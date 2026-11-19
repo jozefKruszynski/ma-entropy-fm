@@ -142,7 +142,7 @@ async def test_browsing_shows_every_area_and_day_and_the_library_has_the_rooms(
     assert [a.name for a in artists] == ["Whole House", "Kitchen", "Living Room"]
     library_albums = await _collect(provider.get_library_albums())
     assert library_albums
-    assert len(await _collect(provider.get_library_tracks())) == len(library_albums)
+    assert len(await _collect(provider.get_library_tracks())) == 6 * len(library_albums)
     # the library reads the days of its window for the titles of their tracks
     listed = len(fake.hass.history_calls)
 

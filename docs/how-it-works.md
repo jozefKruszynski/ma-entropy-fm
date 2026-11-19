@@ -86,30 +86,30 @@ brightens or darkens the sound: two Tuesdays a month apart sound related, not id
 - **The library holds a window of days.** For every room and for the whole house, the albums of the
   last *Days in library* days (default 7, never more than *Days to browse* and so than the
   recorder keeps) are in the library, counted back from today, so the window rolls on at
-  midnight. The library lists one track per album, the one in the default style, so that it
-  does not hold five times as many tracks; the album has all six, and a track you add by hand
-  stays in whatever style it has.
-- **Removing sticks.** What you remove from the library (an album or a track) is unpinned and written
-  down in the storage of the provider with its day, and left out of the library listings, also inside the
-  window, so the next sync does not bring it back; adding it again takes it off the list. The entries
-  of days older than *Days to browse* are dropped. A removed album takes the default track of its day with
-  it. A room cannot be removed (it is always in the library); the log says that *Rooms to show* hides it.
+  midnight. Every track of those albums is in the library too: the soundscape in each style that
+  is offered. Music Assistant syncs and shows all of it; what you keep is what you heart.
+- **There is no library edit.** The source declares the heart features for artists, albums and tracks
+  (`FAVORITE_*_EDIT`) and not the `LIBRARY_*_EDIT` ones, so the library button of Music Assistant only
+  acts on its own database and the next sync lists the days again. An earlier version let you remove an
+  album or track and left it out for good; that list is gone, and the file of the provider is cleaned
+  of it at the first start (the albums, tracks and followed rooms that were in it are hearts now).
 - **A change of *Piece length* or of the rooms asks for a sync** of this source, once, at the next
   load. Music Assistant adds new items from a sync, but it does not rewrite the name, the length or
   the description of a library track it already has (see the README).
-- **Adding pins the day.** Adding an album or a track writes the event timeline of that room on
-  that day, compressed (a few hundred bytes to a few kilobytes), to the folder `entropy_fm` of
-  the storage path of the server, never into the folder of the provider. Adding the whole house
-  pins every room. A pinned day stays in the library after it leaves the window and after Home
-  Assistant has purged it. Removing an album or a track unpins it and deletes the pins that
-  nothing else needs; a day that is still inside the window cannot be hidden, so it stays listed
-  (and the removal reports that it did not hide it) until it leaves the window. Rooms are always
-  in the library, so adding one does nothing and removing one is refused.
+- **A heart pins the day.** Music Assistant calls `set_favorite` when you heart an album or a track,
+  and the event timeline of that room on that day, compressed (a few hundred bytes to a few
+  kilobytes), is written to the folder `entropy_fm` of the storage path of the server, never into
+  the folder of the provider. Hearting the whole house pins every room. A pinned day stays in the
+  library (with all its tracks) after it leaves the window and after Home Assistant has purged it.
+  The provider reports the heart back (`favorite` is true for what you hearted, and never false, which
+  Music Assistant reads as a dislike). Taking the heart off deletes the pins that nothing else needs,
+  and the day ages out of the library with the window; a dislike counts as no heart.
+- **A heart on a room keeps every day of it,** like *Keep every day forever*, and the same check pins
+  each new day when it is over.
 - **Keep every day forever** (a setting with a list of your rooms) pins every day of the
   chosen rooms, the days that can be browsed at once and each new day when it is over (a check
   every six hours, which also pins again a day that was pinned while it was still going on).
-  A room that is not offered (see above) is not pinned while it is hidden. Taking a room out of the list lets its pins go, unless an album or a track needs them. An earlier
-  version kept the days of the artists you had added; those rooms are moved into this setting.
+  A room that is not offered (see above) is not pinned while it is hidden. Taking a room out of the list (or the heart off a room) lets its pins go, unless an album, a track or the other of the two needs them.
 - **The sync of Music Assistant keeps pinned days.** A library sync lists the window and every
   pinned day. For a streaming provider the server never deletes an item that is no longer
   listed: it marks it as no longer in the library and keeps the record, so nothing a pin keeps is
@@ -131,7 +131,7 @@ brightens or darkens the sound: two Tuesdays a month apart sound related, not id
   rooms by default). Shortly after midnight of the house (ten minutes plus up to half an hour of
   jitter) and once three minutes after the start, it takes the tracks of yesterday that the cache
   does not have: with *Pinned rooms*, every offered style of the rooms in *Keep every day forever*
-  and of the albums added to the library for that day, and the tracks that were added; with
+  and of the albums hearted for that day, and the tracks that were hearted; with
   *All rooms*, also every room and the whole house in the default style. It renders one track at
   a time through the same recorder and the same renderer as a live stream (so the file is the one
   a stream would have made), in a worker thread of low priority, with a pause after every second

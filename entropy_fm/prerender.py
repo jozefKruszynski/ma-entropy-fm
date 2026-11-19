@@ -114,8 +114,8 @@ def choose_tracks(  # noqa: PLR0913
     :param pinned_rooms: The rooms whose every day is kept.
     :param offered: The keys of the styles the library offers.
     :param default_style: The key of the default style.
-    :param added_albums: The ids of the albums that were added to the library.
-    :param added_tracks: The ids of the tracks that were added to the library.
+    :param added_albums: The ids of the albums that were hearted.
+    :param added_tracks: The ids of the tracks that were hearted.
     """
     if mode not in {PINNED, ALL}:
         return []

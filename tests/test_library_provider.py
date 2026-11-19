@@ -39,22 +39,48 @@ async def _album(provider: EntropyFMProvider, area: str, index: int) -> Album:
     return albums[index]
 
 
-async def test_the_features_of_a_streaming_provider_with_a_library_to_edit(
+async def _heart(
+    provider: EntropyFMProvider, item: Album | Artist | Track | str, kind: Any = None
+) -> None:
+    """Heart an item, as Music Assistant tells the provider when the user taps the heart."""
+    if isinstance(item, str):
+        await provider.set_favorite(item, kind, favorite=True)
+    else:
+        await provider.set_favorite(item.item_id, item.media_type, favorite=True)
+
+
+async def _unheart(
+    provider: EntropyFMProvider, item_id: str, kind: Any, *, value: bool | None = None
+) -> None:
+    """Take the heart off an item (None clears the state, False is a dislike)."""
+    await provider.set_favorite(item_id, kind, favorite=value)
+
+
+async def test_the_features_hearts_but_no_library_edit(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """The provider says it can edit artists, albums and tracks of the library."""
+    """The provider has hearts for rooms, albums and tracks; the library itself is not edited."""
     from music_assistant_models.enums import ProviderFeature  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
     for feature in (
-        ProviderFeature.LIBRARY_ARTISTS_EDIT,
-        ProviderFeature.LIBRARY_ALBUMS_EDIT,
-        ProviderFeature.LIBRARY_TRACKS_EDIT,
+        ProviderFeature.FAVORITE_ARTISTS_EDIT,
+        ProviderFeature.FAVORITE_ALBUMS_EDIT,
+        ProviderFeature.FAVORITE_TRACKS_EDIT,
+        ProviderFeature.LIBRARY_ARTISTS,
+        ProviderFeature.LIBRARY_ALBUMS,
+        ProviderFeature.LIBRARY_TRACKS,
         ProviderFeature.ARTIST_ALBUMS,
         ProviderFeature.BROWSE,
         ProviderFeature.SEARCH,
     ):
         assert feature in provider.supported_features
+    for feature in (
+        ProviderFeature.LIBRARY_ARTISTS_EDIT,
+        ProviderFeature.LIBRARY_ALBUMS_EDIT,
+        ProviderFeature.LIBRARY_TRACKS_EDIT,
+    ):
+        assert feature not in provider.supported_features
     assert provider.is_streaming_provider
 
 
@@ -92,11 +118,23 @@ async def test_the_library_always_has_every_room_and_a_window_of_days(
     for days in per_area.values():
         assert 5 <= len(days) <= 7
         assert days == sorted(days, reverse=True)
-    # one track per album in the library: the default style; the album holds all the styles
+    # every track of every album in the library: all six styles
     tracks = await _collect(provider.get_library_tracks())
-    assert len(tracks) == len(albums)
-    assert {t.item_id.rsplit("|", 1)[1] for t in tracks} == {"ambient"}
-    assert len(await provider.get_album_tracks(albums[0].item_id)) == 6
+    assert len(tracks) == 6 * len(albums)
+    assert len({t.item_id for t in tracks}) == len(tracks)
+    assert {t.item_id.rsplit("|", 1)[1] for t in tracks} == {
+        "ambient",
+        "berlin_school",
+        "lofi",
+        "minimal",
+        "ritual",
+        "glitch",
+    }
+    for album in albums:
+        own = {t.item_id for t in tracks if t.item_id.startswith(album.item_id + "|")}
+        assert own == {t.item_id for t in await provider.get_album_tracks(album.item_id)}
+    # nothing is a favourite until the user hearts it; never False, which would be a dislike
+    assert all(item.favorite is None for item in [*artists, *albums, *tracks])
 
 
 async def test_the_window_rolls_over_at_midnight(
@@ -125,162 +163,193 @@ async def test_the_window_rolls_over_at_midnight(
     assert provider._library_days == 2  # noqa: SLF001
 
 
-async def test_adding_an_album_pins_the_day_and_it_stays_after_the_window_moves_on(
+async def test_hearting_an_album_pins_the_day_and_it_stays_after_the_window_moves_on(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The pin lives in the storage path of the server; a pinned day outlives the window."""
+    """The pin lives in the storage path of the server; a hearted day outlives the window and shows its heart."""
     provider, _ = await _setup(mass, fake_hass)
     _quiet(provider, monkeypatch, library_days=2)
     album = await _album(provider, "kitchen", 5)
     day = album.item_id.split("|")[1]
     window = [a.item_id for a in await _collect(provider.get_library_albums())]
     assert album.item_id not in window
-    assert await provider.library_add(album)
+    await _heart(provider, album)
     pin_path = provider.pins.path("kitchen", date.fromisoformat(day))
     assert pin_path.is_file()
     assert Path(mass.storage_path) / STORAGE_FOLDER in pin_path.parents
     assert Path(__file__).parents[1] / "entropy_fm" not in pin_path.parents
-    assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
+    listed = await _collect(provider.get_library_albums())
+    assert [a.favorite for a in listed if a.item_id == album.item_id] == [True]
+    assert all(a.favorite is None for a in listed if a.item_id != album.item_id)
+    # all six tracks of the kept day are in the library, too
+    own = [
+        t.item_id
+        for t in await _collect(provider.get_library_tracks())
+        if t.item_id.startswith(album.item_id)
+    ]
+    assert len(own) == 6
     _clock(provider, monkeypatch, 3)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
-    # outside the window, removing it makes it drop out
-    assert await provider.library_remove(album.item_id, MediaType.ALBUM)
+    # it survives a restart
+    assert album.item_id in load_membership(provider.storage_root).albums
+    # outside the window, un-hearting releases the pin and the day ages out
+    await _unheart(provider, album.item_id, MediaType.ALBUM)
     assert not pin_path.exists()
     assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
+    assert album.item_id not in load_membership(provider.storage_root).albums
 
 
-async def test_removing_an_album_inside_the_window_sticks_until_it_is_added_again(
+async def test_a_day_inside_the_window_stays_listed_when_it_is_unhearted(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """A removed album is unpinned and left out of the listings, also inside the window; adding it clears that."""
+    """Nothing is removed from the overviews by a heart: un-hearting only releases the pin."""
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 1)
     day = date.fromisoformat(album.item_id.split("|")[1])
-    default_track = album.item_id + "|_scape|ambient"
-    assert await provider.library_add(album)
+    track_id = album.item_id + "|_scape|ambient"
+    await _heart(provider, album)
     assert provider.pins.has("kitchen", day)
-    assert await provider.library_remove(album.item_id, MediaType.ALBUM)
+    await _unheart(provider, album.item_id, MediaType.ALBUM)
     assert not provider.pins.has("kitchen", day)
-    assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
-    # the track of the removed day goes with it, the other days are untouched
-    tracks = [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert default_track not in tracks
-    assert len(tracks) == len(await _collect(provider.get_library_albums()))
-    # it is still there to browse and to add again
-    assert album.item_id in [a.item_id for a in await provider.get_artist_albums("kitchen")]
-    assert await provider.library_add(album)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
-    assert default_track in [t.item_id for t in await _collect(provider.get_library_tracks())]
+    assert track_id in [t.item_id for t in await _collect(provider.get_library_tracks())]
+    # a dislike releases too, and a heart on something that is not ours does nothing
+    await _heart(provider, album)
+    await _unheart(provider, album.item_id, MediaType.ALBUM, value=False)
+    assert not provider.pins.has("kitchen", day)
+    await _heart(provider, "nonsense", MediaType.TRACK)
+    await _heart(provider, "nonsense", MediaType.ALBUM)
+    await _heart(provider, "kitchen|2026-01-01", MediaType.PLAYLIST)
+    assert provider.pins.all() == []
+    assert not provider.membership.tracks
+    assert not provider.membership.albums
 
 
-async def test_removing_a_track_inside_the_window_sticks_until_it_is_added_again(
-    mass: MusicAssistant, fake_hass: MagicMock
-) -> None:
-    """The default track of a day in the window stays out after a remove, and the removal is stored."""
-    provider, _ = await _setup(mass, fake_hass)
-    album = await _album(provider, "kitchen", 2)
-    item_id = album.item_id + "|_scape|ambient"
-    before = [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert item_id in before
-    assert await provider.library_remove(item_id, MediaType.TRACK)
-    after = [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert item_id not in after
-    assert set(before) - set(after) == {item_id}
-    # the album stays; only the track was removed; and it survives a restart
-    assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
-    stored = load_membership(provider.storage_root)
-    assert stored.removed == {item_id: album.item_id.split("|")[1]}
-    # a track of another style is another track
-    other = album.item_id + "|_scape|minimal"
-    assert await provider.library_add(await provider.get_track(other))
-    assert other in [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert await provider.library_add(await provider.get_track(item_id))
-    assert item_id in [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert not provider.membership.removed
-
-
-async def test_the_removed_items_of_days_nobody_lists_are_forgotten(
+async def test_hearting_a_track_pins_its_day_and_reports_the_heart(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The list of removed items only holds days that the browse window still has."""
+    """A heart on one style keeps the day; only that track shows the heart; un-hearting lets the day go."""
     provider, _ = await _setup(mass, fake_hass)
-    album = await _album(provider, "kitchen", 1)
-    item_id = album.item_id + "|_scape|ambient"
-    await provider.library_remove(item_id, MediaType.TRACK)
-    await provider.library_remove(album.item_id, MediaType.ALBUM)
-    assert len(provider.membership.removed) == 2
-    _clock(provider, monkeypatch, 4)
-    await provider._forget_old_removals()  # noqa: SLF001
-    assert len(provider.membership.removed) == 2
-    _clock(provider, monkeypatch, 30)
-    await provider._forget_old_removals()  # noqa: SLF001
-    assert provider.membership.removed == {}
-    assert load_membership(provider.storage_root).removed == {}
+    _quiet(provider, monkeypatch, library_days=2)
+    album = await _album(provider, "kitchen", 4)
+    day = date.fromisoformat(album.item_id.split("|")[1])
+    item_id = album.item_id + "|_scape|minimal"
+    assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
+    await _heart(provider, await provider.get_track(item_id))
+    assert provider.pins.has("kitchen", day)
+    assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
+    tracks = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
+    assert len([i for i in tracks if i.startswith(album.item_id)]) == 6
+    assert [i for i, t in tracks.items() if t.favorite] == [item_id]
+    assert (await provider.get_track(item_id)).favorite is True
+    await _unheart(provider, item_id, MediaType.TRACK)
+    assert not provider.pins.has("kitchen", day)
+    assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
+    assert (await provider.get_track(item_id)).favorite is None
 
 
-async def test_a_removal_sticks_through_the_library_sync_of_the_server(
+async def test_a_heart_on_the_whole_house_keeps_the_day_of_every_room(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """Remove a track and an album from the library of the server: the next sync does not bring them back."""
+    """The day of the whole house is made of its rooms; un-hearting lets all of them go."""
+    provider, _ = await _setup(mass, fake_hass)
+    album = (await provider.get_artist_albums("_house"))[3]
+    day = date.fromisoformat(album.item_id.split("|")[1])
+    await _heart(provider, album)
+    assert {area for area, d in provider.pins.all() if d == day} == {"kitchen", "living_room"}
+    await _unheart(provider, album.item_id, MediaType.ALBUM)
+    assert provider.pins.all() == []
+
+
+async def test_a_heart_on_a_room_keeps_every_day_of_it(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """Hearting a room pins all its days that are over; un-hearting releases them, unless a heart or the setting needs them."""
+    provider, _ = await _setup(mass, fake_hass)
+    browsable = await provider.get_artist_albums("kitchen")
+    today = str((await provider._now()).date())  # noqa: SLF001
+    over = {a.item_id.split("|")[1] for a in browsable if a.item_id.split("|")[1] < today}
+    await _heart(provider, await provider.get_artist("kitchen"))
+    assert (await provider.get_artist("kitchen")).favorite is True
+    assert (await provider.get_artist("living_room")).favorite is None
+    artists = {a.item_id: a.favorite for a in await _collect(provider.get_library_artists())}
+    assert artists["kitchen"] is True
+    assert artists["living_room"] is None
+    pinned = {day.isoformat() for area, day in provider.pins.all() if area == "kitchen"}
+    assert pinned == over
+    assert not any(area == "living_room" for area, _ in provider.pins.all())
+    assert "kitchen" in load_membership(provider.storage_root).followed
+    # a heart on an album of that room needs its day too, so that day stays when the room is let go
+    album = next(a for a in browsable if a.item_id.split("|")[1] in over)
+    await _heart(provider, album)
+    await _unheart(provider, "kitchen", MediaType.ARTIST)
+    assert provider.membership.followed == {}
+    assert [(area, day.isoformat()) for area, day in provider.pins.all()] == [
+        ("kitchen", album.item_id.split("|")[1])
+    ]
+    assert (await provider.get_artist("kitchen")).favorite is None
+    # a room that is not ours cannot be hearted
+    await _heart(provider, "attic", MediaType.ARTIST)
+    assert "attic" not in provider.membership.followed
+
+
+async def test_hearts_of_an_earlier_library_survive_and_the_removal_list_is_dropped(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """The file of the earlier model: albums, tracks, pins and followed rooms are hearts now; `removed` goes."""
+    import json  # noqa: PLC0415
+
+    provider, _ = await _setup(mass, fake_hass)
+    album = await _album(provider, "kitchen", 3)
+    other = await _album(provider, "kitchen", 4)
+    track_id = other.item_id + "|_scape|ritual"
+    await provider.set_favorite(album.item_id, MediaType.ALBUM, favorite=True)
+    await provider.set_favorite(track_id, MediaType.TRACK, favorite=True)
+    path = Path(provider.storage_root) / "library.json"
+    data = json.loads(path.read_text())
+    data["followed"] = {"living_room": "2026-11-01"}
+    data["removed"] = {"kitchen|2026-11-10|_scape|ambient": "2026-11-10"}
+    path.write_text(json.dumps(data))
+    pins = provider.pins.all()
+
+    provider.membership = load_membership(provider.storage_root)
+    assert provider.membership.legacy_removed
+    await provider._migrate_library_model()  # noqa: SLF001
+    assert not provider.membership.legacy_removed
+    assert "removed" not in json.loads(path.read_text())
+    stored = load_membership(provider.storage_root)
+    assert not stored.legacy_removed
+    assert stored.albums == {album.item_id}
+    assert stored.tracks == {track_id}
+    assert stored.followed == {"living_room": "2026-11-01"}
+    assert provider.pins.all() == pins
+    # they are all shown as hearts
+    assert (await provider.get_album(album.item_id)).favorite is True
+    assert (await provider.get_track(track_id)).favorite is True
+    assert (await provider.get_artist("living_room")).favorite is True
+    # the second run has nothing to do
+    before = path.read_text()
+    await provider._migrate_library_model()  # noqa: SLF001
+    assert path.read_text() == before
+
+
+async def test_the_library_sync_of_the_server_lists_every_track_and_records_the_hearts(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """After a sync the library has all six tracks per album, and the heart is on the item that the sync reads."""
     from tests.test_rooms import _sync  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
+    album = await _album(provider, "kitchen", 1)
+    await _heart(provider, album)
     await _sync(mass, provider)
-    tracks = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
     albums = await mass.music.albums.library_items(provider=provider.instance_id, limit=5000)
-    track = next(
-        t
-        for t in tracks
-        if (t.item_id and "kitchen" in t.name.lower()) or t.artists[0].name == "Kitchen"
-    )
-    album = next(a for a in albums if a.artists[0].name == "Living Room")
-    track_prov = next(
-        m.item_id for m in track.provider_mappings if m.provider_instance == provider.instance_id
-    )
-    album_prov = next(
-        m.item_id for m in album.provider_mappings if m.provider_instance == provider.instance_id
-    )
-    # what the server does when the user removes them: it tells the provider, and drops its own record
-    assert await provider.library_remove(track_prov, MediaType.TRACK)
-    assert await provider.library_remove(album_prov, MediaType.ALBUM)
-    await mass.music.tracks.remove_item_from_library(track.item_id)
-    await mass.music.albums.remove_item_from_library(album.item_id)
-    await _sync(mass, provider)
-    names = {
-        m.item_id
-        for t in await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
-        for m in t.provider_mappings
-    }
-    assert track_prov not in names
-    assert album_prov + "|_scape|ambient" not in names
-    ids = {
-        m.item_id
-        for a in await mass.music.albums.library_items(provider=provider.instance_id, limit=5000)
-        for m in a.provider_mappings
-    }
-    assert album_prov not in ids
-    # adding the album again brings it back with the next sync
-    await provider.library_add(await provider.get_album(album_prov))
-    await _sync(mass, provider)
-    ids = {
-        m.item_id
-        for a in await mass.music.albums.library_items(provider=provider.instance_id, limit=5000)
-        for m in a.provider_mappings
-    }
-    assert album_prov in ids
-
-
-async def test_a_room_cannot_be_removed_and_the_log_says_how_to_hide_it(
-    mass: MusicAssistant, fake_hass: MagicMock, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Removing an artist stays unsupported; the log points at *Rooms to show*."""
-    provider, _ = await _setup(mass, fake_hass)
-    with caplog.at_level("INFO"):
-        assert not await provider.library_remove("kitchen", MediaType.ARTIST)
-    assert "Rooms to show" in caplog.text
-    assert provider.membership.removed == {}
-    assert not await provider.library_remove("nonsense", MediaType.TRACK)
-    assert provider.membership.removed == {}
+    tracks = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
+    assert len(tracks) == 6 * len(albums)
+    # what the server is given as the heart of the provider
+    listed = {a.item_id: a.favorite async for a in provider.get_library_albums()}
+    assert listed[album.item_id] is True
+    assert [i for i, favorite in listed.items() if favorite] == [album.item_id]
 
 
 async def test_adding_a_track_pins_its_day_and_it_stays_while_an_album_needs_it(
@@ -291,26 +360,24 @@ async def test_adding_a_track_pins_its_day_and_it_stays_while_an_album_needs_it(
     album = await _album(provider, "kitchen", 2)
     tracks = await provider.get_album_tracks(album.item_id)
     track = next(t for t in tracks if t.item_id.endswith("|minimal"))
-    assert await provider.library_add(track)
-    assert await provider.library_add(album)
+    await _heart(provider, track)
+    await _heart(provider, album)
     assert ("kitchen", date.fromisoformat(album.item_id.split("|")[1])) in provider.pins.all()
     library = await _collect(provider.get_library_tracks())
     assert track.item_id in [t.item_id for t in library]
-    await provider.library_remove(album.item_id, MediaType.ALBUM)
+    await _unheart(provider, album.item_id, MediaType.ALBUM)
     assert provider.pins.all()
-    await provider.library_remove(track.item_id, MediaType.TRACK)
+    await _unheart(provider, track.item_id, MediaType.TRACK)
     assert provider.pins.all() == []
 
 
-async def test_a_room_is_always_in_the_library_and_cannot_be_added_or_removed(
+async def test_a_room_is_always_in_the_library_whatever_the_heart_says(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """Adding a room does nothing, and removing it says no; neither pins anything."""
+    """Un-hearting a room leaves it in the library; only hearting it pins days."""
     provider, _ = await _setup(mass, fake_hass)
-    artist = await provider.get_artist("kitchen")
-    assert await provider.library_add(artist)
+    await _unheart(provider, "kitchen", MediaType.ARTIST)
     assert provider.pins.all() == []
-    assert not await provider.library_remove("kitchen", MediaType.ARTIST)
     assert "Kitchen" in [a.name for a in await _collect(provider.get_library_artists())]
 
 
@@ -345,24 +412,6 @@ async def test_keep_every_day_of_these_rooms_is_a_setting(
     assert provider.pins.all() == []
 
 
-async def test_rooms_that_artists_followed_move_into_the_setting(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An earlier version kept the days of followed artists; they become the room setting."""
-    provider, _ = await _setup(mass, fake_hass)
-    provider.membership.followed["kitchen"] = "2026-11-01"
-    saved: list[dict] = []
-
-    async def save(domain: str, values: dict, instance_id: str | None = None) -> None:  # noqa: ARG001
-        saved.append(values)
-
-    monkeypatch.setattr(mass.config, "save_provider_config", save)
-    assert provider._keep_rooms == {"kitchen"}  # noqa: SLF001
-    await provider._migrate_followed()  # noqa: SLF001
-    assert saved == [{"keep_rooms": ["kitchen"]}]
-    assert provider.membership.followed == {}
-
-
 async def test_the_library_sync_of_the_server_keeps_pinned_days(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -370,7 +419,7 @@ async def test_the_library_sync_of_the_server_keeps_pinned_days(
     provider, _ = await _setup(mass, fake_hass)
     pinned = await _album(provider, "kitchen", 1)
     plain = await _album(provider, "kitchen", 0)
-    await provider.library_add(pinned)
+    await _heart(provider, pinned)
     await provider.sync_library(MediaType.ALBUM)
     db_ids = {
         album.name: album
@@ -408,7 +457,7 @@ async def test_a_pinned_day_plays_after_home_assistant_has_forgotten_it(
     provider.audio_cache.limit = 0
     album = await _album(provider, "kitchen", 7)
     item_id = f"{album.item_id}|_scape|berlin_school"
-    await provider.library_add(album)
+    await _heart(provider, album)
     before = await _stream(provider, item_id, seek=300, chunks=2)
     # the recorder purges everything, the server forgets what it cached, and only 2 days are kept
     fake.hass.purged = True
@@ -424,7 +473,7 @@ async def test_a_pinned_day_plays_after_home_assistant_has_forgotten_it(
     assert (await provider.get_album(album.item_id)).name == album.name
     assert (await provider.get_track(item_id)).album is not None
     # without the pin the day would be gone
-    await provider.library_remove(album.item_id, MediaType.ALBUM)
+    await _unheart(provider, album.item_id, MediaType.ALBUM)
     with pytest.raises(Exception, match="not found"):
         await provider.get_album(album.item_id)
 
@@ -437,7 +486,7 @@ async def test_the_engine_version_is_in_the_pin_and_a_pin_renders_with_the_curre
 
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 4)
-    await provider.library_add(album)
+    await _heart(provider, album)
     pin = provider.pins.read(
         "kitchen", __import__("datetime").date.fromisoformat(album.item_id.split("|")[1])
     )
@@ -564,7 +613,5 @@ async def test_voice_tracks_of_an_earlier_version_are_dropped_and_ensemble_pins_
     listed = [t.item_id for t in await _collect(provider.get_library_tracks())]
     assert keep_id in listed
     assert not any("sensor.fridge_power" in item for item in listed)
-    voice = await provider.get_track(keep_id)
-    assert not await provider.library_add(
-        voice.__class__.from_dict({**voice.to_dict(), "item_id": stale_id})
-    )
+    await provider.set_favorite(stale_id, MediaType.TRACK, favorite=True)
+    assert stale_id not in provider.membership.tracks

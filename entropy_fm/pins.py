@@ -1,14 +1,14 @@
 """
 Pins: the days of the library that Entropy FM keeps for good, after Home Assistant has forgotten.
 
-The recorder of Home Assistant keeps ten days by default. What the user adds to the library of
-Music Assistant (an album, a track, or an area as an artist) is pinned: the event timeline of the
+The recorder of Home Assistant keeps ten days by default. What the user hearts in
+Music Assistant (an album, a track, or a room as an artist) is pinned: the event timeline of the
 area on that day, compressed, is written once into the storage folder of the server (never into the
 folder of the provider). A pinned day plays from its pin, rendered by the engine of the moment, so a
 better engine makes old days sound better; the version of the engine that was current when the day
 was pinned is in the pin. No audio is stored here, only the history that the music is made from.
 
-`Membership` says what the user added and which pins every item needs, so that removing an item
+`Membership` says what the user hearted and which pins every item needs, so that un-hearting an item
 deletes the pins that nothing else needs. Everything is written to a temporary file and moved into
 place, so a crash cannot leave half a file.
 
@@ -217,9 +217,9 @@ class PinStore:
 
 @dataclass
 class Membership:
-    """What the user added to the library, and the pins each of it needs."""
+    """What the user hearted (rooms, albums, tracks), and the pins each of it needs."""
 
-    # area id to the day it was added as an artist
+    # area id to the day it was hearted as an artist: every day of the room is kept
     followed: dict[str, str] = field(default_factory=dict)
     albums: set[str] = field(default_factory=set)
     tracks: set[str] = field(default_factory=set)
@@ -227,23 +227,8 @@ class Membership:
     needs: dict[str, list[list[str]]] = field(default_factory=dict)
     # what the library knows of an area that Home Assistant may no longer have: name and entities
     snapshot: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # albums and tracks that the user removed from the library, to the ISO day they belong to: the library
-    # window lists them again at every sync unless they are left out
-    removed: dict[str, str] = field(default_factory=dict)
-
-    def forget_removed_before(self, oldest: date) -> None:
-        """
-        Drop the removed items of days before a day: they are not listed any more, so nothing has to be left out.
-
-        :param oldest: The first day that is still listed.
-        """
-        for item_id, day in list(self.removed.items()):
-            try:
-                old = date.fromisoformat(day) < oldest
-            except ValueError:
-                old = True
-            if old:
-                del self.removed[item_id]
+    # set when the file of an earlier version had the list of removed items, which is dropped at the next save
+    legacy_removed: bool = field(default=False, compare=False)
 
     def needed(self) -> set[tuple[str, str]]:
         """Return every pin that something in the library needs, as area id and ISO day."""
@@ -278,7 +263,6 @@ class Membership:
             "tracks": sorted(self.tracks),
             "needs": self.needs,
             "snapshot": self.snapshot,
-            "removed": self.removed,
         }
 
     @classmethod
@@ -296,7 +280,7 @@ class Membership:
                 key: [list(pair) for pair in pairs] for key, pairs in data.get("needs", {}).items()
             },
             snapshot=dict(data.get("snapshot", {})),
-            removed={str(key): str(day) for key, day in dict(data.get("removed", {})).items()},
+            legacy_removed="removed" in data,
         )
 
 

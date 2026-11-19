@@ -19,7 +19,7 @@ from the demo on their own.
 |---|---|
 | `entropy_fm/__init__.py` | The provider: settings, browsing, library, pins, streaming, the cache. |
 | `entropy_fm/library.py` | Areas, days and entities to artists, albums and tracks; ids; durations; which rooms are quiet. |
-| `entropy_fm/pins.py` | The days that were added to the library, kept after Home Assistant forgets them. |
+| `entropy_fm/pins.py` | The days that were hearted, kept after Home Assistant forgets them. |
 | `entropy_fm/audiocache.py` | Ogg/Opus files of rendered past days, with least-recently-used eviction. |
 | `entropy_fm/prerender.py` | Which tracks of yesterday to render ahead into the cache, and when. |
 | `entropy_fm/roles.py` | The layered classifier that gives an entity its role. |

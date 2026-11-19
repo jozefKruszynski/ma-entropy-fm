@@ -270,7 +270,7 @@ async def test_a_deselected_room_leaves_the_library_but_keeps_its_pins_and_its_c
     provider, _ = await _setup(mass, fake_hass)
     albums = await provider.get_artist_albums("living_room")
     old = albums[-1]
-    assert await provider.library_add(old)
+    await provider.set_favorite(old.item_id, MediaType.ALBUM, favorite=True)
     area, day = old.item_id.split("|")
     assert provider.pins.has(area, date.fromisoformat(day))
     provider.audio_cache.root.mkdir(parents=True, exist_ok=True)
@@ -574,7 +574,8 @@ async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_li
         assert (await provider.get_track(track.item_id)).duration == track.duration
     library = [t async for t in provider.get_library_tracks()]
     assert library
-    assert {t.duration for t in library} == {condensed_seconds("ambient")}
+    assert {t.duration for t in library} == {condensed_seconds(s) for s in ("ambient", "lofi")}
+    assert all(t.duration == condensed_seconds(t.item_id.rsplit("|", 1)[1]) for t in library)
     assert {t.duration for t in library} != set(full)
 
     # back to full: asked again

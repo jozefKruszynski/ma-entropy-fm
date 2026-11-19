@@ -210,9 +210,10 @@ SUPPORTED_FEATURES = {
     ProviderFeature.LIBRARY_ARTISTS,
     ProviderFeature.LIBRARY_ALBUMS,
     ProviderFeature.LIBRARY_TRACKS,
-    ProviderFeature.LIBRARY_ARTISTS_EDIT,
-    ProviderFeature.LIBRARY_ALBUMS_EDIT,
-    ProviderFeature.LIBRARY_TRACKS_EDIT,
+    # the library is the shown rooms and their days, nothing to edit; a heart is what keeps a day
+    ProviderFeature.FAVORITE_ARTISTS_EDIT,
+    ProviderFeature.FAVORITE_ALBUMS_EDIT,
+    ProviderFeature.FAVORITE_TRACKS_EDIT,
     ProviderFeature.ARTIST_ALBUMS,
 }
 ARTIST_KEY = "@artist|"
@@ -618,6 +619,7 @@ class EntropyFMProvider(MusicProvider):
         )
         await self._drop_voice_tracks()
         await self._migrate_ensemble_tracks()
+        await self._migrate_library_model()
         self._pin_lock = asyncio.Lock()
         self._benchmark_task = self.mass.create_task(self._pick_quality())
         self._maintenance_task = self.mass.create_task(self._maintain())
@@ -1022,6 +1024,8 @@ class EntropyFMProvider(MusicProvider):
             name=name,
             provider_mappings={self._mapping(area_id)},
             metadata=MediaItemMetadata(images=self._artist_images(area_id)),
+            # True for a heart; never False, which Music Assistant reads as a dislike
+            favorite=True if area_id in self.membership.followed else None,
         )
 
     def _artist_images(self, area_id: str) -> UniqueList[MediaItemImage] | None:
@@ -1228,6 +1232,7 @@ class EntropyFMProvider(MusicProvider):
                 images=self._images(area_id, day, self._offered_styles[0].key),
             ),
             provider_mappings={self._mapping(item_id)},
+            favorite=True if item_id in self.membership.albums else None,
         )
 
     def _track(  # noqa: PLR0913, PLR0917
@@ -1263,6 +1268,7 @@ class EntropyFMProvider(MusicProvider):
                 images=self._images(ref.area_id, ref.day, ref.style or style.key),
             ),
             provider_mappings={self._mapping(item_id)},
+            favorite=True if item_id in self.membership.tracks else None,
         )
 
     def _day_tracks(
@@ -1531,48 +1537,21 @@ class EntropyFMProvider(MusicProvider):
         return sorted(found, reverse=True)
 
     async def get_library_albums(self) -> AsyncGenerator[Album]:
-        """Return the days of every room in the window, and every pinned day."""
+        """Return the days of every room in the window, and every day that a heart or a kept room keeps."""
         for area_id, name in (await self._offered(await self._catalog_all())).items():
             for day in await self._library_days_of(area_id):
-                if album_id(area_id, day) in self.membership.removed:
-                    continue
                 yield self._album(area_id, name, day, await self._facts(area_id, day))
 
     async def get_library_tracks(self) -> AsyncGenerator[Track]:
-        """
-        Return one track of each album of the library, the one in the default style.
-
-        The album itself holds the soundscape in every style; listing all of them for every room and
-        every day would be six times as many tracks, so only the default style is listed here,
-        and the tracks that were added by hand, in whatever style. What the user removed stays out,
-        also inside the window of the library.
-        """
+        """Return every track of every album of the library: the soundscape of the day in each style that is offered."""
         catalog = await self._catalog_all()
         tz, now = await self._timezone(), await self._now()
-        wanted: set[str] = set(self.membership.tracks)
-        default = self._default_style.key
-        names = await self._offered(catalog)
-        for area_id in names:
+        for area_id in await self._offered(catalog):
             for day in await self._library_days_of(area_id):
-                # a track of an album that was removed is left out with it, unless it was added by hand
-                if album_id(area_id, day) not in self.membership.removed:
-                    wanted.add(track_id(area_id, day, SCAPE_ID, default))
-        wanted -= self.membership.removed.keys()
-        for item_id in sorted(wanted):
-            try:
-                ref = parse_track_id(item_id)
-            except ValueError:
-                continue
-            if ref.target not in TRACK_TARGETS or ref.style not in STYLES:
-                continue
-            if ref.area_id not in names:
-                continue
-            duration = track_seconds(ref.day, tz, now, self._compression)
-            facts = await self._facts(ref.area_id, ref.day)
-            for track in self._tracks_of(catalog, ref.area_id, ref.day, duration, facts):
-                if track.item_id == item_id:
+                duration = track_seconds(day, tz, now, self._compression)
+                facts = await self._facts(area_id, day)
+                for track in self._tracks_of(catalog, area_id, day, duration, facts):
                     yield track
-                    break
 
     async def get_artist(self, prov_artist_id: str) -> Artist:
         """Return the artist with the given id."""
@@ -1713,76 +1692,72 @@ class EntropyFMProvider(MusicProvider):
         self.membership.add(key, pinned)
         await asyncio.to_thread(save_membership, self.storage_root, self.membership)
 
-    async def library_add(self, item: MediaItemType) -> bool:
+    async def set_favorite(
+        self,
+        prov_item_id: str,
+        media_type: MediaType,
+        favorite: bool | None,  # noqa: FBT001
+    ) -> None:
         """
-        Add an album or a track to the library: the day is pinned, and stays however old it gets.
+        Keep or release what the user hearted.
 
-        The rooms are always in the library, so adding one does nothing; to keep every day of a
-        room, use the setting *Keep every day of these rooms*.
-
-        :param item: The item of this provider.
-        """
-        catalog = await self._catalog_all()
-        item_id = item.item_id
-        if item.media_type == MediaType.ARTIST:
-            return item_id in self._artist_names(catalog)
-        if item.media_type == MediaType.ALBUM:
-            area_id, day = parse_album_id(item_id)
-            self.membership.albums.add(item_id)
-            self.membership.removed.pop(item_id, None)
-            await self._remember(
-                item_id, [(area, day) for area in self._areas_of(area_id, catalog)]
-            )
-            return True
-        if item.media_type == MediaType.TRACK:
-            ref = parse_track_id(item_id)
-            if ref.target not in TRACK_TARGETS:
-                return False
-            self.membership.tracks.add(item_id)
-            self.membership.removed.pop(item_id, None)
-            areas = self._areas_of(ref.area_id, catalog)
-            await self._remember(item_id, [(area, ref.day) for area in areas])
-            return True
-        return False
-
-    async def library_remove(self, prov_item_id: str, media_type: MediaType) -> bool:
-        """
-        Remove an album or a track from the library: its day is unpinned and the item is left out of the library.
-
-        The days of the library window are listed at every sync, so what was removed is written down
-        (with its day) and left out of the listings, which makes the removal stick; adding the item again
-        takes it off that list. A room cannot be removed: the rooms are always in the library, and *Rooms to
-        show* in the settings hides the ones that are not wanted.
+        A heart on an album or a track pins its day (for the whole house, the day of every room), so that it
+        stays in the library however old it gets and after Home Assistant has purged it. A heart on a room keeps
+        every day of that room. Anything else than a like (a dislike, or the state cleared) releases what the
+        item kept; a pin is deleted when nothing else needs it, and the day then ages out of the library as
+        every day does.
 
         :param prov_item_id: The id of the item on this provider.
         :param media_type: Its type.
+        :param favorite: True for a like, False for a dislike, None when the state is cleared.
         """
-        if media_type == MediaType.ARTIST:
-            self.logger.info(
-                "Rooms are always in the library and cannot be removed; to hide a room, untick it "
-                "in the setting 'Rooms to show'"
-            )
-            return False
+        catalog = await self._catalog_all()
+        keep = bool(favorite)
         try:
+            if media_type == MediaType.ARTIST:
+                await self._favorite_room(prov_item_id, catalog, keep=keep)
+                return
             if media_type == MediaType.ALBUM:
-                self.membership.albums.discard(prov_item_id)
-                day = parse_album_id(prov_item_id)[1]
+                area_id, day = parse_album_id(prov_item_id)
+                kept = self.membership.albums
             elif media_type == MediaType.TRACK:
-                self.membership.tracks.discard(prov_item_id)
-                day = parse_track_id(prov_item_id).day
+                ref = parse_track_id(prov_item_id)
+                if ref.target not in TRACK_TARGETS:
+                    return
+                area_id, day = ref.area_id, ref.day
+                kept = self.membership.tracks
             else:
-                return False
+                return
         except ValueError:
-            return False
-        freed = self.membership.remove(prov_item_id)
+            return
+        if keep:
+            kept.add(prov_item_id)
+            await self._remember(
+                prov_item_id, [(area, day) for area in self._areas_of(area_id, catalog)]
+            )
+            return
+        kept.discard(prov_item_id)
+        await self._release(prov_item_id)
+
+    async def _favorite_room(self, area_id: str, catalog: Catalog, *, keep: bool) -> None:
+        """Keep every day of a room that was hearted, or let go of it."""
+        if keep:
+            if area_id not in self._artist_names(catalog):
+                return
+            self.membership.followed[area_id] = (await self._now()).date().isoformat()
+            await asyncio.to_thread(save_membership, self.storage_root, self.membership)
+            await self._pin_followed()
+            return
+        self.membership.followed.pop(area_id, None)
+        await asyncio.to_thread(save_membership, self.storage_root, self.membership)
+        await self._release_unkept_rooms()
+
+    async def _release(self, key: str) -> None:
+        """Forget what an item needs and delete the pins that nothing else needs."""
+        freed = self.membership.remove(key)
         for area_id, pinned_day in freed:
             await asyncio.to_thread(self.pins.delete, area_id, date.fromisoformat(pinned_day))
-        self.membership.removed[prov_item_id] = day.isoformat()
-        _, _, _, now = await self._days_and_catalog()
-        self.membership.forget_removed_before(now.date() - timedelta(days=self._days))
         await asyncio.to_thread(save_membership, self.storage_root, self.membership)
-        self.logger.info("%s is removed from the library and stays out of it", prov_item_id)
-        return True
 
     async def _release_unkept_rooms(self) -> None:
         """Let go of the pins of rooms that are no longer in *Keep every day of these rooms*."""
@@ -1797,24 +1772,20 @@ class EntropyFMProvider(MusicProvider):
             await asyncio.to_thread(self.pins.delete, area_id, date.fromisoformat(day))
         await asyncio.to_thread(save_membership, self.storage_root, self.membership)
 
-    async def _migrate_followed(self) -> None:
-        """Move the artists that an earlier version followed into the setting of the rooms."""
-        if not self.membership.followed:
+    async def _migrate_library_model(self) -> None:
+        """
+        Move the data of the earlier library model into the model of hearts.
+
+        What was added to the library is what is hearted now: the albums, the tracks, and the rooms that were
+        followed keep their pins and their days, and Music Assistant is told of the hearts at the next sync.
+        The list of removed items is dropped (every day of the window is in the library now); it is gone from
+        the file at the first save.
+        """
+        if not self.membership.legacy_removed:
             return
-        merged = sorted(
-            {*map(str, self.get_config_value(CONF_KEEP_ROOMS, []) or []), *self.membership.followed}
-        )
-        try:
-            await self.mass.config.save_provider_config(
-                self.domain, {CONF_KEEP_ROOMS: merged}, instance_id=self.instance_id
-            )
-        except Exception:
-            self.logger.warning(
-                "Could not move the followed rooms into the settings", exc_info=True
-            )
-            return
-        self.membership.followed.clear()
+        self.membership.legacy_removed = False
         await asyncio.to_thread(save_membership, self.storage_root, self.membership)
+        self.logger.info("The library now follows hearts: the list of removed items is dropped")
 
     async def _migrate_ensemble_tracks(self) -> None:
         """
@@ -1870,26 +1841,14 @@ class EntropyFMProvider(MusicProvider):
     async def _maintain(self) -> None:
         """Pin the days of the followed areas that are over, and the days that were pinned early."""
         await asyncio.sleep(30)
-        await self._migrate_followed()
         while True:
             try:
-                await self._forget_old_removals()
                 await self._pin_followed()
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001 - keep the loop alive
                 self.logger.warning("Pinning the days of the followed areas failed: %s", err)
             await asyncio.sleep(MAINTENANCE_SECONDS)
-
-    async def _forget_old_removals(self) -> None:
-        """Drop the removed items of days that nothing lists any more."""
-        if not self.membership.removed:
-            return
-        now = await self._now()
-        before = len(self.membership.removed)
-        self.membership.forget_removed_before(now.date() - timedelta(days=self._days))
-        if len(self.membership.removed) != before:
-            await asyncio.to_thread(save_membership, self.storage_root, self.membership)
 
     async def _pin_followed(self) -> None:
         """Pin every day that a followed area has and that is not pinned yet or was pinned early."""

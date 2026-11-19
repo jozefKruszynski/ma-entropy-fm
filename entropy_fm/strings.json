@@ -22,7 +22,7 @@
     },
     "days": {
       "label": "Days to browse",
-      "description": "How many days back you can browse and search, from 1 to 10. Home Assistant's recorder keeps 10 days by default. Days you added to the library stay, however old."
+      "description": "How many days back you can browse and search, from 1 to 10. Home Assistant's recorder keeps 10 days by default. Days you hearted stay, however old."
     },
     "render_quality": {
       "label": "Render quality",

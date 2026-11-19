@@ -6,7 +6,7 @@ slowly evolving piece for each room and each day, in six styles. Your house does
 notes. It steers the texture, the density, the brightness, the space and the movement of music that
 a generative system plays. The audio is made on your server while it plays, from the history it
 reads from your own Home Assistant and from CC0 samples that ship with the provider. Nothing leaves
-your server; what it keeps is the event timeline of the days you add to your library and, if you
+your server; what it keeps is the event timeline of the days you heart and, if you
 want it, a cache of the days that were played.
 
 Entropy FM is made and maintained by [@jozefKruszynski](https://github.com/jozefKruszynski), not by
@@ -32,8 +32,7 @@ short history of the style (Eno's tape loops, the Berlin School, lo-fi hip hop, 
 the Akira soundtrack, cinematic neurofunk), how the house drives it, and a line about the day ("A busy afternoon;
 a door at 03:12."). Titles and descriptions follow the language of the server when it is Dutch, and are
 English otherwise. Music Assistant keeps the name, the length and the description of a track from the moment it
-was added to the library; to see new titles on a track that is already there, remove it and add it again, or
-refresh its metadata.
+was synced into the library; to see new titles on a track that is already there, refresh its metadata.
 
 A soundscape is as long as its day was busy, between 10 and 22 minutes (or, as a condensed piece,
 about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi, Minimal and Cinematic
@@ -72,7 +71,15 @@ is used at your own risk.
    not: Entropy FM uses its connection. Without the plugin, turn off *Use the Home Assistant plugin*
    in the settings of Entropy FM and enter a URL and a long-lived access token.
 4. Add Entropy FM under Settings > Music sources. The rooms are in the Artists overview at once;
-   play a day, or add an album to the library to keep that day for good.
+   play a day, or heart an album to keep that day for good.
+
+### The library and hearts
+
+The overviews of Music Assistant (artists, albums and tracks) show the recent days of the rooms you show: every room and
+the whole house is an artist, each of the last days an album, and each album has the day's soundscape as a track in
+every style that is offered. Heart an album or a track to keep its day for good (it stays after it leaves the window and
+after Home Assistant purges it); heart a room to keep every day of it; take the heart off and the day ages out as every
+other day does. There is nothing to add to or remove from the library by hand.
 
 ## Settings
 
@@ -92,14 +99,14 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Days to browse | 10 | 1 to 10 | How many days back you can browse and search. The recorder of Home Assistant keeps 10 days by default. Days you added to the library stay, however old. |
-| Days in library | 7 | 1 to 10 | How many of the last days of every room are in the library, counted back from today (never more than *Days to browse*). The window rolls on at midnight. Days you add stay for good. An album or track you remove stays out of the library, also inside the window, until you add it again. Rooms cannot be removed: untick them in *Rooms to show*. |
+| Days to browse | 10 | 1 to 10 | How many days back you can browse and search. The recorder of Home Assistant keeps 10 days by default. Days you hearted stay, however old. |
+| Days in library | 7 | 1 to 10 | How many of the last days of every room are in the library, counted back from today (never more than *Days to browse*). The window rolls on at midnight. Every style of every one of these days is a track in the library. Days you heart stay for good. To hide a room, untick it in *Rooms to show*. |
 | Rooms to show | all (nothing ticked) | any of your rooms | The rooms that appear in Music Assistant: in browsing, search, the library and the pre-render. Nothing ticked shows every room, including rooms that Home Assistant gets later. A room you leave out disappears from those lists; what you pinned or cached for it is kept (hidden, not deleted) and is back when you tick the room again. A room is still found by its id, so a queue that holds it keeps playing. When this changes, the provider asks Music Assistant to re-sync its own items, so that the library views follow. |
 | Whole House uses only these rooms | on | on, off | On: the *Whole House* soundscape is made of the ticked rooms only (every room when none is ticked). Off: it is made of every room, whatever is ticked. |
 | Hide quiet rooms | on | on, off | Do not offer a room in which nothing that would make a note or an event (a door, a motion sensor, a light, an appliance and the like) has changed over the days you can browse. A room that has only temperature, humidity, sun or other static sensors after the role filtering counts as quiet too. A room that is merely quiet on one day still offers that day. |
-| Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) as soon as they are over, even after Home Assistant purges its history. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
+| Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) as soon as they are over, even after Home Assistant purges its history. Hearting a room does the same. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
 | Styles offered | all six | any of the six styles | Which styles each day comes in, as versions of the same soundscape. |
-| Default style | Ambient | one of the six styles | The style the library lists for every day, and the one an id without a version plays. It is always offered. |
+| Default style | Ambient | one of the six styles | The one an id without a version plays. It is always offered. |
 
 ### Sound
 
@@ -229,8 +236,8 @@ table says.
   the entities that can play and the history of a day when you play it. It sends nothing anywhere
   else, with one opt-in exception (AI covers, below), and does not write into its own folder.
 - What it keeps is only what you ask for: a pin (the event timeline of one area on one day, a few
-  kilobytes) for what you add to the library, in the storage folder of the server; and rendered
-  audio of past days in the cache folder, if the cache is on. Removing an item from the library
+  kilobytes) for what you heart, in the storage folder of the server; and rendered
+  audio of past days in the cache folder, if the cache is on. Taking the heart off an item
   deletes its pins; the cache is a normal cache folder.
 
 ### Covers
