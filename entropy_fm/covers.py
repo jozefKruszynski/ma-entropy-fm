@@ -359,11 +359,17 @@ def _stops(colours: list[str], t: np.ndarray) -> np.ndarray:
 
 
 def _background(
-    colours: list[str], angle: float, bloom: tuple[float, float], size: int
+    colours: list[str],
+    angle: float,
+    bloom: tuple[float, float],
+    size: int,
+    width: int | None = None,
 ) -> np.ndarray:
-    """Return the gradient, the bloom and the darkening of the lower-left, as float RGB."""
-    axis = (np.arange(size, dtype=np.float32) + 0.5) / size
-    x, y = np.meshgrid(axis, axis)
+    """Return the gradient, the bloom and the darkening of the lower-left, as float RGB (width x size, square by default)."""
+    x, y = np.meshgrid(
+        (np.arange(width or size, dtype=np.float32) + 0.5) / (width or size),
+        (np.arange(size, dtype=np.float32) + 0.5) / size,
+    )
     theta = np.radians(angle)
     t = np.clip(0.5 + (x - 0.5) * np.cos(theta) * 0.9 + (y - 0.5) * np.sin(theta) * 0.9, 0.0, 1.0)
     canvas = _stops(colours, t)
@@ -373,17 +379,21 @@ def _background(
     return canvas * (1.0 - shade[..., None])
 
 
-def _draw_ops(  # noqa: C901
+def _draw_ops(  # noqa: C901, PLR0913, PLR0917
     ops: list[Op],
     place: Callable[[float, float], tuple[float, float]],
     scale: float,
     turn: float,
     size: int,
+    width: int | None = None,
 ) -> tuple[Image.Image, Image.Image]:
-    """Draw glyph operations into two masks (white and accent) at the size of the layer."""
+    """Draw glyph operations into two masks (white and accent) at the size (height) of the layer; the width is the height unless given."""
     from PIL import Image, ImageDraw  # noqa: PLC0415
 
-    masks = {"w": Image.new("L", (size, size), 0), "a": Image.new("L", (size, size), 0)}
+    masks = {
+        "w": Image.new("L", (width or size, size), 0),
+        "a": Image.new("L", (width or size, size), 0),
+    }
     draws = {key: ImageDraw.Draw(image) for key, image in masks.items()}
     k = size / SIZE
     spin = np.radians(turn)

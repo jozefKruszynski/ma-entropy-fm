@@ -34,6 +34,8 @@ CONF_COVER_STYLE = "cover_style"
 CONF_COVER_PROMPT = "cover_prompt"
 CONF_COVER_TITLE = "cover_title"
 COVER_PATH_PREFIX = "cover"
+# the images of the artists (rooms): `artist|<area id>|thumb or fanart|g<number of the redraw>`
+ARTIST_PATH_PREFIX = "artist"
 
 DEFAULT_DAYS = 10
 MAX_DAYS = 10

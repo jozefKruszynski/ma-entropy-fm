@@ -72,6 +72,7 @@ from .audiocache import AudioCache, cache_key
 from .autotune import benchmark, heaviest_style
 from .baseline import EntityBaseline
 from .const import (
+    ARTIST_PATH_PREFIX,
     CONF_AUDIO_CACHE_MB,
     CONF_COVER_ENGINE,
     CONF_COVER_LIMIT,
@@ -178,6 +179,7 @@ from .quality import (
 )
 from .render import render_pcm
 from .roles import parse_overrides
+from .roomart import artist_fanart, artist_thumb, room_kind
 from .scape import analysis_of, duration_of, scape_score
 from .score import Score
 from .styles import DEFAULT_STYLE, STYLES, Style, get_style
@@ -980,6 +982,7 @@ class EntropyFMProvider(MusicProvider):
                 include_presence=self._include_presence,
                 meta=snapshot.meta,
                 overrides=parse_overrides(str(self.get_config_value(CONF_ROLES, "") or "")),
+                icons=snapshot.icons,
             )
             self._catalog_time = loop_time
             return self._catalog
@@ -1018,6 +1021,23 @@ class EntropyFMProvider(MusicProvider):
             provider=self.instance_id,
             name=name,
             provider_mappings={self._mapping(area_id)},
+            metadata=MediaItemMetadata(images=self._artist_images(area_id)),
+        )
+
+    def _artist_images(self, area_id: str) -> UniqueList[MediaItemImage] | None:
+        """Return the drawn thumb and the wide backdrop of a room, or None when covers are off."""
+        if self._cover_mode() == COVER_OFF:
+            return None
+        return UniqueList(
+            [
+                MediaItemImage(
+                    type=image_type,
+                    path=f"{ARTIST_PATH_PREFIX}|{area_id}|{kind}|g{self._cover_generation}",
+                    provider=self.instance_id,
+                    remotely_accessible=False,
+                )
+                for image_type, kind in ((ImageType.THUMB, "thumb"), (ImageType.FANART, "fanart"))
+            ]
         )
 
     def _images(
@@ -1048,7 +1068,7 @@ class EntropyFMProvider(MusicProvider):
 
     def accepts_stored_image_path(self, path: str) -> bool:
         """Accept the covers of this provider when they are read back from stored data."""
-        return path.startswith(f"{COVER_PATH_PREFIX}|")
+        return path.startswith((f"{COVER_PATH_PREFIX}|", f"{ARTIST_PATH_PREFIX}|"))
 
     async def resolve_image(self, path: str) -> str | bytes | None:
         """
@@ -1059,6 +1079,8 @@ class EntropyFMProvider(MusicProvider):
             accepted too.
         """
         parts = path.split("|")
+        if parts[0] == ARTIST_PATH_PREFIX:
+            return await self._artist_image(parts)
         if len(parts) not in {4, 5} or parts[0] != COVER_PATH_PREFIX:
             return None
         if len(parts) == 5 and not re.fullmatch(r"g\d+", parts[4]):
@@ -1069,6 +1091,42 @@ class EntropyFMProvider(MusicProvider):
         except ValueError:
             return None
         return await self._cover(area_id, day, style_key or DEFAULT_STYLE)
+
+    async def _artist_image(self, parts: list[str]) -> bytes | None:
+        """
+        Return the image of a room: drawn once, kept in the cache folder of the covers.
+
+        :param parts: `artist|<area id>|thumb or fanart|g<number of the redraw>`, split at the bars.
+        """
+        if (
+            len(parts) != 4
+            or parts[2] not in {"thumb", "fanart"}
+            or not re.fullmatch(r"g\d+", parts[3])
+            or self._cover_mode() == COVER_OFF
+        ):
+            return None
+        area_id, kind = parts[1], parts[2]
+        try:
+            catalog = await self._catalog_all()
+        except Exception:
+            self.logger.debug("No rooms for the image of %s", area_id, exc_info=True)
+            catalog = Catalog()
+        if area_id == WHOLE_HOUSE_ID:
+            name = WHOLE_HOUSE_NAME
+        elif area_id in catalog.areas:
+            name = catalog.areas[area_id]
+        else:
+            return None
+        room = room_kind(name, area_id, catalog.icons.get(area_id))
+        # a new name or a new kind of room is a new image; the old file ages out of the cache
+        slot = f"artist|{area_id}|{name}|{room}|{kind}"
+        if kind == "fanart":
+            return await self.covers.make(
+                COVER_PROCEDURAL, slot, slot, lambda: artist_fanart(area_id, room), None
+            )
+        return await self.covers.make(
+            COVER_PROCEDURAL, slot, slot, lambda: artist_thumb(area_id, name, room), None
+        )
 
     async def _cover(self, area_id: str, day: date, style_key: str) -> bytes | None:
         """
@@ -1349,7 +1407,7 @@ class EntropyFMProvider(MusicProvider):
                 for area_id, snap in missing.items()
             },
         }
-        return Catalog(areas, entities, catalog.sun, catalog.changed)
+        return Catalog(areas, entities, catalog.sun, catalog.changed, catalog.icons)
 
     async def _pinned_house_days(self) -> set[date]:
         """Return the days that every room of the whole house has pinned."""
