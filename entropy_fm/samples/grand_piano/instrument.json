@@ -1,0 +1,279 @@
+{
+ "name": "Splendid Grand Piano",
+ "zones": [
+  {
+   "file": "pp_40.ogg",
+   "root": 52.06,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 0,
+   "hi": 53
+  },
+  {
+   "file": "pp_43.ogg",
+   "root": 55.06,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 54,
+   "hi": 56
+  },
+  {
+   "file": "pp_46.ogg",
+   "root": 58.05,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 57,
+   "hi": 59
+  },
+  {
+   "file": "pp_48.ogg",
+   "root": 60.05,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 60,
+   "hi": 62
+  },
+  {
+   "file": "pp_52.ogg",
+   "root": 64.05,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 63,
+   "hi": 65
+  },
+  {
+   "file": "pp_55.ogg",
+   "root": 67.07,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 66,
+   "hi": 68
+  },
+  {
+   "file": "pp_57.ogg",
+   "root": 69.06,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 69,
+   "hi": 70
+  },
+  {
+   "file": "pp_60.ogg",
+   "root": 72.04,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 71,
+   "hi": 74
+  },
+  {
+   "file": "pp_64.ogg",
+   "root": 76.05,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 75,
+   "hi": 77
+  },
+  {
+   "file": "pp_67.ogg",
+   "root": 79.07,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 78,
+   "hi": 80
+  },
+  {
+   "file": "pp_70.ogg",
+   "root": 82.08,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 81,
+   "hi": 83
+  },
+  {
+   "file": "pp_73.ogg",
+   "root": 85.07,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 84,
+   "hi": 85
+  },
+  {
+   "file": "pp_75.ogg",
+   "root": 87.12,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 87,
+   "hi": 87
+  },
+  {
+   "file": "pp_79.ogg",
+   "root": 91.11,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 90,
+   "hi": 91
+  },
+  {
+   "file": "pp_82.ogg",
+   "root": 94.11,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 93,
+   "hi": 94
+  },
+  {
+   "file": "pp_85.ogg",
+   "root": 85.24,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 86,
+   "hi": 86
+  },
+  {
+   "file": "pp_88.ogg",
+   "root": 88.25,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 88,
+   "hi": 89
+  },
+  {
+   "file": "pp_91.ogg",
+   "root": 91.29,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 92,
+   "hi": 92
+  },
+  {
+   "file": "pp_94.ogg",
+   "root": 94.34,
+   "vlo": 1,
+   "vhi": 72,
+   "lo": 95,
+   "hi": 127
+  },
+  {
+   "file": "ff_40.ogg",
+   "root": 52.15,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 0,
+   "hi": 53
+  },
+  {
+   "file": "ff_43.ogg",
+   "root": 55.11,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 54,
+   "hi": 56
+  },
+  {
+   "file": "ff_46.ogg",
+   "root": 58.1,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 57,
+   "hi": 59
+  },
+  {
+   "file": "ff_48.ogg",
+   "root": 60.11,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 60,
+   "hi": 62
+  },
+  {
+   "file": "ff_52.ogg",
+   "root": 64.09,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 63,
+   "hi": 65
+  },
+  {
+   "file": "ff_55.ogg",
+   "root": 67.17,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 66,
+   "hi": 68
+  },
+  {
+   "file": "ff_57.ogg",
+   "root": 69.12,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 69,
+   "hi": 70
+  },
+  {
+   "file": "ff_60.ogg",
+   "root": 72.07,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 71,
+   "hi": 74
+  },
+  {
+   "file": "ff_64.ogg",
+   "root": 76.08,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 75,
+   "hi": 77
+  },
+  {
+   "file": "ff_67.ogg",
+   "root": 79.08,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 78,
+   "hi": 80
+  },
+  {
+   "file": "ff_70.ogg",
+   "root": 82.11,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 81,
+   "hi": 83
+  },
+  {
+   "file": "ff_73.ogg",
+   "root": 85.09,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 84,
+   "hi": 86
+  },
+  {
+   "file": "ff_76.ogg",
+   "root": 88.15,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 87,
+   "hi": 89
+  },
+  {
+   "file": "ff_79.ogg",
+   "root": 91.15,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 90,
+   "hi": 92
+  },
+  {
+   "file": "ff_81.ogg",
+   "root": 93.14,
+   "vlo": 73,
+   "vhi": 127,
+   "lo": 93,
+   "hi": 127
+  }
+ ],
+ "release": 0.5,
+ "voices": 16
+}

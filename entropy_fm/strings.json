@@ -1,0 +1,134 @@
+{
+  "manifest": {
+    "name": "Entropy FM",
+    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in six styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, or when you redraw the covers, it asks Music Assistant to re-sync its own items."
+  },
+  "config_entries": {
+    "use_ha_plugin": {
+      "label": "Use the Home Assistant plugin",
+      "description": "Read Home Assistant through the Home Assistant plugin of Music Assistant, which must be set up. Turn this off to connect with a URL and a token of your own."
+    },
+    "url": {
+      "label": "Home Assistant URL",
+      "description": "The address of Home Assistant, such as http://homeassistant.local:8123. Only used when the plugin is not used."
+    },
+    "token": {
+      "label": "Long-lived access token",
+      "description": "A long-lived access token from your Home Assistant profile. Only used when the plugin is not used."
+    },
+    "verify_ssl": {
+      "label": "Verify the certificate",
+      "description": "Check the certificate of Home Assistant when the URL uses https."
+    },
+    "days": {
+      "label": "Days to browse",
+      "description": "How many days back you can browse and search, from 1 to 10. Home Assistant's recorder keeps 10 days by default. Days you added to the library stay, however old."
+    },
+    "render_quality": {
+      "label": "Render quality",
+      "description": "How much of the processor a second of music may use. Light suits a Raspberry Pi, Standard a small server, Rich a PC. Light has fewer layers, fewer saws in the big voices and a cheaper room; Rich adds a long hall and a shimmer. Auto runs a short benchmark when the provider starts and picks the richest that would use less than 30 percent of one core, measured with the dearest style that you offer."
+    },
+    "audio_cache_mb": {
+      "label": "Audio cache size (MB)",
+      "description": "Rendered tracks of past days are kept as Opus audio in Ogg files in the cache of the server, so that playing them again costs no processor and can be seeked. The oldest used are deleted above this size. 0 turns the cache off."
+    },
+    "prerender": {
+      "label": "Pre-render past days",
+      "description": "Shortly after midnight, and once after the start, render the tracks of the day that just ended into the audio cache, so that they play at once and cost no processor. Off does nothing. Pinned rooms renders the rooms you keep every day of, in every style you offer, and the days you added. All rooms also renders every room and the whole house in the default style. It works one track at a time at low priority, waits while a track plays, never fills more than 80 percent of the audio cache and does nothing when the cache is off."
+    },
+    "piece_length": {
+      "label": "Piece length",
+      "description": "Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same day and the same plan in a shorter piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi, Minimal and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Full and condensed pieces are cached and pre-rendered apart."
+    },
+    "key": {
+      "label": "Key",
+      "description": "The root note that all pitches are tuned to."
+    },
+    "scale": {
+      "label": "Scale",
+      "description": "The scale that all pitches are tuned to."
+    },
+    "styles": {
+      "label": "Styles offered",
+      "description": "Which styles each soundscape comes in: Ambient, Berlin School, Lo-fi, Minimal, Ritual and Cinematic Glitch. Every style is a version of the same day, such as \"Dishwasher at Dusk (Lo-fi)\", so you can compare them."
+    },
+    "default_style": {
+      "label": "Default style",
+      "description": "The style the library lists for every day, and the one an old track id plays. It is always offered."
+    },
+    "energy_offset": {
+      "label": "Activity offset",
+      "description": "Moves how lively the house seems to the music, in percentage points from -50 to 50. The activity brings layers in and out and sets how dense they are and how fast they change; it never writes notes."
+    },
+    "day_character": {
+      "label": "Character of the day",
+      "description": "Let every day have its own character: weekday or weekend and how much was going on set the density, how warm it was picks the mode, the key walks the circle of fifths from week to week and the season brightens or darkens the sound. Unusual moments (a door at night, a washing machine on a strange day) become a swell, a dip of the filters and a change of harmony. Off: the plain sound; no extra history is read."
+    },
+    "include_presence": {
+      "label": "Include presence",
+      "description": "Also let persons and device trackers play, which tells who is home. Off by default."
+    },
+    "exclude": {
+      "label": "Extra exclusions",
+      "description": "Entities to keep out of the music: patterns on the entity id, separated by commas, such as sensor.bedroom_*, light.hall_*. Persons, device trackers, locks, alarm panels, cameras and anything with password or code in its id are always left out."
+    },
+    "role_overrides": {
+      "label": "Role overrides",
+      "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, dryer, fridge, oven, drone, pluck, chord, blip, pad, temperature, humidity, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; a label wins over this list."
+    },
+    "library_days": {
+      "label": "Days in library",
+      "description": "How many of the last days of every room are in the library (counted back from today, at most the recorder retention below). Days you add to the library stay for good, however old."
+    },
+    "rooms": {
+      "label": "Rooms to show",
+      "description": "Rooms that appear in Music Assistant. None ticked shows every room, also rooms added later."
+    },
+    "house_selected_rooms": {
+      "label": "Whole House uses only these rooms",
+      "description": "On: the Whole House soundscape is made of the rooms ticked above (of every room when none is ticked). Off: it is made of every room of the house, whatever is ticked."
+    },
+    "hide_quiet_rooms": {
+      "label": "Hide quiet rooms",
+      "description": "Do not offer a room in which, over the days you can browse, nothing that would make a note or an event (a door, a motion sensor, a light, an appliance) has changed. A room with only temperature, humidity or static sensors is quiet too. This is read from the current states of the entities, not from the history. A room that is merely quiet on one day still offers that day."
+    },
+    "keep_rooms": {
+      "label": "Keep every day forever",
+      "description": "Days of these rooms are saved permanently, even after Home Assistant purges its history. Does not show or hide rooms."
+    },
+    "covers": {
+      "label": "Covers",
+      "description": "What the covers of the days show. Off: no covers. Drawn from the day: a picture made on your server from the events of the day, in the look of the Music Assistant covers; it is the same every time. AI image engine (only offered when Music Assistant has an image engine): the engine draws the cover from the name of the room and a few abstract mood words; nothing else leaves your server. The drawn cover shows until the AI cover is ready."
+    },
+    "cover_engine": {
+      "label": "Image engine",
+      "description": "Which image engine of Music Assistant makes the AI covers. The default follows the engine that Music Assistant uses."
+    },
+    "cover_style": {
+      "label": "Cover style",
+      "description": "The look of the AI covers: the presets of the Music Assistant playlist covers (Music Assistant, Neon, Bold, Soft Gradient, Risograph, Gouache) or Custom, which uses the prompt below."
+    },
+    "cover_prompt": {
+      "label": "Cover prompt",
+      "description": "The prompt of the AI covers when the style is Custom, as a template: {name} is the name of the room and {context} the mood words of the day. Left empty, the default of Music Assistant is used."
+    },
+    "cover_title": {
+      "label": "Title on the cover",
+      "description": "On: Entropy FM draws the title (the room and the day) over the AI cover, and the engine is told to leave the picture without text. Off: the engine is asked to draw the title itself."
+    },
+    "cover_ai_per_hour": {
+      "label": "AI covers per hour",
+      "description": "The most AI covers that are asked for in an hour, from 1 to 120. A cover is made once and kept; this only paces the first time."
+    },
+    "redraw_covers": {
+      "label": "Redraw covers",
+      "description": "Throws away the covers made so far and makes new ones as albums are shown. AI covers count against the hourly limit.",
+      "action_label": "Redraw covers"
+    }
+  },
+  "config_actions": {
+    "redraw_covers": {
+      "result": "The covers are thrown away; new ones are made as albums are shown."
+    }
+  }
+}

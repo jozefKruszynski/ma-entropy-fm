@@ -1,0 +1,57 @@
+{
+ "name": "Drum one-shots, VCSL",
+ "shots": {
+  "kick": [
+   {
+    "file": "bassdrum_hit_pp1.ogg",
+    "name": "bassdrum_hit_pp1"
+   },
+   {
+    "file": "bassdrum_hit_mp1.ogg",
+    "name": "bassdrum_hit_mp1"
+   },
+   {
+    "file": "bassdrum_hit_mf1.ogg",
+    "name": "bassdrum_hit_mf1"
+   }
+  ],
+  "snare": [
+   {
+    "file": "Snare3M_HitSN_v2_rr1_Mid.ogg",
+    "name": "Snare3M_HitSN_v2_rr1_Mid"
+   },
+   {
+    "file": "Snare3M_HitSN_v3_rr1_Mid.ogg",
+    "name": "Snare3M_HitSN_v3_rr1_Mid"
+   },
+   {
+    "file": "Snare3M_HitSN_v4_rr1_Mid.ogg",
+    "name": "Snare3M_HitSN_v4_rr1_Mid"
+   }
+  ],
+  "rim": [
+   {
+    "file": "Snare3M_Xstick_v2_rr1_Mid.ogg",
+    "name": "Snare3M_Xstick_v2_rr1_Mid"
+   },
+   {
+    "file": "Snare3M_stick_v3_rr1_Mid.ogg",
+    "name": "Snare3M_stick_v3_rr1_Mid"
+   }
+  ],
+  "click": [
+   {
+    "file": "Claves1_Hit_v1_rr1_Mid.ogg",
+    "name": "Claves1_Hit_v1_rr1_Mid"
+   },
+   {
+    "file": "Claves1_Hit_v2_rr1_Mid.ogg",
+    "name": "Claves1_Hit_v2_rr1_Mid"
+   },
+   {
+    "file": "Claves2_Hit_v1_rr1_Mid.ogg",
+    "name": "Claves2_Hit_v1_rr1_Mid"
+   }
+  ]
+ }
+}

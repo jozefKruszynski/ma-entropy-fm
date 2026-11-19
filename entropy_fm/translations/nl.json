@@ -1,0 +1,134 @@
+{
+  "manifest": {
+    "name": "Entropy FM",
+    "description": "Speelt de geschiedenis van je Home Assistant als generatieve klanklandschappen: elk gebied is een artiest, elke dag een album, en elk album bevat één lang, langzaam evoluerend stuk in zes stijlen. Het leest alleen uit Home Assistant en synthetiseert de audio tijdens het afspelen. Als de kamers die je toont veranderen, of als je de covers opnieuw tekent, vraagt het Music Assistant om zijn eigen items opnieuw te synchroniseren."
+  },
+  "config_entries": {
+    "use_ha_plugin": {
+      "label": "Home Assistant-plug-in gebruiken",
+      "description": "Lees Home Assistant via de Home Assistant-plug-in van Music Assistant, die ingesteld moet zijn. Zet dit uit om met een eigen URL en token te verbinden."
+    },
+    "url": {
+      "label": "Home Assistant-URL",
+      "description": "Het adres van Home Assistant, zoals http://homeassistant.local:8123. Alleen gebruikt als de plug-in niet wordt gebruikt."
+    },
+    "token": {
+      "label": "Langlevend toegangstoken",
+      "description": "Een langlevend toegangstoken uit je Home Assistant-profiel. Alleen gebruikt als de plug-in niet wordt gebruikt."
+    },
+    "verify_ssl": {
+      "label": "Certificaat controleren",
+      "description": "Controleer het certificaat van Home Assistant als de URL https gebruikt."
+    },
+    "days": {
+      "label": "Dagen om te bladeren",
+      "description": "Hoeveel dagen terug je kunt bladeren en zoeken, van 1 tot 10. De recorder van Home Assistant bewaart standaard 10 dagen. Dagen die je aan de bibliotheek toevoegt blijven bewaard."
+    },
+    "render_quality": {
+      "label": "Renderkwaliteit",
+      "description": "Hoeveel van de processor een seconde muziek mag gebruiken. Licht past bij een Raspberry Pi, Standaard bij een kleine server, Rijk bij een pc. Auto draait bij het starten een korte test en kiest de rijkste stand die minder dan 30 procent van een kern gebruikt, gemeten met de duurste stijl die je aanbiedt."
+    },
+    "audio_cache_mb": {
+      "label": "Grootte van de audiocache (MB)",
+      "description": "Gerenderde tracks van afgelopen dagen worden als Opus-audio in een Ogg-bestand in de cache van de server bewaard, zodat opnieuw afspelen geen processor kost. De langst ongebruikte bestanden worden boven deze grootte gewist. 0 zet de cache uit."
+    },
+    "prerender": {
+      "label": "Afgelopen dagen vooraf renderen",
+      "description": "Kort na middernacht, en eenmaal na het starten, worden de tracks van de dag die net voorbij is in de audiocache gerenderd, zodat ze meteen spelen en geen processor kosten. Uit doet niets. Vastgezette kamers rendert de kamers waarvan je elke dag bewaart, in elke stijl die je aanbiedt, en de dagen die je hebt toegevoegd. Alle kamers rendert ook elke kamer en het hele huis in de standaardstijl. Het werkt één track tegelijk met lage prioriteit, wacht zolang er een track speelt, vult de audiocache nooit voor meer dan 80 procent en doet niets als de cache uit staat."
+    },
+    "piece_length": {
+      "label": "Lengte van het stuk",
+      "description": "Full: zo lang als de dag druk was, 10 tot 22 minuten. Condensed: dezelfde dag en hetzelfde plan in een korter stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi, Minimal en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Full- en Condensed-stukken worden apart gecachet en vooraf gerenderd."
+    },
+    "key": {
+      "label": "Toonsoort",
+      "description": "De grondtoon waarop alle toonhoogtes zijn gestemd."
+    },
+    "scale": {
+      "label": "Toonladder",
+      "description": "De toonladder waarop alle toonhoogtes zijn gestemd."
+    },
+    "styles": {
+      "label": "Aangeboden stijlen",
+      "description": "In welke stijlen elk klanklandschap wordt aangeboden: Ambient, Berlin School, Lo-fi, Minimal, Ritual en Cinematic Glitch. Elke stijl is een versie van dezelfde dag, zoals \"Vaatwasser bij Schemering (Lo-fi)\", zodat je ze kunt vergelijken."
+    },
+    "default_style": {
+      "label": "Standaardstijl",
+      "description": "De stijl die de bibliotheek voor elke dag toont, en die een oud nummer-id afspeelt. Hij wordt altijd aangeboden."
+    },
+    "energy_offset": {
+      "label": "Activiteitsverschuiving",
+      "description": "Verschuift hoe levendig het huis voor de muziek lijkt, in procentpunten van -50 tot 50. De activiteit brengt lagen in en uit en bepaalt hoe dicht ze zijn en hoe snel ze veranderen; ze schrijft nooit noten."
+    },
+    "day_character": {
+      "label": "Karakter van de dag",
+      "description": "Geef elke dag zijn eigen karakter: de dag kiest zijn palet (tempo en drukte uit werkdag of weekend, toonsoort uit hoe warm het was, dichtheid uit hoeveel er gebeurde, melodie uit hoe lang er iemand thuis was), de toonsoort loopt van week tot week langs de kwintencirkel, wat het huis elke dag doet verdwijnt in de textuur en wat ongewoon is komt naar voren. Het leest tot 7 extra dagen geschiedenis, één keer, en de server bewaart ze in de cache. Zet het uit voor het gewone geluid."
+    },
+    "include_presence": {
+      "label": "Aanwezigheid meenemen",
+      "description": "Laat ook personen en apparaattrackers meespelen, wat verraadt wie thuis is. Standaard uit."
+    },
+    "exclude": {
+      "label": "Extra uitsluitingen",
+      "description": "Entiteiten die buiten de muziek blijven: patronen op de entiteits-id, gescheiden door komma's, zoals sensor.slaapkamer_*, light.gang_*. Personen, apparaattrackers, sloten, alarmpanelen, camera's en alles met password of code in de id blijven altijd buiten."
+    },
+    "role_overrides": {
+      "label": "Rolkeuze",
+      "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, dryer, fridge, oven, drone, pluck, chord, blip, pad, temperature, humidity, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; een label wint van deze lijst."
+    },
+    "library_days": {
+      "label": "Dagen in de bibliotheek",
+      "description": "Hoeveel van de laatste dagen van elke kamer in de bibliotheek staan (vanaf vandaag teruggeteld). Dagen die je toevoegt blijven altijd bewaard."
+    },
+    "rooms": {
+      "label": "Kamers om te tonen",
+      "description": "Kamers die in Music Assistant verschijnen. Geen enkele aangevinkt toont elke kamer, ook kamers die later worden toegevoegd."
+    },
+    "house_selected_rooms": {
+      "label": "Heel huis gebruikt alleen deze kamers",
+      "description": "Aan: het klanklandschap van het hele huis wordt gemaakt van de hierboven aangevinkte kamers (van elke kamer als er geen is aangevinkt). Uit: het wordt gemaakt van elke kamer van het huis, wat er ook is aangevinkt."
+    },
+    "hide_quiet_rooms": {
+      "label": "Stille kamers verbergen",
+      "description": "Bied geen kamer aan waarin in de dagen waarover je kunt bladeren niets is veranderd dat een noot of gebeurtenis zou maken (een deur, een bewegingssensor, een lamp, een apparaat). Een kamer met alleen temperatuur-, vochtigheids- of statische sensoren is ook stil. Dit wordt gelezen uit de huidige statussen van de entiteiten, niet uit de geschiedenis. Een kamer die alleen op één dag stil is, biedt die dag gewoon aan."
+    },
+    "keep_rooms": {
+      "label": "Elke dag voor altijd bewaren",
+      "description": "Dagen van deze kamers worden permanent opgeslagen, ook nadat Home Assistant zijn geschiedenis heeft opgeruimd. Toont of verbergt geen kamers."
+    },
+    "covers": {
+      "label": "Covers",
+      "description": "Wat de covers van de dagen tonen. Uit: geen covers. Getekend uit de dag: een plaatje dat op je server wordt gemaakt uit de gebeurtenissen van de dag, in de stijl van de covers van Music Assistant; het is elke keer hetzelfde. AI-beeldengine (alleen als Music Assistant een beeldengine heeft): de engine tekent de cover uit de naam van de kamer en een paar abstracte sfeerwoorden; er verlaat niets anders je server. De getekende cover blijft staan tot de AI-cover klaar is."
+    },
+    "cover_engine": {
+      "label": "Beeldengine",
+      "description": "Welke beeldengine van Music Assistant de AI-covers maakt. Standaard volgt de engine die Music Assistant gebruikt."
+    },
+    "cover_style": {
+      "label": "Coverstijl",
+      "description": "De stijl van de AI-covers: de presets van de playlistcovers van Music Assistant (Music Assistant, Neon, Bold, Soft Gradient, Risograph, Gouache) of Custom, dat de prompt hieronder gebruikt."
+    },
+    "cover_prompt": {
+      "label": "Coverprompt",
+      "description": "De prompt van de AI-covers als de stijl Custom is, als sjabloon: {name} is de naam van de kamer en {context} de sfeerwoorden van de dag. Leeg: de standaard van Music Assistant."
+    },
+    "cover_title": {
+      "label": "Titel op de cover",
+      "description": "Aan: Entropy FM tekent de titel (de kamer en de dag) over de AI-cover en de engine krijgt de opdracht het beeld zonder tekst te maken. Uit: de engine wordt gevraagd de titel zelf te tekenen."
+    },
+    "cover_ai_per_hour": {
+      "label": "AI-covers per uur",
+      "description": "Het maximum aantal AI-covers dat per uur wordt aangevraagd, van 1 tot 120. Een cover wordt één keer gemaakt en bewaard; dit remt alleen de eerste keer."
+    },
+    "redraw_covers": {
+      "label": "Covers opnieuw tekenen",
+      "description": "Gooit de tot nu toe gemaakte covers weg en maakt nieuwe terwijl albums worden getoond. AI-covers tellen mee voor de limiet per uur.",
+      "action_label": "Covers opnieuw tekenen"
+    }
+  },
+  "config_actions": {
+    "redraw_covers": {
+      "result": "De covers zijn weggegooid; er worden nieuwe gemaakt terwijl albums worden getoond."
+    }
+  }
+}

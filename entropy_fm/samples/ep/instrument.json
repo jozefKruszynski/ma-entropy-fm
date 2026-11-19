@@ -1,0 +1,319 @@
+{
+ "name": "FM electric piano, VCSL (Yamaha TX81Z)",
+ "zones": [
+  {
+   "file": "vl1_36.ogg",
+   "root": 36.02,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 0,
+   "hi": 38
+  },
+  {
+   "file": "vl1_48.ogg",
+   "root": 48.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 47,
+   "hi": 50
+  },
+  {
+   "file": "vl1_60.ogg",
+   "root": 60.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 59,
+   "hi": 62
+  },
+  {
+   "file": "vl1_72.ogg",
+   "root": 72.0,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 71,
+   "hi": 74
+  },
+  {
+   "file": "vl1_84.ogg",
+   "root": 84.0,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 83,
+   "hi": 127
+  },
+  {
+   "file": "vl1_40.ogg",
+   "root": 40.02,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 39,
+   "hi": 42
+  },
+  {
+   "file": "vl1_52.ogg",
+   "root": 52.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 51,
+   "hi": 54
+  },
+  {
+   "file": "vl1_64.ogg",
+   "root": 64.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 63,
+   "hi": 66
+  },
+  {
+   "file": "vl1_76.ogg",
+   "root": 76.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 75,
+   "hi": 78
+  },
+  {
+   "file": "vl1_44.ogg",
+   "root": 44.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 43,
+   "hi": 46
+  },
+  {
+   "file": "vl1_56.ogg",
+   "root": 56.01,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 55,
+   "hi": 58
+  },
+  {
+   "file": "vl1_68.ogg",
+   "root": 68.0,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 67,
+   "hi": 70
+  },
+  {
+   "file": "vl1_80.ogg",
+   "root": 80.0,
+   "vlo": 1,
+   "vhi": 60,
+   "lo": 79,
+   "hi": 82
+  },
+  {
+   "file": "vl2_36.ogg",
+   "root": 36.02,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 0,
+   "hi": 38
+  },
+  {
+   "file": "vl2_48.ogg",
+   "root": 48.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 47,
+   "hi": 50
+  },
+  {
+   "file": "vl2_60.ogg",
+   "root": 60.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 59,
+   "hi": 62
+  },
+  {
+   "file": "vl2_72.ogg",
+   "root": 72.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 71,
+   "hi": 74
+  },
+  {
+   "file": "vl2_84.ogg",
+   "root": 84.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 83,
+   "hi": 127
+  },
+  {
+   "file": "vl2_40.ogg",
+   "root": 40.02,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 39,
+   "hi": 42
+  },
+  {
+   "file": "vl2_52.ogg",
+   "root": 52.02,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 51,
+   "hi": 54
+  },
+  {
+   "file": "vl2_64.ogg",
+   "root": 64.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 63,
+   "hi": 66
+  },
+  {
+   "file": "vl2_76.ogg",
+   "root": 76.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 75,
+   "hi": 78
+  },
+  {
+   "file": "vl2_44.ogg",
+   "root": 44.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 43,
+   "hi": 46
+  },
+  {
+   "file": "vl2_56.ogg",
+   "root": 56.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 55,
+   "hi": 58
+  },
+  {
+   "file": "vl2_68.ogg",
+   "root": 68.01,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 67,
+   "hi": 70
+  },
+  {
+   "file": "vl2_80.ogg",
+   "root": 80.0,
+   "vlo": 61,
+   "vhi": 100,
+   "lo": 79,
+   "hi": 82
+  },
+  {
+   "file": "vl3_36.ogg",
+   "root": 36.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 0,
+   "hi": 38
+  },
+  {
+   "file": "vl3_48.ogg",
+   "root": 48.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 47,
+   "hi": 50
+  },
+  {
+   "file": "vl3_60.ogg",
+   "root": 60.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 59,
+   "hi": 62
+  },
+  {
+   "file": "vl3_72.ogg",
+   "root": 72.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 71,
+   "hi": 74
+  },
+  {
+   "file": "vl3_84.ogg",
+   "root": 84.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 83,
+   "hi": 127
+  },
+  {
+   "file": "vl3_40.ogg",
+   "root": 40.02,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 39,
+   "hi": 42
+  },
+  {
+   "file": "vl3_52.ogg",
+   "root": 52.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 51,
+   "hi": 54
+  },
+  {
+   "file": "vl3_64.ogg",
+   "root": 64.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 63,
+   "hi": 66
+  },
+  {
+   "file": "vl3_76.ogg",
+   "root": 76.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 75,
+   "hi": 78
+  },
+  {
+   "file": "vl3_44.ogg",
+   "root": 44.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 43,
+   "hi": 46
+  },
+  {
+   "file": "vl3_56.ogg",
+   "root": 56.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 55,
+   "hi": 58
+  },
+  {
+   "file": "vl3_68.ogg",
+   "root": 68.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 67,
+   "hi": 70
+  },
+  {
+   "file": "vl3_80.ogg",
+   "root": 80.01,
+   "vlo": 101,
+   "vhi": 127,
+   "lo": 79,
+   "hi": 82
+  }
+ ],
+ "release": 0.5,
+ "voices": 12
+}

@@ -1,0 +1,272 @@
+{
+ "name": "Violin and cello sections, VSCO 2 CE",
+ "zones": [
+  {
+   "file": "cellos_57.ogg",
+   "root": 56.98,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 386452,
+   "name": "cellos",
+   "lo": 55,
+   "hi": 58
+  },
+  {
+   "file": "cellos_47.ogg",
+   "root": 47.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 364072,
+   "name": "cellos",
+   "lo": 45,
+   "hi": 48
+  },
+  {
+   "file": "cellos_71.ogg",
+   "root": 70.99,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 274124,
+   "name": "cellos",
+   "lo": 70,
+   "hi": 72
+  },
+  {
+   "file": "cellos_36.ogg",
+   "root": 36.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 368907,
+   "name": "cellos",
+   "lo": 0,
+   "hi": 37
+  },
+  {
+   "file": "cellos_60.ogg",
+   "root": 59.98,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 387350,
+   "name": "cellos",
+   "lo": 59,
+   "hi": 61
+  },
+  {
+   "file": "cellos_50.ogg",
+   "root": 50.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 407783,
+   "name": "cellos",
+   "lo": 49,
+   "hi": 51
+  },
+  {
+   "file": "cellos_74.ogg",
+   "root": 74.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 341396,
+   "name": "cellos",
+   "lo": 73,
+   "hi": 75
+  },
+  {
+   "file": "cellos_40.ogg",
+   "root": 39.95,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 389310,
+   "name": "cellos",
+   "lo": 38,
+   "hi": 41
+  },
+  {
+   "file": "cellos_64.ogg",
+   "root": 63.97,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 404822,
+   "name": "cellos",
+   "lo": 62,
+   "hi": 65
+  },
+  {
+   "file": "cellos_53.ogg",
+   "root": 53.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 347982,
+   "name": "cellos",
+   "lo": 52,
+   "hi": 54
+  },
+  {
+   "file": "cellos_77.ogg",
+   "root": 76.98,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 291324,
+   "name": "cellos",
+   "lo": 76,
+   "hi": 127
+  },
+  {
+   "file": "cellos_43.ogg",
+   "root": 42.99,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 329694,
+   "name": "cellos",
+   "lo": 42,
+   "hi": 44
+  },
+  {
+   "file": "cellos_67.ogg",
+   "root": 67.01,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 382991,
+   "name": "cellos",
+   "lo": 66,
+   "hi": 69
+  },
+  {
+   "file": "violins_57.ogg",
+   "root": 56.99,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 420264,
+   "name": "violins",
+   "lo": 56,
+   "hi": 58
+  },
+  {
+   "file": "violins_69.ogg",
+   "root": 68.99,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 406096,
+   "name": "violins",
+   "lo": 68,
+   "hi": 70
+  },
+  {
+   "file": "violins_59.ogg",
+   "root": 59.03,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 437996,
+   "name": "violins",
+   "lo": 59,
+   "hi": 60
+  },
+  {
+   "file": "violins_83.ogg",
+   "root": 83.01,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 440416,
+   "name": "violins",
+   "lo": 82,
+   "hi": 84
+  },
+  {
+   "file": "violins_72.ogg",
+   "root": 71.99,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 426512,
+   "name": "violins",
+   "lo": 71,
+   "hi": 73
+  },
+  {
+   "file": "violins_62.ogg",
+   "root": 61.97,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 415028,
+   "name": "violins",
+   "lo": 61,
+   "hi": 64
+  },
+  {
+   "file": "violins_86.ogg",
+   "root": 86.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 440284,
+   "name": "violins",
+   "lo": 85,
+   "hi": 127
+  },
+  {
+   "file": "violins_76.ogg",
+   "root": 76.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 420220,
+   "name": "violins",
+   "lo": 74,
+   "hi": 77
+  },
+  {
+   "file": "violins_66.ogg",
+   "root": 66.03,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 371518,
+   "name": "violins",
+   "lo": 65,
+   "hi": 67
+  },
+  {
+   "file": "violins_55.ogg",
+   "root": 55.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 433464,
+   "name": "violins",
+   "lo": 0,
+   "hi": 55
+  },
+  {
+   "file": "violins_79.ogg",
+   "root": 79.0,
+   "vlo": 1,
+   "vhi": 127,
+   "loop_start": 185220,
+   "loop_end": 439316,
+   "name": "violins",
+   "lo": 78,
+   "hi": 81
+  }
+ ],
+ "attack": 0.9,
+ "release": 1.6,
+ "voices": 12
+}

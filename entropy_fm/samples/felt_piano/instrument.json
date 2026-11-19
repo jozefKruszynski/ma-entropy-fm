@@ -1,0 +1,191 @@
+{
+ "name": "Upright piano, VSCO 2 CE",
+ "zones": [
+  {
+   "file": "pp_24.ogg",
+   "root": 23.87,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 0,
+   "hi": 27
+  },
+  {
+   "file": "pp_31.ogg",
+   "root": 30.89,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 28,
+   "hi": 33
+  },
+  {
+   "file": "pp_36.ogg",
+   "root": 35.9,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 34,
+   "hi": 39
+  },
+  {
+   "file": "pp_43.ogg",
+   "root": 42.98,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 40,
+   "hi": 45
+  },
+  {
+   "file": "pp_48.ogg",
+   "root": 47.99,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 46,
+   "hi": 51
+  },
+  {
+   "file": "pp_55.ogg",
+   "root": 54.98,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 52,
+   "hi": 57
+  },
+  {
+   "file": "pp_60.ogg",
+   "root": 59.97,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 58,
+   "hi": 63
+  },
+  {
+   "file": "pp_67.ogg",
+   "root": 67.05,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 64,
+   "hi": 69
+  },
+  {
+   "file": "pp_72.ogg",
+   "root": 72.02,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 70,
+   "hi": 75
+  },
+  {
+   "file": "pp_79.ogg",
+   "root": 79.01,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 76,
+   "hi": 81
+  },
+  {
+   "file": "pp_84.ogg",
+   "root": 84.09,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 82,
+   "hi": 87
+  },
+  {
+   "file": "pp_91.ogg",
+   "root": 91.02,
+   "vlo": 1,
+   "vhi": 70,
+   "lo": 88,
+   "hi": 127
+  },
+  {
+   "file": "mf_31.ogg",
+   "root": 30.93,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 0,
+   "hi": 33
+  },
+  {
+   "file": "mf_36.ogg",
+   "root": 35.94,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 34,
+   "hi": 39
+  },
+  {
+   "file": "mf_43.ogg",
+   "root": 43.03,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 40,
+   "hi": 45
+  },
+  {
+   "file": "mf_48.ogg",
+   "root": 48.03,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 46,
+   "hi": 51
+  },
+  {
+   "file": "mf_55.ogg",
+   "root": 55.05,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 52,
+   "hi": 57
+  },
+  {
+   "file": "mf_60.ogg",
+   "root": 59.98,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 58,
+   "hi": 63
+  },
+  {
+   "file": "mf_67.ogg",
+   "root": 67.07,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 64,
+   "hi": 69
+  },
+  {
+   "file": "mf_72.ogg",
+   "root": 72.05,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 70,
+   "hi": 75
+  },
+  {
+   "file": "mf_79.ogg",
+   "root": 79.04,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 76,
+   "hi": 81
+  },
+  {
+   "file": "mf_84.ogg",
+   "root": 84.06,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 82,
+   "hi": 87
+  },
+  {
+   "file": "mf_91.ogg",
+   "root": 91.02,
+   "vlo": 71,
+   "vhi": 127,
+   "lo": 88,
+   "hi": 127
+  }
+ ],
+ "release": 0.4,
+ "voices": 16
+}
