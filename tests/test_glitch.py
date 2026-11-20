@@ -172,6 +172,10 @@ def test_every_edit_kind_keeps_the_length_and_stays_finite() -> None:
         "spectral": {"length": 0.5, "back": 0.4, "seed": 1},
         "crush": {"dur": 0.2, "factor": 4, "bits": 8},
         "gate": {"step": 0.1, "pattern": (1, 0, 1, 1), "floor": 0.05},
+        "reverse": {"length": 0.25},
+        "pitchrep": {"slice": 0.1, "repeats": 3, "rate": 2.0, "gains": (1.0, 0.9, 0.8)},
+        "bitdrop": {"dur": 0.25, "factor": 16, "bits": 4},
+        "roll": {"slices": (0.2, 0.1, 0.1, 0.05, 0.05), "gains": (0.8, 0.9, 1.0, 1.1, 1.2)},
     }
     assert set(cases) == set(glitch.EDIT_KINDS)
     for kind, params in cases.items():

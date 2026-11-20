@@ -201,6 +201,8 @@ KIT_FULL = 0.4
 KIT_SOFT = 0.6
 # the chord chops are a short accent, so their layer plays louder than the other layers to be heard
 CHOP_GAIN = 1.2
+# the electric piano sits a few dB behind the drums and the bass
+KEYS_GAIN = 0.55
 # how much of the kit, the comping and the bass each role of the form plays
 KIT_BY_ROLE = {INTRO: 0.0, BUILD: 0.6, CLIMAX: 1.0, RELEASE: 0.5, PLATEAU: 0.85, OUTRO: 0.0}
 COMP_BY_ROLE = {INTRO: 0.4, BUILD: 0.7, CLIMAX: 1.0, RELEASE: 0.7, PLATEAU: 0.85, OUTRO: 0.4}
@@ -642,7 +644,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     drums_cut = 3500.0 * 3.0**tone * dips(plan, 0.7, 1.0, 3.0)
     sweep = swells(plan, 3.0, 6.0)
     layers = {
-        "keys": Layer("keys", 1.0, None, keys_cut, 0.12, reverb=0.3, title="electric piano"),
+        "keys": Layer("keys", KEYS_GAIN, None, keys_cut, 0.12, reverb=0.3, title="electric piano"),
         "bass": Layer(
             "bass",
             1.0,

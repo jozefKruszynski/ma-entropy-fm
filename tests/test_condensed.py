@@ -120,7 +120,7 @@ def test_glitch_edits_and_drops_are_no_denser_than_in_a_full_piece() -> None:
     drops = [e for e in score.glitch.edits if e.why == "drop"]
     assert len(drops) <= 3 * 4
     per_minute = len(score.glitch.edits) / (plan.length / 60.0)
-    assert per_minute <= 4.0, per_minute
+    assert per_minute <= 12.0, per_minute
 
 
 @pytest.mark.parametrize("style", SLOW + FAST)

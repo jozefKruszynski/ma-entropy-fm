@@ -13,11 +13,21 @@ the bass, pads, strings and stabs duck from every kick.
 
 The edits are what the house plays: a stutter, a tape stop, a hard brake of 60 to 150 ms (a fast fall to nothing, a cut,
 a gap of a sixteenth, a snap back on the grid, sometimes twice in a row), a grain or spectral freeze, a crush of one
-hit, a gate chop, a beat repeat of the kit. A door, a switch, an appliance that starts or stops, a light, someone moving
-brings one of them, on the grid and at most one in a couple of bars; which are favoured is dealt by the day. The big moments
-are drop sequences: a reversed swell, a snare roll that stutters, a reversed snare, a tape stop on the whole mix, a silence,
-then the drop (stab, sub boom, taiko, the full growl and the big pattern). They come at the peaks of the day and at an anomaly;
-an anomaly in the night is a reversed swell into a distant boom, nothing else.
+hit, a gate chop, a beat repeat of the kit, a beat or half a beat played backwards, a repeat of a slice an octave up, an
+octave down or slowed (a jump, never a glide), a bit drop (a few kilohertz and three to five bits, with no filter, so it
+grates) and a roll whose repeats get shorter and louder (1/8, 1/16, 1/32). Where the kit plays, most bars get one, on the
+grid: about one in every one to two bars on a busy day and one in every two to four on a quiet one, the activity of the
+house and the energy of the day moving it between them; the ramps (a roll, a reversal, a brake) lead into the bar line, and
+the same kind rarely plays twice in a row. Most cut the whole mix; about a fifth are on an instrument of their own, the
+strings, the growl or the stabs (stuttered, reversed, gated, repeated or dropped), apart from those of the drums, and no two
+edits overlap on a bus. The hottest peaks or plateaus of a piece (one or two by the energy of the day, at most 16 bars
+each, and never where the house is calm) go all the way: an edit in nearly every bar, almost all of the whole mix, with gates that cut to silence. A door, a switch, an appliance that starts or stops, a light, someone moving brings its bar an edit that it favours
+(a door a reversal or a brake, an appliance a bit drop, a light a pitch repeat, motion a roll or a gate), and the older
+rule stays: one of the classic kinds at most every couple of bars, on the grid. Which are favoured is dealt by the day. The
+big moments are drop sequences: a reversed swell, a snare roll that stutters, a reversed snare, a tape stop on the whole mix,
+a silence, then the drop (stab, sub boom, taiko, the full growl and the big pattern). They come at the peaks of the day and
+at an anomaly; an anomaly in the night is a reversed swell into a distant boom, nothing else, and the night has no drums to
+cut.
 
 How the house steers it: the energy of the day leans the mode of the piece (quiet days slow, busy days fast, but similar days
 rotate between them): heavy at 54 to 60 beats per minute (sparse, huge hits, a held sub growl, long freezes and tape stops,
@@ -126,6 +136,13 @@ PHRASE_MARK_KINDS = ("tape", "spectral", "grain", "brake")
 TAPE_LONG_SHARE = 0.5
 
 
+class _Shape(NamedTuple):
+    """The parameters of a groove edit, and the steps of a bar that it may start on."""
+
+    params: dict[str, Any]
+    starts: tuple[int, ...]
+
+
 class Loop(NamedTuple):
     """Four chords (semitones above the root, 0 minor or 1 major) and how much their roots move (0 a vamp, 1 a chase)."""
 
@@ -205,6 +222,81 @@ MOST_DROPS = (1, 6)
 EDIT_CHANCE = 0.35
 EDIT_ENERGY = 0.35
 EDIT_HEAT = 0.3
+# the groove: in a bar where the kit plays, the chance of an edit is the least, plus what the energy of the day and the
+# heat of the bar add; a bar with an event of the house is this much more likely, and a bar is tried this many times
+GROOVE_CHANCE = 0.4
+GROOVE_ENERGY = 0.12
+GROOVE_HEAT = 0.1
+GROOVE_HOUSE_BOOST = 1.6
+GROOVE_TRIES = 3
+# the bars before a drop and after it, and the bar before a new section, that the groove leaves alone
+GROOVE_BEFORE_DROP = 1
+GROOVE_AFTER_DROP = 3
+# where a groove edit lands: the share of the instruments (strings, bass, stabs), of the kit and of the whole mix
+GROOVE_BUSES: tuple[tuple[str, float], ...] = (("whole", 0.65), ("kit", 0.12), ("instrument", 0.23))
+# the hottest peaks or plateaus of a piece go all the way: an edit in nearly every bar, almost all of the mix, gates
+# that cut to silence; one such section on a calm day, up to two on a busy one, each at most this many bars, and only
+# where the house is at least this hot, so a quiet stretch never goes extreme
+EXTREME_CHANCE = 0.95
+EXTREME_BUSES: tuple[tuple[str, float], ...] = (("whole", 0.9), ("instrument", 0.1))
+EXTREME_GATE_FLOOR = 0.0
+EXTREME_SECTIONS = (1, 2)
+EXTREME_MAX_BARS = 16
+EXTREME_MIN_HEAT = 0.5
+INSTRUMENT_BUSES: tuple[tuple[str, float], ...] = (("bass", 0.4), ("str", 0.35), ("stab", 0.25))
+KIT_BUSES: tuple[tuple[tuple[str, ...], float], ...] = (
+    (("kick", "snare", "hats"), 0.4),
+    (("snare",), 0.25),
+    (("kick",), 0.15),
+    (("hats",), 0.2),
+)
+# the weight of each kind of groove edit, before the favour of the day and the event of the house
+GROOVE_KINDS = {
+    "stutter": 2.0,
+    "roll": 1.5,
+    "reverse": 2.0,
+    "pitchrep": 2.0,
+    "bitdrop": 1.5,
+    "gate": 1.5,
+    "brake": 0.8,
+}
+# the kinds that lead into the next bar (a roll, a reversal, a brake) are more likely on the last bar of two or four
+GROOVE_RAMPS = {"roll", "reverse", "brake"}
+GROOVE_RAMP_BOOST = 2.0
+# a kind that sounded in one of the last few edits is this much less likely
+GROOVE_RECENT = 4
+GROOVE_REPEAT_PENALTY = 0.4
+# what each kind of event of the house brings to its bar; the kinds that it does not name are this likely
+GROOVE_HOUSE: dict[str, dict[str, float]] = {
+    "door": {"reverse": 3.0, "brake": 2.0, "roll": 1.0},
+    "motion": {"stutter": 2.0, "roll": 2.0, "gate": 2.0, "pitchrep": 1.0},
+    "light": {"pitchrep": 3.0, "gate": 2.0, "reverse": 1.0},
+    "appliance": {"bitdrop": 3.0, "stutter": 1.0, "brake": 1.0},
+}
+GROOVE_HOUSE_OTHER = {"stutter": 2.0, "gate": 1.0, "pitchrep": 1.0}
+GROOVE_HOUSE_UNNAMED = 0.3
+# the steps (an eighth of a beat) of a bar
+BAR_STEPS = 32
+# the gates of the groove: eight sixteenths, two beats
+GROOVE_GATES = (
+    (1, 0, 1, 1, 0, 1, 0, 1),
+    (1, 1, 0, 1, 0, 0, 1, 1),
+    (1, 0, 0, 1, 1, 0, 1, 0),
+)
+# the read speeds of a pitch repeat: an octave up, an octave down, and slowed
+PITCH_RATES = (2.0, 0.5, 2.0 / 3.0)
+# a roll of a beat and a half (the rest are a beat), a reversal of a half beat or a beat (in steps), and how a pitch repeat
+# is made: its share of sixteenth slices (the rest are eighths of two), and how much each repeat falls
+ROLL_LONG_SHARE = 0.5
+REVERSE_STEPS = (8, 16)
+PITCH_SIXTEENTH_SHARE = 0.5
+PITCH_FADE = 0.12
+STUTTER_FADE = 0.07
+GATE_FLOOR = 0.05
+BRAKE_STOP = (0.07, 0.14)
+# the sample rate and the depth of a bit drop: the held samples (44.1 kHz over this), and the bits
+BIT_DROP_FACTORS = (12, 22)
+BIT_DROP_BITS = (3, 5)
 # the drop chord comes this many bars after the start of a peak; the motif of the room follows it
 # the cheapest tier plays the accented hats alone (every other step)
 LIGHT_HAT_FLOOR = 0.35
@@ -254,6 +346,18 @@ EVENT_EDITS: dict[str, dict[str, float]] = {
     "appliance": {"crush": 3.0, "brake": 2.0, "stutter": 1.0},
 }
 DEFAULT_EDITS = {"stutter": 2.0, "gate": 1.0, "freeze": 1.0}
+# the most that one kind plays in a row, and the edits that give way to keep it so
+MOST_IN_A_ROW = 2
+GIVES_WAY = {"event", "house", "groove"}
+# the kinds of edit that each choice of the events of the house makes
+CHOICE_KINDS = {
+    "brake": {"brake"},
+    "tape": {"tape"},
+    "stutter": {"stutter", "roll"},
+    "gate": {"gate"},
+    "freeze": {"grain", "spectral"},
+    "crush": {"crush"},
+}
 GATE_PATTERNS = (
     (1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1),
     (1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1),
@@ -694,7 +798,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         "freeze": 0,
         "gate": 0,
         "crush": 0,
-        "repeat": 0,
+        "reverse": 0,
+        "pitchrep": 0,
+        "bitdrop": 0,
+        "roll": 0,
         "drop": 0,
     }
 
@@ -720,6 +827,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         t: float, layers: tuple[str, ...], slices: list[float], gains: list[float], why: str
     ) -> bool:
         return edit(t, "stutter", layers, {"slices": tuple(slices), "gains": tuple(gains)}, why)
+
+    def roll_edit(
+        t: float, layers: tuple[str, ...], slices: list[float], gains: list[float], why: str
+    ) -> bool:
+        return edit(t, "roll", layers, {"slices": tuple(slices), "gains": tuple(gains)}, why)
 
     def brake_edit(t: float, layers: tuple[str, ...], stop: float, span: float, why: str) -> bool:
         return edit(t, "brake", layers, {"stop": round(stop, 3), "span": span}, why)
@@ -772,9 +884,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             and drum_rng.random() < 0.55 + 0.4 * float(per_bar[b_end] - 0.5)
         ):
             t = b_end * bar + 3 * beat
-            if stutter_edit(t, KIT, [u16] * 2 + [u32] * 4, [1, 1, 0.9, 0.9, 0.8, 0.8], "phrase"):
+            if roll_edit(t, KIT, [u16] * 2 + [u32] * 4, [1, 1, 0.9, 0.9, 0.8, 0.8], "phrase"):
                 phrase_edits += 1
-                stats["repeat"] += 1
+                stats["roll"] += 1
         b_mid = 8 * (p - 1) + int(drum_rng.choice((3, 5)))
         level = levels.get(2 * (b_mid // 2), 0)
         if level >= 2 and drum_rng.random() < 0.4:
@@ -793,11 +905,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         level = levels.get(2 * (b_roll // 2), 0)
         if level >= 3 and drum_rng.random() < 0.35:
             t = b_roll * bar + 2 * beat
-            if any(abs(s - t) < 0.01 for s in kit_hits["snare"]) and stutter_edit(
+            if any(abs(s - t) < 0.01 for s in kit_hits["snare"]) and roll_edit(
                 t, ("snare",), [u8, u8, u16, u16], [0.8, 0.9, 1.0, 1.15], "phrase"
             ):
                 phrase_edits += 1
-                stats["stutter"] += 1
+                stats["roll"] += 1
         b_mark = 8 * (p - 1) + int(drum_rng.choice(PHRASE_MARK_BARS))
         if (
             mode.phrase_edits
@@ -854,7 +966,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         # a snare roll one bar ahead: one hit repeated, with a crescendo; the reversed snare ends on the drop
         t_roll = t_d - bar + 2 * beat
         put(t_roll, 0.4, 0.0, 0.7, "glitch:snare", "snare")
-        stutter_edit(t_roll, ("snare",), [u8, u8, u16, u16], [0.7, 0.85, 1.0, 1.2], "drop")
+        roll_edit(t_roll, ("snare",), [u8, u8, u16, u16], [0.7, 0.85, 1.0, 1.2], "drop")
         put(t_d - 1.1, 1.1, 0.0, 0.9, "glitch:revsnare", "fx")
         tape_edit(t_d - 0.5 * beat, WHOLE, 0.38, 0.5 * beat, 0.0, "drop")
         for event in taiko.roll(t_d - bar, t_d, "odaiko", 0.2, 0.95, 0.6, 0.11):
@@ -921,7 +1033,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             pass
         if not weights:
             continue
-        choice = weighted(edit_rng, list(weights), list(weights.values()))
+        next_to = _kinds_next_to(book, second)
+        fresh = {k: w for k, w in weights.items() if not CHOICE_KINDS[k] & next_to}
+        choice = weighted(edit_rng, list(fresh or weights), list((fresh or weights).values()))
         t_beat = math.ceil(second / beat) * beat
         t_bar = math.ceil((second + 0.4) / bar) * bar
         done = False
@@ -955,10 +1069,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             end = t_bar
         elif choice == "stutter":
             if kit_on and edit_rng.random() < 0.4:
-                done = stutter_edit(
+                done = roll_edit(
                     t_beat, KIT, [u16] * 2 + [u32] * 4, [1, 1, 0.9, 0.9, 0.8, 0.8], "event"
                 )
-                stats["repeat"] += int(done)
+                stats["roll"] += int(done)
             else:
                 pick = int(edit_rng.integers(0, 3))
                 slices, gains = (
@@ -999,6 +1113,91 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 where = chord_at(second)
                 put(snap(second) + beat, 4.0, float(where.root), 0.35, "glitch:boomfar", "fx")
                 far_booms += 1
+
+    # -- the groove: where the kit plays, most bars may get an edit of their own, on the grid; the activity of the house
+    # moves the chance, and an event of the house in a bar brings it and picks the kind
+    groove_edits = 0
+    groove_rng = plan.rng("glitch groove")
+    house_bars: dict[int, str] = {}
+    extreme_bars = _extreme_bars(sections, per_bar, bar, energy)
+    for second, _strength, what in triggers:
+        house_bars.setdefault(int(second / bar), what)
+    for b in range(2, bars - 1):
+        if (
+            levels.get(2 * (b // 2), 0) == 0
+            or b + 1 in section_starts
+            or any(d - GROOVE_BEFORE_DROP <= b < d + GROOVE_AFTER_DROP for d in drops)
+        ):
+            continue
+        extreme = b in extreme_bars
+        chance = (
+            EXTREME_CHANCE
+            if extreme
+            else GROOVE_CHANCE + GROOVE_ENERGY * energy + GROOVE_HEAT * per_bar[b]
+        )
+        bus_weights = EXTREME_BUSES if extreme else GROOVE_BUSES
+        visit = house_bars.get(b)
+        if visit is not None:
+            chance = min(chance * GROOVE_HOUSE_BOOST, 1.0)
+        if groove_rng.random() > chance:
+            continue
+        ordered = sorted(book.edits, key=lambda e: e.t)
+        middle = b * bar + bar / 2.0
+        before = [e.kind for e in ordered if e.t <= middle]
+        next_to = _kinds_next_to(book, middle)
+        for _ in range(GROOVE_TRIES):
+            category = weighted(
+                groove_rng, [c for c, _ in bus_weights], [w for _, w in bus_weights]
+            )
+            weights = {}
+            for kind, base in GROOVE_KINDS.items():
+                if (kind == "brake" and category != "whole") or kind in next_to:
+                    continue
+                weight = base * favour.get(_family(kind), 1.0)
+                if visit is not None:
+                    house = GROOVE_HOUSE.get(visit, GROOVE_HOUSE_OTHER)
+                    weight *= house.get(kind, GROOVE_HOUSE_UNNAMED)
+                if kind in GROOVE_RAMPS and b % 4 == 3:
+                    weight *= GROOVE_RAMP_BOOST
+                weights[kind] = weight * GROOVE_REPEAT_PENALTY ** before[-GROOVE_RECENT:].count(
+                    kind
+                )
+            if not weights:
+                break
+            kind = weighted(groove_rng, list(weights), list(weights.values()))
+            params, starts = GROOVE_SHAPES[kind](groove_rng, beat)
+            if extreme and kind == "gate":
+                params = {**params, "floor": EXTREME_GATE_FLOOR}
+            t = b * bar + int(groove_rng.choice(starts)) * step
+            reach = glitch.edit_extent(kind, params)
+            if category == "instrument":
+                open_buses = [(k, w) for k, w in INSTRUMENT_BUSES if alive((k,), t, t + reach)]
+                if not open_buses:
+                    continue
+                cut_buses: tuple[str, ...] = (
+                    weighted(groove_rng, [k for k, _ in open_buses], [w for _, w in open_buses]),
+                )
+            elif category == "kit":
+                cut_buses = weighted(
+                    groove_rng, [k for k, _ in KIT_BUSES], [w for _, w in KIT_BUSES]
+                )
+            else:
+                cut_buses = ("pad", "str", "wash", "bass") if kind == "gate" else WHOLE
+            if edit(t, kind, cut_buses, params, "groove" if visit is None else "house"):
+                stats[kind] += 1
+                groove_edits += 1
+                break
+
+    # a kind that would play a third time in a row gives way; the edits of the structure stay
+    kept: list[Edit] = []
+    for cut in sorted(book.edits, key=lambda e: e.t):
+        if all(e.kind == cut.kind for e in kept[-MOST_IN_A_ROW:]) and len(kept) >= MOST_IN_A_ROW:
+            if cut.why in GIVES_WAY:
+                continue
+            if kept[-1].why in GIVES_WAY:
+                kept.pop()
+        kept.append(cut)
+    book.edits = kept
 
     # -- the layers
     count_curve = np.full(count, 3700.0)
@@ -1053,7 +1252,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             f"{stab_count} stabs, washes '{wash_name}'; the heat of the house picks the row of the growl, the pattern of the kit and how often it is glitched."
         ),
         (
-            f"Edits (favoured: {favour_name}): {kinds or 'none'}; {event_edits} from the events of the house, {phrase_edits} from the structure; "
+            f"Edits (favoured: {favour_name}): {kinds or 'none'}; {event_edits} from the events of the house, {groove_edits} from the groove of the bars, {phrase_edits} from the structure; "
             f"{drop_count} drops (the big moments), {far_booms} distant booms in the night."
         ),
     ]
@@ -1069,9 +1268,113 @@ def tonic_name_of(pitch_class: int) -> str:
     return ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")[pitch_class % 12]
 
 
+def _roll_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    u8, u16, u32 = beat / 2.0, beat / 4.0, beat / 8.0
+    if rng.random() < ROLL_LONG_SHARE:
+        return _Shape(
+            {"slices": (u8, u16, u16, *[u32] * 4), "gains": (0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.2)},
+            (BAR_STEPS - 12,),
+        )
+    return _Shape(
+        {"slices": (u16, u16, *[u32] * 4), "gains": (0.75, 0.85, 0.9, 1.0, 1.1, 1.2)},
+        (BAR_STEPS - 8,),
+    )
+
+
+def _reverse_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    steps = int(rng.choice(REVERSE_STEPS))
+    last = BAR_STEPS - steps
+    return _Shape({"length": steps * beat / 8.0}, (last, last, last - 8, last - 16))
+
+
+def _pitch_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    rate = float(PITCH_RATES[int(rng.integers(0, len(PITCH_RATES)))])
+    if rng.random() < PITCH_SIXTEENTH_SHARE:
+        slice_s, repeats = beat / 4.0, int(rng.integers(3, 5))
+    else:
+        slice_s, repeats = beat / 2.0, 2
+    gains = tuple(1.0 - PITCH_FADE * i for i in range(repeats))
+    params = {"slice": slice_s, "repeats": repeats, "rate": rate, "gains": gains}
+    return _Shape(params, (24, 24, 16, 8))
+
+
+def _bitdrop_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    params = {
+        "dur": beat / 2.0 if rng.random() < 0.5 else beat,
+        "factor": int(rng.integers(BIT_DROP_FACTORS[0], BIT_DROP_FACTORS[1] + 1)),
+        "bits": int(rng.integers(BIT_DROP_BITS[0], BIT_DROP_BITS[1] + 1)),
+    }
+    return _Shape(params, (0, 16, 24, 8))
+
+
+def _gate_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    pattern = GROOVE_GATES[int(rng.integers(0, len(GROOVE_GATES)))]
+    return _Shape({"step": beat / 2.0, "pattern": pattern, "floor": GATE_FLOOR}, (16, 8))
+
+
+def _brake_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    stop = round(float(rng.uniform(*BRAKE_STOP)), 3)
+    return _Shape({"stop": stop, "span": beat / 4.0}, (BAR_STEPS - 2,))
+
+
+def _stutter_shape(rng: np.random.Generator, beat: float) -> _Shape:
+    if rng.random() < 0.5:
+        return _Shape({"slices": (beat / 2.0,) * 4, "gains": (1.0, 0.9, 0.8, 0.7)}, (16, 8))
+    gains = tuple(1.0 - STUTTER_FADE * i for i in range(8))
+    return _Shape({"slices": (beat / 4.0,) * 8, "gains": gains}, (16, 8))
+
+
+# the parameters of each kind of groove edit, and the steps of a bar (an eighth of a beat) that it may start on; the ramps
+# (a roll, a reversal, a brake) end on the bar line, the rest start on a beat or a half beat
+GROOVE_SHAPES: dict[str, Callable[[np.random.Generator, float], _Shape]] = {
+    "stutter": _stutter_shape,
+    "roll": _roll_shape,
+    "reverse": _reverse_shape,
+    "pitchrep": _pitch_shape,
+    "bitdrop": _bitdrop_shape,
+    "gate": _gate_shape,
+    "brake": _brake_shape,
+}
+
+
+def _extreme_bars(
+    sections: list[tuple[float, float, str, float]], per_bar: list[float], bar: float, energy: float
+) -> set[int]:
+    """
+    Return the bars where the groove edits go all the way: the start of the hottest peaks or plateaus that are hot enough.
+
+    :param sections: The sections of the form, as seconds, role and level.
+    :param per_bar: The heat of the house in each bar.
+    :param bar: The length of a bar in seconds.
+    :param energy: The energy of the day, which allows a second extreme section.
+    """
+    candidates = []
+    for first, last, role, _ in sections:
+        a, b = round(first / bar), round(last / bar)
+        heat = float(np.mean(per_bar[a:b])) if b > a else 0.0
+        if role in {CLIMAX, PLATEAU} and heat >= EXTREME_MIN_HEAT:
+            candidates.append((heat, a, min(b, a + EXTREME_MAX_BARS)))
+    low, high = EXTREME_SECTIONS
+    chosen = sorted(candidates, reverse=True)[: low + round((high - low) * energy)]
+    return {x for _, a, b in chosen for x in range(a, b)}
+
+
+def _kinds_next_to(book: _Book, t: float) -> set[str]:
+    """Return the kinds of the edits just before and just after a second."""
+    before = max((e for e in book.edits if e.t <= t), key=lambda e: e.t, default=None)
+    after = min((e for e in book.edits if e.t > t), key=lambda e: e.t, default=None)
+    return {e.kind for e in (before, after) if e is not None}
+
+
 def _family(kind: str) -> str:
     """Return the family of a kind of edit that the day may favour."""
-    return {"crush": "stutter", "tape": "tape"}.get(kind, kind)
+    return {
+        "crush": "stutter",
+        "roll": "stutter",
+        "bitdrop": "stutter",
+        "pitchrep": "freeze",
+        "reverse": "tape",
+    }.get(kind, kind)
 
 
 def _dips(plan: Plan) -> np.ndarray:

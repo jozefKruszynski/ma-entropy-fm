@@ -73,7 +73,7 @@ class Texture:
 
 @dataclass
 class Edit:
-    """A splice of the mix of Cinematic Glitch: a stutter, a tape stop, a brake, a freeze, a crush or a gate chop."""
+    """A splice of a bus of Cinematic Glitch: a stutter, a tape stop, a brake, a freeze, a crush, a gate chop, a reversal, a pitch repeat, a bit drop or a roll."""
 
     # where it starts, in seconds of the piece, on the grid
     t: float
@@ -86,7 +86,7 @@ class Edit:
     back: float
     # what the kind needs: lengths, gains, a seed
     params: dict[str, Any] = field(default_factory=dict)
-    # what brought it: a kind of event of the house, or the structure of the piece
+    # what brought it: an event of the house, the groove of the bars, or the structure of the piece
     why: str = ""
 
 

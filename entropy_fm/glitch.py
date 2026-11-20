@@ -12,7 +12,13 @@ filtered back, and every edit is a splice with a short raised-cosine fade at bot
 * grain freeze and spectral freeze: a moment held, as Hann grains or as a stretched spectrum;
 * reverse swell: a sound with its tail, turned round, that ends on a hit (a note of the score);
 * crush: a short sample-rate and bit-depth reduction of one hit, pre-filtered and filtered again after;
-* gate chop: a rhythmic gate whose edges are smoothed.
+* gate chop: a rhythmic gate whose edges are smoothed;
+* reverse: a beat or half a beat of a bus played backwards, so that its hit lands on the next grid line;
+* pitch repeat: a slice repeated at a fixed speed (an octave up, an octave down, or slowed), a jump and never a glide;
+* bit drop: a sample rate of a few kilohertz and three to five bits, with no filter before it, so it aliases and grates;
+* roll: repeats of a slice that get shorter (1/8, 1/16, 1/32) and louder.
+
+The new kinds are slices, reversals and index tricks on the buffer (no FFT), so that they can be dealt often.
 
 The sounds are made as notes (a swell, a stab, one bass note) so that they are cached like the voices of the
 library; the edits are made on the buses of the render (`glitch_render`).
@@ -420,6 +426,21 @@ def splice(
     buf[s:e] = buf[s:e] * (1.0 - w) + piece * w
 
 
+def _repeats(cap: np.ndarray, lens: list[int], gains: list[float] | None, f: int) -> np.ndarray:
+    """Return the repeats of the start of `cap`, one per length, overlapped by `f` samples with complementary ramps."""
+    total = sum(lens)
+    piece = np.zeros((total + f, 2), np.float32)
+    pos = 0
+    for i, length in enumerate(lens):
+        last = i == len(lens) - 1
+        seg = cap[: length if last else length + f]
+        w = _ramp(len(seg), 0 if i == 0 else f, f)[:, None]
+        g = gains[i] if gains else 1.0
+        piece[pos : pos + len(seg)] += seg * w * g
+        pos += length
+    return piece[:total]
+
+
 def stutter(
     buf: np.ndarray,
     t0: float,
@@ -435,18 +456,88 @@ def stutter(
     s = int(t0 * SR)
     f = int(fade_s * SR)
     lens = [int(x * SR) for x in slices]
-    total = sum(lens)
     cap = buf[s : s + max(lens) + f].copy()
-    piece = np.zeros((total + f, 2), np.float32)
-    pos = 0
-    for i, length in enumerate(lens):
-        last = i == len(lens) - 1
-        seg = cap[: length if last else length + f].copy()
-        w = _ramp(len(seg), 0 if i == 0 else f, f)[:, None]
-        g = gains[i] if gains else 1.0
-        piece[pos : pos + len(seg)] += seg * w * g
-        pos += length
-    splice(buf, s, piece[:total], fade_s, fade_s)
+    splice(buf, s, _repeats(cap, lens, gains, f), fade_s, fade_s)
+
+
+def reverse_chunk(buf: np.ndarray, t0: float, length_s: float, fade_s: float = 0.003) -> None:
+    """Play `length_s` of a buffer from `t0` backwards, crossfading with the original at both ends."""
+    s = int(t0 * SR)
+    seg = buf[s : s + int(length_s * SR)]
+    splice(buf, s, seg[::-1].copy(), fade_s, fade_s)
+
+
+def pitch_repeat(  # noqa: PLR0913, PLR0917
+    buf: np.ndarray,
+    t0: float,
+    slice_s: float,
+    repeats: int,
+    rate: float,
+    gains: list[float] | None = None,
+    fade_s: float = 0.0025,
+) -> None:
+    """
+    Repeat a slice of a buffer from `t0` at a fixed read speed: 2 is an octave up, 0.5 an octave down.
+
+    A jump to another pitch that holds, never a glide. The slice is read by linear interpolation (after a two-tap
+    average when it is read faster than it was made, so that the highs do not fold much), which costs a few
+    array operations and no transform.
+
+    :param buf: The stereo buffer, edited in place.
+    :param t0: Where the first repeat starts, in seconds of the buffer.
+    :param slice_s: The length of each repeat, in seconds of the output.
+    :param repeats: How many repeats.
+    :param rate: The read speed of the slice.
+    :param gains: The gain of each repeat.
+    :param fade_s: The overlap of the repeats.
+    """
+    s = int(t0 * SR)
+    n = int(slice_s * SR)
+    f = int(fade_s * SR)
+    need = int((n + f) * rate) + 2
+    src = buf[s : s + need]
+    if len(src) < need:
+        src = np.pad(src, ((0, need - len(src)), (0, 0)))
+    if rate > 1.0:
+        src = (src[:-1] + src[1:]) * np.float32(0.5)
+        src = np.concatenate([src, src[-1:]])
+    pos = np.arange(n + f) * rate
+    j0 = pos.astype(np.int64)
+    fr = (pos - j0)[:, None].astype(np.float32)
+    seg = src[j0] * (1.0 - fr) + src[j0 + 1] * fr
+    splice(buf, s, _repeats(seg, [n] * repeats, gains, f), fade_s, fade_s)
+
+
+def bit_drop(buf: np.ndarray, t0: float, dur: float, factor: int = 16, bits: int = 4) -> None:
+    """
+    Drop the sample rate to a few kilohertz and the depth to a few bits, with no filter before or after.
+
+    Everything above the new Nyquist folds back and the steps of the rounding are heard as grit: much harsher than
+    `crush`. The level of the stretch is kept.
+
+    :param buf: The stereo buffer, edited in place.
+    :param t0: Where it starts, in seconds of the buffer.
+    :param dur: How long it lasts.
+    :param factor: The samples that each held value lasts for (44.1 kHz over this is the new rate).
+    :param bits: The depth in bits.
+    """
+    s = int(t0 * SR)
+    seg = buf[s : s + int(dur * SR)]
+    if not len(seg):
+        return
+    held = np.repeat(seg[::factor], factor, axis=0)[: len(seg)]
+    peak = float(np.abs(seg).max()) + 1e-9
+    levels = np.float32(2 ** (bits - 1))
+    out = np.round(held / peak * levels) / levels * peak
+    ref = float(np.sqrt(np.mean(seg.astype(np.float64) ** 2))) + 1e-9
+    got = float(np.sqrt(np.mean(out.astype(np.float64) ** 2))) + 1e-9
+    splice(
+        buf,
+        s,
+        (out * np.float32(min(ref / got, BIT_DROP_MAX_GAIN))).astype(np.float32),
+        0.002,
+        0.004,
+    )
 
 
 def tape_stop(  # noqa: PLR0913, PLR0917
@@ -620,13 +711,31 @@ def gate_chop(  # noqa: PLR0913, PLR0917
     buf[s:e] *= sm[: e - s, None].astype(np.float32)
 
 
-EDIT_KINDS = ("stutter", "tape", "brake", "grain", "spectral", "crush", "gate")
+# the most that a bit drop may lift a stretch to hold its level
+BIT_DROP_MAX_GAIN = 1.5
+EDIT_KINDS = (
+    "stutter",
+    "tape",
+    "brake",
+    "grain",
+    "spectral",
+    "crush",
+    "gate",
+    "reverse",
+    "pitchrep",
+    "bitdrop",
+    "roll",
+)
 
 
 def edit_extent(kind: str, params: dict[str, Any]) -> float:
     """Return how many seconds from its start an edit changes."""
     extents = {
         "stutter": lambda p: sum(p["slices"]) + 0.01,
+        "roll": lambda p: sum(p["slices"]) + 0.01,
+        "reverse": lambda p: p["length"] + 0.01,
+        "pitchrep": lambda p: p["slice"] * p["repeats"] + 0.01,
+        "bitdrop": lambda p: p["dur"] + 0.01,
         "tape": lambda p: p["span"],
         "brake": lambda p: p["span"],
         "grain": lambda p: p["length"] + 0.06,
@@ -646,6 +755,23 @@ def edit_history(kind: str, params: dict[str, Any]) -> float:
     return 0.02
 
 
+def _apply_slice_edit(buf: np.ndarray, t0: float, kind: str, params: dict[str, Any]) -> None:
+    """Make a reversal, a pitch repeat or a bit drop."""
+    if kind == "reverse":
+        reverse_chunk(buf, t0, float(params["length"]))
+    elif kind == "pitchrep":
+        pitch_repeat(
+            buf,
+            t0,
+            float(params["slice"]),
+            int(params["repeats"]),
+            float(params["rate"]),
+            list(params["gains"]),
+        )
+    else:
+        bit_drop(buf, t0, float(params["dur"]), int(params["factor"]), int(params["bits"]))
+
+
 def apply_edit(buf: np.ndarray, t0: float, kind: str, params: dict[str, Any]) -> None:
     """
     Make one edit on a stereo buffer, in place.
@@ -655,7 +781,9 @@ def apply_edit(buf: np.ndarray, t0: float, kind: str, params: dict[str, Any]) ->
     :param kind: One of `EDIT_KINDS`.
     :param params: What the kind needs (see the composer).
     """
-    if kind == "stutter":
+    if kind in {"reverse", "pitchrep", "bitdrop"}:
+        _apply_slice_edit(buf, t0, kind, params)
+    elif kind in {"stutter", "roll"}:
         stutter(buf, t0, list(params["slices"]), list(params["gains"]))
     elif kind == "tape":
         tape_stop(buf, t0, float(params["stop"]), t0 + float(params["span"]), float(params["wind"]))
