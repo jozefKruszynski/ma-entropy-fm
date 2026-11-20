@@ -30,6 +30,7 @@ from entropy_fm.library import (
     quiet_areas,
 )
 from entropy_fm.plan import condensed_seconds
+from entropy_fm.styles import STYLES
 from entropy_fm.timeline import EntityInfo, VoiceKind
 from music_assistant.mass import MusicAssistant
 from tests import fake_hass as fake_module
@@ -361,7 +362,6 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
         "ambient": 420,
         "berlin_school": 420,
         "lofi": 300,
-        "minimal": 300,
         "ritual": 420,
         "glitch": 300,
     }
@@ -386,7 +386,7 @@ async def test_a_condensed_soundscape_of_today_still_needs_three_hours_of_the_da
     four_hours = int(4 * 3600 / provider._compression)  # noqa: SLF001
     assert not provider._day_tracks("kitchen", "Kitchen", day, two_hours, None)  # noqa: SLF001
     tracks = provider._day_tracks("kitchen", "Kitchen", day, four_hours, None)  # noqa: SLF001
-    assert len(tracks) == 6
+    assert len(tracks) == len(STYLES)
     assert two_hours * provider._compression < MIN_SCAPE_SECONDS_OF_DAY  # noqa: SLF001
 
     async def early() -> datetime:

@@ -2,7 +2,7 @@
 
 Entropy FM is a community provider for [Music Assistant](https://music-assistant.io) that turns the
 history of your [Home Assistant](https://www.home-assistant.io) into generative soundscapes: one long,
-slowly evolving piece for each room and each day, in six styles. Your house does not write the
+slowly evolving piece for each room and each day, in five styles. Your house does not write the
 notes. It steers the texture, the density, the brightness, the space and the movement of music that
 a generative system plays. The audio is made on your server while it plays, from the history it
 reads from your own Home Assistant and from CC0 samples that ship with the provider. Nothing leaves
@@ -19,12 +19,12 @@ the Music Assistant team. Questions and problems go to the
 |---|---|
 | Artist | A Home Assistant area, such as "Kitchen", and one more, "Whole House" |
 | Album | One day of one area: "Kitchen, Tue 17 Nov" |
-| Track | The soundscape of that day, 10 to 22 minutes (5 to 7 when *Piece length* is Condensed), with a title of its own: "Dishwasher at Dusk (Ambient)". Each style you offer is its own version, so an album has up to six tracks. |
+| Track | The soundscape of that day, 10 to 22 minutes (5 to 7 when *Piece length* is Condensed), with a title of its own: "Dishwasher at Dusk (Ambient)". Each style you offer is its own version, so an album has up to five tracks. |
 
 **Titles and descriptions.** Every track is named from what the day was like: the busiest hour, the
 kind of thing that ran (a dishwasher, a hob, a door at night), the temperature, the weekday and how busy it
 was, in the words of its style: "Dishwasher at Dusk (Ambient)", "Sequencer for a Busy Kitchen (Berlin School)",
-"Door Fault 14:12 (Cinematic Glitch)", ceremonial for Ritual, warm for Lo-fi, sparse and geometric for Minimal.
+"Door Fault 14:12 (Cinematic Glitch)", ceremonial for Ritual, warm for Lo-fi.
 The same room, day and style always give the same title; the title of today can change as the day goes on, but
 only once an hour. Titles hold kinds of things and times, never an entity id or a name, and a day without
 history, or Home Assistant being away, gives a plain title of the style. The description of a track is a
@@ -36,7 +36,7 @@ the weekday, what kind of day it was). Titles and descriptions follow the langua
 and are English otherwise (see *Known limitations* for when a changed title shows).
 
 A soundscape is as long as its day was busy, between 10 and 22 minutes (or, as a condensed piece,
-about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi, Minimal and Cinematic
+about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi and Cinematic
 Glitch, whatever the day), and the day is spread over it in order: the night is sparse and dark, the morning brightens, the busy part of the day is
 denser and warmer, the evening is fuller, the late night thins out again. A soundscape of today
 needs three hours of the day to have happened. Tracks can be seeked, and the same room, day and
@@ -47,7 +47,6 @@ style always sound the same.
 | Ambient | Tape loops of different lengths that phase against each other, a felt piano, no beat |
 | Berlin School | Interlocking sequencer lines that mutate by rule, strings, choir and a slow lead, and in the busy day a soft kick, warm toms and a light shaker under the grid |
 | Lo-fi | A boom-bap band that never plays the loop the same way twice, electric piano, a little vinyl crackle |
-| Minimal | Euclidean percussion with a shuffle, a short figure that mutates, a deep rolling bass, 118 to 124 BPM |
 | Ritual | One plucked line in a Japanese scale, answered off the beat by a slit drum and a woodblock, over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko |
 | Cinematic Glitch | Film-score swells and brass stabs, a growling bass and hard half-time drums, cut up by the doors, switches and appliances of the house |
 
@@ -113,16 +112,16 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 | Whole House uses only these rooms | on | on, off | On: the *Whole House* soundscape is made of the ticked rooms only (every room when none is ticked). Off: it is made of every room, whatever is ticked. |
 | Hide quiet rooms | on | on, off | Do not offer a room in which nothing that would make a note or an event (a door, a motion sensor, a light, an appliance and the like) has changed over the days you can browse. A room that has only temperature, humidity, sun or other static sensors after the role filtering counts as quiet too. A room that is merely quiet on one day still offers that day. |
 | Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) as soon as they are over, even after Home Assistant purges its history. Hearting a room does the same. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
-| Styles offered | all six | any of the six styles | Which styles each day comes in, as versions of the same soundscape. |
-| Default style | Ambient | one of the six styles | The style that an id without a version plays, and that the *All rooms* pre-render uses for every room. It is always offered. The library lists every style that is offered, not only this one. |
+| Styles offered | all five | any of the five styles | Which styles each day comes in, as versions of the same soundscape. |
+| Default style | Ambient | one of the five styles | The style that an id without a version plays, and that the *All rooms* pre-render uses for every room. It is always offered. The library lists every style that is offered, not only this one. |
 
 ### Sound
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Minimal, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play (a full piece is read from its day when it is listed). |
+| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play (a full piece is read from its day when it is listed). |
 | Key | D | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | The root note that the pitches are tuned to; the key of a day walks away from it and back. |
-| Scale | Dorian | Dorian, Natural minor (Aeolian), Mixolydian, Lydian, Major (Ionian), Minor pentatonic, Major pentatonic | The scale of the pieces. A style that does not have the scale uses its own: Berlin School and Minimal are in a minor mode, Ritual keeps a Japanese pentatonic, Cinematic Glitch is in aeolian or phrygian. |
+| Scale | Dorian | Dorian, Natural minor (Aeolian), Mixolydian, Lydian, Major (Ionian), Minor pentatonic, Major pentatonic | The scale of the pieces. A style that does not have the scale uses its own: Berlin School is in a minor mode, Ritual keeps a Japanese pentatonic, Cinematic Glitch is in aeolian or phrygian. |
 | Activity offset | 0 | -50 to 50 | Points added to how lively the house seems. The activity brings layers in and out and sets how dense and how fast they are; it never writes notes. |
 | Character of the day | on | on, off | Baseline, surprise, the palette of the day and the drift of the key. Off: the plain sound, and no extra history is read. |
 | Include presence | off | on, off | Also play persons and device trackers, which tells who is home (advanced). |
@@ -167,7 +166,6 @@ CPU milliseconds per second of audio, kitchen, cold, one core:
 | ambient | 13.8 | 22.9 | 24.2 |
 | berlin_school | 18.0 | 43.2 | 46.0 |
 | lofi | 17.5 | 30.3 | 30.5 |
-| minimal | 10.8 | 20.1 | 22.8 |
 | ritual | 14.9 | 34.6 | 32.6 |
 | glitch (Cinematic Glitch) | 15.8 | 46.6 | 45.5 |
 | budget | 20 | 60 | 120 |
@@ -197,7 +195,7 @@ Standard for a whole day.
 **Auto** (the default) renders a few seconds of a small invented house in each tier when the
 provider starts and measures the CPU time one second of audio takes on this machine. It does that
 with the dearest style that is offered (Cinematic Glitch when it is; otherwise Berlin School, then
-Ritual, Lo-fi, Ambient, Minimal), and picks the richest tier that would use less than 30 percent
+Ritual, Lo-fi, Ambient), and picks the richest tier that would use less than 30 percent
 of one core in real time. A tier that Auto picks therefore fits every style that is offered, not
 only the cheap ones. The benchmark takes about 20 seconds once, on a background thread (it renders a short stretch of
 the invented house twice per tier and times the second pass), and its
@@ -220,7 +218,7 @@ house in the default style. It works on one track at a time, in a worker thread 
 with a pause after every second of audio, and waits while any Entropy FM stream is playing. It
 stops when the provider unloads, does nothing when the cache is off, never evicts anything to make
 room (it stops at 80 percent of the cache size) and logs one line per run. A track takes a few
-minutes in the background, so six styles of five rooms take hours on a Raspberry Pi: on a small
+minutes in the background, so five styles of five rooms take hours on a Raspberry Pi: on a small
 machine keep *Keep every day forever* short, or choose *Off*.
 
 **Many streams at once.** Each stream renders its own pieces, a block of one second at a time, so

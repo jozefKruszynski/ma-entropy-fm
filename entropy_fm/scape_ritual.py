@@ -293,6 +293,14 @@ MOTIF_OCTAVE_STEPS = 5
 CELL_SLOTS = 8.0
 WASH_SECONDS = 24.0
 DRONE_STEP = 18.0
+# the bus gains that make the plucked line the lead: the drone sits under it and the two woods answer a few dB below it
+DRONE_GAIN = 0.24
+SUB_GAIN = 0.22
+PLUCK_GAIN = 1.5
+WASH_GAIN = 0.7
+SLIT_GAIN = 2.3
+BLOCK_GAIN = 30.0
+TAIKO_GAIN = 1.2
 DRONE_OVERLAP = 4.5
 
 
@@ -1012,17 +1020,27 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     )
     layers = {
         "drone": Layer(
-            "drone", 1.0, drone_presence, drone_cut, 0.0, reverb=0.4, title="choir drone, breathing"
+            "drone",
+            DRONE_GAIN,
+            drone_presence,
+            drone_cut,
+            0.0,
+            reverb=0.4,
+            title="choir drone, breathing",
         ),
-        "sub": Layer("sub", 0.9, drone_presence, None, 0.0, reverb=0.1, title="round sub"),
-        "wash": Layer("wash", 1.0, wash_presence, None, 0.0, reverb=0.8, title="stretched washes"),
-        "plucks": Layer("plucks", 1.0, None, pluck_cut, 0.0, reverb=0.62, title="plucked line"),
-        "slit": Layer("slit", 1.0, None, None, 0.0, reverb=0.5, title="slit drum"),
-        "block": Layer("block", 1.0, None, block_cut, 0.0, reverb=0.5, title="woodblock"),
+        "sub": Layer("sub", SUB_GAIN, drone_presence, None, 0.0, reverb=0.1, title="round sub"),
+        "wash": Layer(
+            "wash", WASH_GAIN, wash_presence, None, 0.0, reverb=0.8, title="stretched washes"
+        ),
+        "plucks": Layer(
+            "plucks", PLUCK_GAIN, None, pluck_cut, 0.0, reverb=0.62, title="plucked line"
+        ),
+        "slit": Layer("slit", SLIT_GAIN, None, None, 0.0, reverb=0.5, title="slit drum"),
+        "block": Layer("block", BLOCK_GAIN, None, block_cut, 0.0, reverb=0.5, title="woodblock"),
         "clack": Layer("clack", 1.0, None, None, 0.0, reverb=0.65, title="shishi-odoshi"),
         "lead": Layer("lead", 1.0, None, None, 0.0, reverb=0.6, title="chant leader"),
-        "taiko": Layer("taiko", 1.0, None, None, 0.0, reverb=0.5, title="taiko"),
-        "heart": Layer("heart", 1.0, None, None, 0.0, reverb=0.25, title="heartbeat"),
+        "taiko": Layer("taiko", TAIKO_GAIN, None, None, 0.0, reverb=0.5, title="taiko"),
+        "heart": Layer("heart", TAIKO_GAIN, None, None, 0.0, reverb=0.25, title="heartbeat"),
     }
     space = np.clip(0.5 + 0.25 * plan.humid + 0.2 * swell + 0.1 * plan.night, 0.0, 0.95)
     score = Score(
@@ -1032,8 +1050,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         [],
         space,
         events=list(plan.events),
-        compress_db=-15.0,
-        level_db=-18.8,
+        compress_db=-17.0,
+        level_db=-16.6,
     )
     plan.choices["patch"] = str(patch)
     plan.choices[MOTIF_CHOICE] = str(motif_played)

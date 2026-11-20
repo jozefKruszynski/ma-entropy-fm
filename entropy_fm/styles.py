@@ -1,9 +1,9 @@
 """
-The five styles of Entropy FM: Ambient, Berlin School, Lo-fi, Minimal and Ritual.
+The five styles of Entropy FM: Ambient, Berlin School, Lo-fi, Ritual and Cinematic Glitch.
 
 A style is a name, the modes it allows, a tempo range where it has a pulse, and how it is listed in the
 library. What it sounds like is decided by its composer (`scape_ambient`, `scape_berlin`, `scape_lofi`,
-`scape_minimal`, `scape_ritual`), a generative system with a vocabulary of its own.
+`scape_ritual`, `scape_glitch`), a generative system with a vocabulary of its own.
 
 The module imports nothing from Music Assistant.
 """
@@ -69,15 +69,6 @@ LOFI = Style(
     description="A dusty swung boom-bap loop, electric piano chords on jazzy progressions, a round bass, vinyl.",
     genres=("Lo-fi", "Chillhop", "Generative"),
 )
-MINIMAL = Style(
-    key="minimal",
-    title="Minimal",
-    version="Minimal",
-    modes=("aeolian", "dorian", "phrygian", "mixolydian"),
-    tempo=(118.0, 124.0),
-    description="A hypnotic 4/4 with a soft kick and shuffled percussion, a short figure that evolves, a deep rolling bass.",
-    genres=("Electronic", "Minimal", "Generative"),
-)
 RITUAL = Style(
     key="ritual",
     title="Ritual",
@@ -97,7 +88,7 @@ GLITCH = Style(
     genres=("Electronic", "Cinematic", "Generative"),
 )
 STYLES: dict[str, Style] = {
-    style.key: style for style in (AMBIENT, BERLIN_SCHOOL, LOFI, MINIMAL, RITUAL, GLITCH)
+    style.key: style for style in (AMBIENT, BERLIN_SCHOOL, LOFI, RITUAL, GLITCH)
 }
 
 

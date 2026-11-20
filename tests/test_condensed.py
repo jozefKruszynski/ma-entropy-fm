@@ -27,7 +27,7 @@ from .pitch_tools import find_glides, noise_floor_db
 from .scape_tools import demo, window
 
 SLOW = ["ambient", "berlin_school", "ritual"]
-FAST = ["lofi", "minimal", "glitch"]
+FAST = ["lofi", "glitch"]
 SCRIPTS = Path(__file__).parents[1] / "scripts"
 
 
@@ -150,7 +150,7 @@ def test_a_condensed_piece_lands_in_the_loudness_band(style: str) -> None:
     assert numbers["short_max"] <= numbers["integrated"] + 3.0, numbers
 
 
-@pytest.mark.parametrize("style", ["ambient", "ritual", "lofi", "minimal"])
+@pytest.mark.parametrize("style", ["ambient", "ritual", "lofi"])
 def test_a_condensed_piece_has_no_continuous_pitch_glide(style: str) -> None:
     """No fall and no rise of more than three semitones in a second and a half."""
     score, plan = demo(style, length_mode=CONDENSED)

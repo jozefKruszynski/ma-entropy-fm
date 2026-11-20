@@ -183,7 +183,6 @@ def test_every_style_has_a_description_that_tells_its_history() -> None:
         "ambient": "Eno",
         "berlin_school": "Schulze",
         "lofi": "vinyl",
-        "minimal": "Reich",
         "ritual": "Geinoh",
         "glitch": "KOAN",
     }

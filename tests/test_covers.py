@@ -101,7 +101,7 @@ def test_a_drawn_cover_is_the_same_every_time_and_days_and_styles_differ() -> No
     first = _cover()
     assert first == _cover()
     other_day = _cover(seed="kitchen|2026-11-18|berlin_school")
-    other_style = _cover("minimal", "kitchen|2026-11-17|minimal")
+    other_style = _cover("ritual", "kitchen|2026-11-17|ritual")
     assert other_day != first
     assert other_style != first
     quiet = procedural_cover(DayProfile(), "ambient", 5, "aeolian", "x", "Kitchen")
@@ -115,7 +115,7 @@ def test_a_cover_is_cheap_and_small() -> None:
     """A 1024 pixel cover takes well under a second and a couple of hundred kilobytes."""
     _cover()
     started = time.process_time()
-    data = _cover("minimal", "x|y|minimal")
+    data = _cover("ritual", "x|y|ritual")
     assert time.process_time() - started < 2.0
     assert len(data) < 250_000
 
@@ -146,7 +146,7 @@ def test_the_context_holds_only_mood_words_and_nothing_of_the_house() -> None:
 
 def test_the_prompt_is_built_like_the_playlist_covers_of_music_assistant() -> None:
     """The base prompt, the preset and the no-text rule of a title that is overlaid afterwards."""
-    context = describe_day("minimal", 2, "dorian", 0.5, [VoiceKind.DISHWASHER])
+    context = describe_day("ritual", 2, "dorian", 0.5, [VoiceKind.DISHWASHER])
     prompt = build_prompt("Kitchen", LOOK, context)
     assert 'called "Kitchen"' in prompt
     assert context in prompt

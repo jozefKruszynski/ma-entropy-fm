@@ -4,7 +4,7 @@ Status: implemented. This replaces the song form, the eight styles and their kit
 
 The decision behind it: after a day of chasing radio-quality tracks in eight genres (and getting a mishmash of bells,
 disjointed melodies and styles that all sounded alike) the project went back to its roots, which is a soundscape.
-One long, slowly evolving piece per room and day, in six styles that can be told apart from the first bar.
+One long, slowly evolving piece per room and day, in five styles that can be told apart from the first bar.
 
 ## Rules that every part follows
 
@@ -46,12 +46,11 @@ the anomalies.
 **Layers.** A layer is a bus: a gain and a presence curve, an optional low-pass whose cutoff the house moves, and sends to
 the reverb and the echo. A note names its layer.
 
-## The six systems
+## The five systems
 
-See the module docstrings of `scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_minimal.py`, `scape_ritual.py` and `scape_glitch.py`; each says
+See the module docstrings of `scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_ritual.py` and `scape_glitch.py`; each says
 what the system is and how the house steers it. In short: tape loops that phase (Ambient), a step sequencer with
-mutation rules and transposition (Berlin School), a band that varies a composed loop (Lo-fi), euclidean percussion, a
-mutating figure and an arrangement state machine (Minimal), and a plucked call-and-response line answered by a slit drum and a woodblock of other loop lengths over a
+mutation rules and transposition (Berlin School), a band that varies a composed loop (Lo-fi), and a plucked call-and-response line answered by a slit drum and a woodblock of other loop lengths over a
 breathing choir drone with stretched washes, a chant leader, a heartbeat and taiko (Ritual), and a film score of swells, brass-like stabs and a growling bass over half-time drums that the events of the house cut up with stutters, tape stops, brakes and freezes (Cinematic Glitch).
 
 Ritual has three rules of its own. A voice that sustains has a hint of vibrato (4 to 6 cents, 4.5 to 5.5 Hz) that

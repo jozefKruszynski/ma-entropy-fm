@@ -1,7 +1,7 @@
 """
 The small generative tools that the four styles share.
 
-Weighted choices, Markov chains, Euclidean rhythms, random walks and the curves of anomaly events. Everything
+Weighted choices, Markov chains, random walks and the curves of anomaly events. Everything
 takes a numpy generator.
 
 Everything takes a numpy generator that the plan seeds from the room, the day and the style, so a piece is the same
@@ -38,12 +38,6 @@ def markov[T](rng: np.random.Generator, state: T, table: dict[T, Sequence[tuple[
     if not row:
         return state
     return weighted(rng, [item for item, _ in row], [w for _, w in row])
-
-
-def euclid(hits: int, steps: int, rotate: int = 0) -> list[bool]:
-    """Return the Euclidean rhythm of `hits` onsets in `steps` steps, turned by `rotate` steps."""
-    pattern = [((i * hits) % steps) < hits for i in range(steps)]
-    return pattern[rotate % steps :] + pattern[: rotate % steps]
 
 
 def swung(index: int, step: float, swing: float) -> float:

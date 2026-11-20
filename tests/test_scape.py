@@ -1,4 +1,4 @@
-"""Tests of the soundscapes: the plan, the generative systems of the six styles, the day to day variation."""
+"""Tests of the soundscapes: the plan, the generative systems of the five styles, the day to day variation."""
 
 import itertools
 from dataclasses import replace
@@ -32,12 +32,12 @@ def _score(
     return the_demo().score(index, areas, style, tier)
 
 
-def test_there_are_six_styles_and_the_removed_ones_are_gone() -> None:
-    """Ambient, Berlin School, Lo-fi, Minimal and Ritual; no House, Drum and bass, Dub techno or Gamelan."""
-    assert list(STYLES) == ["ambient", "berlin_school", "lofi", "minimal", "ritual", "glitch"]
+def test_there_are_five_styles_and_the_removed_ones_are_gone() -> None:
+    """Ambient, Berlin School, Lo-fi, Ritual and Cinematic Glitch; no House, Drum and bass, Dub techno, Gamelan or Minimal."""
+    assert list(STYLES) == ["ambient", "berlin_school", "lofi", "ritual", "glitch"]
     from entropy_fm import covers, palette, synth  # noqa: PLC0415
 
-    for gone in ("house", "dnb", "dub_techno", "gamelan"):
+    for gone in ("house", "dnb", "dub_techno", "gamelan", "minimal"):
         assert gone not in STYLES
         assert gone not in covers.PALETTES
         assert gone not in covers.GLYPHS
@@ -192,7 +192,7 @@ def test_the_chosen_voices_vary_across_seven_days(style: str) -> None:
     assert frozenset.union(*used) - core
 
 
-def test_the_six_styles_use_different_voices() -> None:
+def test_the_five_styles_use_different_voices() -> None:
     """Each style has a character of its own: the voices they share are few."""
     sets = {
         style: set(the_demo().score(13, ("kitchen",), style, STANDARD)[0].voices_used())
@@ -203,7 +203,7 @@ def test_the_six_styles_use_different_voices() -> None:
             if a < b:
                 shared = sets[a] & sets[b]
                 assert len(shared) <= 0.5 * min(len(sets[a]), len(sets[b])), (a, b, shared)
-    assert any(v.startswith("drum:") for v in sets["minimal"])
+    assert any(v.startswith("drum:") for v in sets["lofi"])
     assert not any(v.startswith("drum:") for v in sets["ambient"])
 
 
@@ -260,16 +260,10 @@ def test_the_pitches_come_from_the_composed_vocabulary(style: str) -> None:
     assert len(outside) <= 0.03 * len(pitched)
 
 
-def test_no_beat_in_ambient_and_a_beat_in_minimal() -> None:
-    """Ambient has no drums at all; Minimal has a soft kick on every beat while it plays."""
+def test_no_beat_in_ambient() -> None:
+    """Ambient has no drums at all."""
     ambient, _ = _score("ambient")
     assert not any(n.layer in {"kick", "drums"} for n in ambient.notes)
-    minimal, _ = _score("minimal")
-    kicks = sorted(n.t for n in minimal.notes if n.layer == "kick")
-    gaps = np.diff(kicks)
-    beat = 60.0 / minimal.tempo
-    assert 118.0 <= minimal.tempo <= 124.0
-    assert np.mean(np.abs(gaps[gaps < 1.5 * beat] - beat) < 0.02) > 0.9
 
 
 def test_ambient_loops_have_lengths_that_share_no_measure() -> None:
@@ -362,7 +356,7 @@ def test_berlin_school_drums_rest_at_night_and_play_in_the_active_day() -> None:
 
 
 def test_an_appliance_that_runs_brings_in_its_layer() -> None:
-    """While the dishwasher runs the second Berlin line and the Minimal clicks are held in."""
+    """While the dishwasher runs the second Berlin line is held in."""
     _, plan = the_demo().score(13, ("kitchen",), "berlin_school", STANDARD)
     assert plan.runs["dish"].max() > 0.5
     score, plan = the_demo().score(13, ("kitchen",), "berlin_school", STANDARD)

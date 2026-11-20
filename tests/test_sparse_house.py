@@ -371,7 +371,7 @@ def _calm_day() -> list[Series]:
 
 
 # the fewest layers that play in nine of ten minutes of a calm day: the base of each style
-BASE_LAYERS = {"ambient": 3, "berlin_school": 5, "lofi": 3, "minimal": 4, "ritual": 3, "glitch": 3}
+BASE_LAYERS = {"ambient": 3, "berlin_school": 5, "lofi": 3, "ritual": 3, "glitch": 3}
 
 
 @pytest.mark.parametrize("style", list(STYLES))

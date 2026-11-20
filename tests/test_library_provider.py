@@ -17,6 +17,7 @@ from entropy_fm import EntropyFMProvider
 from entropy_fm.const import CONF_QUALITY, STORAGE_FOLDER
 from entropy_fm.library import Catalog, parse_track_id
 from entropy_fm.pins import load_membership
+from entropy_fm.styles import STYLES
 from music_assistant.mass import MusicAssistant
 from tests.test_provider import (  # noqa: F401
     _all_albums,
@@ -82,7 +83,7 @@ async def test_the_features_hearts_but_no_library_edit(
         ProviderFeature.LIBRARY_TRACKS_EDIT,
     ):
         assert feature not in provider.supported_features
-    assert provider.is_streaming_provider
+    assert not provider.is_streaming_provider
 
 
 def _clock(provider: EntropyFMProvider, monkeypatch: pytest.MonkeyPatch, shift_days: int) -> None:
@@ -119,15 +120,14 @@ async def test_the_library_always_has_every_room_and_a_window_of_days(
     for days in per_area.values():
         assert 5 <= len(days) <= 7
         assert days == sorted(days, reverse=True)
-    # every track of every album in the library: all six styles
+    # every track of every album in the library: all five styles
     tracks = await _collect(provider.get_library_tracks())
-    assert len(tracks) == 6 * len(albums)
+    assert len(tracks) == len(STYLES) * len(albums)
     assert len({t.item_id for t in tracks}) == len(tracks)
     assert {t.item_id.rsplit("|", 1)[1] for t in tracks} == {
         "ambient",
         "berlin_school",
         "lofi",
-        "minimal",
         "ritual",
         "glitch",
     }
@@ -182,13 +182,13 @@ async def test_hearting_an_album_pins_the_day_and_it_stays_after_the_window_move
     listed = await _collect(provider.get_library_albums())
     assert [a.favorite for a in listed if a.item_id == album.item_id] == [True]
     assert all(a.favorite is None for a in listed if a.item_id != album.item_id)
-    # all six tracks of the kept day are in the library, too
+    # all five tracks of the kept day are in the library, too
     own = [
         t.item_id
         for t in await _collect(provider.get_library_tracks())
         if t.item_id.startswith(album.item_id)
     ]
-    assert len(own) == 6
+    assert len(own) == len(STYLES)
     _clock(provider, monkeypatch, 3)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
     # it survives a restart
@@ -234,13 +234,13 @@ async def test_hearting_a_track_pins_its_day_and_reports_the_heart(
     _quiet(provider, monkeypatch, library_days=2)
     album = await _album(provider, "kitchen", 4)
     day = date.fromisoformat(album.item_id.split("|")[1])
-    item_id = album.item_id + "|_scape|minimal"
+    item_id = album.item_id + "|_scape|lofi"
     assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
     await _heart(provider, await provider.get_track(item_id))
     assert provider.pins.has("kitchen", day)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
     tracks = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
-    assert len([i for i in tracks if i.startswith(album.item_id)]) == 6
+    assert len([i for i in tracks if i.startswith(album.item_id)]) == len(STYLES)
     assert [i for i, t in tracks.items() if t.favorite] == [item_id]
     assert (await provider.get_track(item_id)).favorite is True
     await _unheart(provider, item_id, MediaType.TRACK)
@@ -338,7 +338,7 @@ async def test_hearts_of_an_earlier_library_survive_and_the_removal_list_is_drop
 async def test_the_library_sync_of_the_server_lists_every_track_and_records_the_hearts(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """After a sync the library has all six tracks per album, and the heart is on the item that the sync reads."""
+    """After a sync the library has all five tracks per album, and the heart is on the item that the sync reads."""
     from tests.test_rooms import _sync  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
@@ -347,7 +347,7 @@ async def test_the_library_sync_of_the_server_lists_every_track_and_records_the_
     await _sync(mass, provider)
     albums = await mass.music.albums.library_items(provider=provider.instance_id, limit=5000)
     tracks = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
-    assert len(tracks) == 6 * len(albums)
+    assert len(tracks) == len(STYLES) * len(albums)
     # what the server is given as the heart of the provider
     listed = {a.item_id: a.favorite async for a in provider.get_library_albums()}
     assert listed[album.item_id] is True
@@ -361,7 +361,7 @@ async def test_adding_a_track_pins_its_day_and_it_stays_while_an_album_needs_it(
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 2)
     tracks = await provider.get_album_tracks(album.item_id)
-    track = next(t for t in tracks if t.item_id.endswith("|minimal"))
+    track = next(t for t in tracks if t.item_id.endswith("|lofi"))
     await _heart(provider, track)
     await _heart(provider, album)
     assert ("kitchen", date.fromisoformat(album.item_id.split("|")[1])) in provider.pins.all()
@@ -417,7 +417,7 @@ async def test_keep_every_day_of_these_rooms_is_a_setting(
 async def test_the_library_sync_of_the_server_keeps_pinned_days(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """For a streaming provider an album that leaves the listing is not deleted; a pinned one stays."""
+    """An album that leaves the listing is removed from the database; a pinned one stays."""
     provider, _ = await _setup(mass, fake_hass)
     pinned = await _album(provider, "kitchen", 1)
     plain = await _album(provider, "kitchen", 0)
@@ -436,16 +436,12 @@ async def test_the_library_sync_of_the_server_keeps_pinned_days(
     assert pinned.item_id in listed
     assert plain.item_id not in listed
     await provider.sync_library(MediaType.ALBUM)
-    # the album that is no longer listed is not deleted from the database; it is no longer "in library"
     kept = await mass.music.albums.library_items(provider=provider.instance_id)
     names = {album.name for album in kept}
     assert pinned.name in names
     assert plain.name not in names
-    every = await mass.music.albums.get_library_item_by_prov_id(plain.item_id, provider.instance_id)
-    assert every is not None
-    assert not any(
-        m.in_library for m in every.provider_mappings if m.provider_instance == provider.instance_id
-    )
+    gone = await mass.music.albums.get_library_item_by_prov_id(plain.item_id, provider.instance_id)
+    assert gone is None
 
 
 async def test_a_pinned_day_plays_after_home_assistant_has_forgotten_it(
@@ -509,7 +505,7 @@ async def test_a_past_day_is_cached_after_it_played_to_the_end_and_streams_from_
 
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 5)
-    item_id = f"{album.item_id}|_scape|minimal"
+    item_id = f"{album.item_id}|_scape|ambient"
     details = await provider.get_stream_details(item_id, MediaType.TRACK)
     assert details.stream_type == StreamType.CUSTOM
     assert isinstance(details.data, str)
@@ -681,7 +677,7 @@ async def test_hearts_on_tracks_survive_a_change_of_the_length(
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 1)
     day = date.fromisoformat(album.item_id.split("|")[1])
-    full_id = album.item_id + "|_scape|minimal"
+    full_id = album.item_id + "|_scape|lofi"
     await _heart(provider, await provider.get_track(full_id))
     assert provider.pins.has("kitchen", day)
 
@@ -729,6 +725,11 @@ async def test_after_a_switch_and_a_sync_the_library_has_the_condensed_tracks_on
     for track in after:
         ref = parse_track_id(track.provider_mappings.copy().pop().item_id)
         assert track.duration == condensed_seconds(ref.style)
+    # the full tracks are gone from the albums too, which list every track the database links to them
+    album = (await mass.music.albums.library_items(provider=provider.instance_id))[0]
+    shown = await mass.music.albums.tracks(album.item_id, "library")
+    assert shown
+    assert all(t.version.endswith("Condensed") for t in shown)
 
 
 async def test_full_listings_say_the_length_the_stream_says_for_past_days(

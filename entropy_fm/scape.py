@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import scape_ambient, scape_berlin, scape_glitch, scape_lofi, scape_minimal, scape_ritual
+from . import scape_ambient, scape_berlin, scape_glitch, scape_lofi, scape_ritual
 from .character import DayCharacter, scale_of_day
 from .day_analysis import DAY_SECONDS, DayAnalysis, analyze_day
 from .levels import feed_forward, trim_db
@@ -33,7 +33,6 @@ COMPOSERS: dict[str, Callable[[Plan], Score]] = {
     "ambient": scape_ambient.compose,
     "berlin_school": scape_berlin.compose,
     "lofi": scape_lofi.compose,
-    "minimal": scape_minimal.compose,
     "ritual": scape_ritual.compose,
     "glitch": scape_glitch.compose,
 }

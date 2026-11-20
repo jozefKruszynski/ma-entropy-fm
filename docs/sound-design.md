@@ -4,7 +4,7 @@ How the voices are made, where the samples come from and how loud the pieces are
 
 ## The voice library
 
-All six styles draw on one library of 28 voices (Cinematic Glitch adds its own `glitch:*` voices), each with a character, a gain and a brightness of
+All five styles draw on one library of 28 voices (Cinematic Glitch adds its own `glitch:*` voices), each with a character, a gain and a brightness of
 its own (no blanket filter, no per-note normalising): a warm round sub, a Moog-style ladder bass, a
 growling Reese (two or three detuned band-limited saws, waveshaped before a moving resonant low-pass,
 with a clean sub under it), an FM growl (the index moves, never the pitch), an acid bass; a string
@@ -37,8 +37,7 @@ of each style is trimmed to a design level (`entropy_fm/levels.py`, measured by
 piece the same way for every seek (a sparse night is lifted, a dense afternoon is held down), a
 slow trim of at most 2 dB follows, and a look-ahead peak limiter with a ceiling of -2.4 dBFS
 finishes. The styles with drums have a gentle compressor in front of the limiter. The aims:
-integrated loudness -18 to -20 LUFS for Ambient, -16 to -18 for Berlin School and Lo-fi, -15 to -17
-for Minimal, -18 to -20 for Ritual, -14.5 to -15.5 for Cinematic Glitch; the loudest three seconds at most one LU above the integrated loudness; true peak under
+integrated loudness -18 to -20 LUFS for Ambient, -16 to -18 for Berlin School and Lo-fi, -18 to -20 for Ritual, -14.5 to -15.5 for Cinematic Glitch; the loudest three seconds at most one LU above the integrated loudness; true peak under
 -1 dBTP; the limiter taking at most 2 dB. `scripts/loudness_report.py` measures them, and tests check
 them. The numbers of the last run are in [the notes of the demo files](development.md#run-the-demo).
 
@@ -52,8 +51,6 @@ them. The numbers of the last run are in [the notes of the demo files](developme
 | berlin_school | full demo piece | -17.6 | -18 to -16 | -15.9 (+1.7) | -3.9 | 1.5 | 0.00 | 0.0 | short-term -15.9 more than 1 LU over |
 | lofi | demo excerpts | -16.2 | -18 to -16 | -15.1 (+1.1) | -5.7 | 0.7 | 0.00 | 0.0 | short-term -15.1 more than 1 LU over |
 | lofi | kitchen excerpts | -17.8 | -18 to -16 | -15.8 (+2.0) | -4.8 | 5.8 | 0.00 | 0.0 | short-term -15.8 more than 1 LU over |
-| minimal | demo excerpts | -16.3 | -17 to -15 | -15.6 (+0.7) | -1.2 | 2.0 | 0.00 | 0.2 | ok |
-| minimal | kitchen excerpts | -16.8 | -17 to -15 | -15.5 (+1.3) | -4.2 | 2.0 | 0.00 | 0.0 | short-term -15.5 more than 1 LU over |
 | ritual | demo excerpts | -18.7 | -20 to -18 | -17.1 (+1.6) | -8.5 | 3.1 | 0.00 | 0.0 | short-term -17.1 more than 1 LU over |
 | ritual | kitchen excerpts | -18.9 | -20 to -18 | -16.9 (+2.0) | -8.3 | 2.9 | 0.00 | 0.0 | short-term -16.9 more than 1 LU over |
 | glitch | demo excerpts | -14.7 | -15.5 to -14.5 | -11.3 (+3.4) | -2.4 | 5.3 | 0.00 | 1.1 | ok (its own caps: short-term at most 4 LU over, limiter at most 3 dB) |

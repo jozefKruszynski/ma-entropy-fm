@@ -129,6 +129,14 @@ SECOND_VOICES: dict[str, VoiceTag] = {
     "moog_seq": (0.6, 0.1),
     "blip_synth": (0.85, -0.5),
 }
+# the lead line is Sequence A: it sits above the others; a blip as the second line sits behind it, and darker
+SEQ_A_GAIN = 1.4
+BLIP_VOICE = "blip_synth"
+BLIP_GAIN = 0.4
+BLIP_CUTOFF_SCALE = 0.45
+# the soft kit sits a few dB under the sequence, so that its pulse is felt where it plays
+PULSE_GAIN = 1.25
+SHAKER_GAIN = 1.05
 LEADS: dict[str, VoiceTag] = {"analog_lead": (0.65, 0.4), "flute_lead": (0.3, -0.4)}
 STRINGS: dict[str, VoiceTag] = {"tape_strings": (0.3, 0.5), "string_machine": (0.7, -0.3)}
 # warm electronic toms on the 16th grid: (step of the bar, which tom: 0 is the lowest of three), and the energy each suits
@@ -402,9 +410,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 )
             )
         mutations[line_key] = done
+        behind_blip = line_key == "seqB" and voice == BLIP_VOICE
         layers[line_key] = Layer(
             line_key,
-            1.0,
+            SEQ_A_GAIN if line_key == "seqA" else BLIP_GAIN if behind_blip else 1.0,
             presence,
             None,
             0.4,
@@ -654,7 +663,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         seconds = (np.arange(plan.count) + 0.5) / CR
         triangle = 0.5 + 0.5 * np.sin(2 * np.pi * (seconds / period + phase))
         x = np.clip(0.1 + 0.25 * plan.bright + 0.25 * power + 0.3 * triangle + cut_walk, 0.0, 1.0)
-        layers[key].cutoff = 380.0 * 16.0**x * dips(plan, 0.8, 0.9, 4.0)
+        scale_ = BLIP_CUTOFF_SCALE if key == "seqB" and voice_b == BLIP_VOICE else 1.0
+        layers[key].cutoff = scale_ * 380.0 * 16.0**x * dips(plan, 0.8, 0.9, 4.0)
     form = FORM_FLOOR + (1.0 - FORM_FLOOR) * intensity
     layers["strings"] = Layer(
         "strings",
@@ -685,7 +695,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         title="organ bed",
     )
     layers["lead"] = Layer("lead", 0.9, None, None, 0.0, reverb=0.5, echo=0.55, title="lead")
-    layers["pulse"] = Layer("pulse", 0.7, pulse_gate, None, 0.0, reverb=0.1, title="pulse")
+    layers["pulse"] = Layer("pulse", PULSE_GAIN, pulse_gate, None, 0.0, reverb=0.1, title="pulse")
     if quality.max_layers >= 6:
         # the toms and the shaker are rolled off, so that they are warm and have no click
         layers["toms"] = Layer(
@@ -699,7 +709,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         )
         layers["shaker"] = Layer(
             "shaker",
-            0.6,
+            SHAKER_GAIN,
             shaker_gate,
             6500.0 * dips(plan, 0.8, 0.9, 4.0),
             0.0,

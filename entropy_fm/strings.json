@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "Entropy FM",
-    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in six styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, it asks Music Assistant to re-sync its own items."
+    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in five styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, it asks Music Assistant to re-sync its own items."
   },
   "config_entries": {
     "use_ha_plugin": {
@@ -38,7 +38,7 @@
     },
     "piece_length": {
       "label": "Piece length",
-      "description": "Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same day and the same plan in a shorter piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi, Minimal and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Full and condensed pieces are cached and pre-rendered apart."
+      "description": "Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same day and the same plan in a shorter piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Full and condensed pieces are cached and pre-rendered apart."
     },
     "key": {
       "label": "Key",
@@ -50,7 +50,7 @@
     },
     "styles": {
       "label": "Styles offered",
-      "description": "Which styles each soundscape comes in: Ambient, Berlin School, Lo-fi, Minimal, Ritual and Cinematic Glitch. Every style is a version of the same day, such as \"Dishwasher at Dusk (Lo-fi)\", so you can compare them."
+      "description": "Which styles each soundscape comes in: Ambient, Berlin School, Lo-fi, Ritual and Cinematic Glitch. Every style is a version of the same day, such as \"Dishwasher at Dusk (Lo-fi)\", so you can compare them."
     },
     "default_style": {
       "label": "Default style",

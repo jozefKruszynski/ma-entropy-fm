@@ -135,13 +135,13 @@ async def test_browsing_shows_every_area_and_day_and_the_library_has_the_rooms(
 ) -> None:
     """Areas are artists, a whole house too, each has an album per day; the library has the rooms."""
     provider, fake = await _setup(mass, fake_hass)
-    assert provider.is_streaming_provider
+    assert not provider.is_streaming_provider
     # the library is the rooms and a window of days from the start, whatever was added
     artists = await _collect(provider.get_library_artists())
     assert [a.name for a in artists] == ["Whole House", "Kitchen", "Living Room"]
     library_albums = await _collect(provider.get_library_albums())
     assert library_albums
-    assert len(await _collect(provider.get_library_tracks())) == 6 * len(library_albums)
+    assert len(await _collect(provider.get_library_tracks())) == len(STYLES) * len(library_albums)
     # the library reads the days of its window for the titles of their tracks
     listed = len(fake.hass.history_calls)
 
@@ -354,20 +354,20 @@ async def test_every_kind_of_track_streams(mass: MusicAssistant, fake_hass: Magi
 async def test_soundscapes_come_in_every_style_as_versions(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """Each of the six styles is a version of the soundscape of the same day."""
+    """Each of the five styles is a version of the soundscape of the same day."""
     provider, _ = await _setup(mass, fake_hass)
     albums = await _all_albums(provider)
     album = next(a for a in albums if a.item_id.startswith("kitchen|"))
     tracks = await provider.get_album_tracks(album.item_id)
-    assert len(tracks) == len(STYLES) == 6
-    assert list(STYLES) == ["ambient", "berlin_school", "lofi", "minimal", "ritual", "glitch"]
+    assert len(tracks) == len(STYLES) == 5
+    assert list(STYLES) == ["ambient", "berlin_school", "lofi", "ritual", "glitch"]
     assert [track.version for track in tracks] == [style.version for style in STYLES.values()]
     assert [track.item_id.rsplit("|", 1)[1] for track in tracks] == list(STYLES)
     # a title of its own for each style
     assert len({track.name for track in tracks}) == len(STYLES)
     assert {_target(track.item_id) for track in tracks} == {"_scape"}
-    other = await provider.get_track(f"{album.item_id}|_scape|minimal")
-    assert other.version == STYLES["minimal"].version
+    other = await provider.get_track(f"{album.item_id}|_scape|lofi")
+    assert other.version == STYLES["lofi"].version
 
 
 async def test_one_style_offered_shows_no_version(
@@ -432,7 +432,7 @@ async def test_a_soundscape_is_as_long_as_its_day_and_streams_the_same_each_time
     )
     albums = await _all_albums(provider)
     past = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
-    for style in ("minimal", "ambient"):
+    for style in ("lofi", "ambient"):
         item_id = f"{past.item_id}|_scape|{style}"
         details = await provider.get_stream_details(item_id, MediaType.TRACK)
         assert 600 <= (details.duration or 0) <= 1320
@@ -443,7 +443,7 @@ async def test_a_soundscape_is_as_long_as_its_day_and_streams_the_same_each_time
         b = np.frombuffer(second, dtype="<i2").astype(np.int32)
         assert np.abs(a - b).max() <= 2, (style, (a != b).mean())
         assert any(first)
-    details = await provider.get_stream_details(f"{past.item_id}|_scape|minimal", MediaType.TRACK)
-    assert (await provider.get_track(f"{past.item_id}|_scape|minimal")).duration == details.duration
+    details = await provider.get_stream_details(f"{past.item_id}|_scape|lofi", MediaType.TRACK)
+    assert (await provider.get_track(f"{past.item_id}|_scape|lofi")).duration == details.duration
     # a soundscape of today needs three hours of the day; before that it is not found
     assert MIN_SCAPE_SECONDS_OF_DAY == 3 * 3600

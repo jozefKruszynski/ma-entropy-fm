@@ -15,11 +15,11 @@ from tests.test_provider import _setup
 
 
 def test_the_dearest_offered_style_is_the_one_that_is_measured() -> None:
-    """Cinematic Glitch when it is offered, then Berlin School, Ritual, Lo-fi, Ambient and Minimal."""
+    """Cinematic Glitch when it is offered, then Berlin School, Ritual, Lo-fi and Ambient."""
     assert autotune.heaviest_style(STYLES) == "glitch"
-    assert autotune.heaviest_style(["ambient", "berlin_school", "minimal"]) == "berlin_school"
-    assert autotune.heaviest_style(["minimal", "ritual", "lofi"]) == "ritual"
-    assert autotune.heaviest_style(["minimal"]) == "minimal"
+    assert autotune.heaviest_style(["ambient", "berlin_school", "lofi"]) == "berlin_school"
+    assert autotune.heaviest_style(["ambient", "ritual", "lofi"]) == "ritual"
+    assert autotune.heaviest_style(["ambient"]) == "ambient"
     assert autotune.heaviest_style([]) == "glitch"
     assert set(autotune.COST_ORDER) == set(STYLES)
 
@@ -36,7 +36,7 @@ def test_a_slow_machine_gets_a_tier_that_the_dearest_style_fits() -> None:
     assert glitch["light"] < limit
 
 
-@pytest.mark.parametrize("style", ["glitch", "minimal"])
+@pytest.mark.parametrize("style", ["glitch", "ambient"])
 def test_the_benchmark_measures_every_tier_in_the_style_it_is_given(style: str) -> None:
     """A short render of the invented house gives a cost per tier, richer tiers costing more than Light."""
     costs = autotune.benchmark(ORDER, style, 3)

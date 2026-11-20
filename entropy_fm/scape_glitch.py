@@ -92,10 +92,16 @@ class Mode(NamedTuple):
     grain_share: float
     # reversed swells into every section after the first
     swells: bool
+    # the lowest level of the kit that sounds through the day (0 leaves the drums to the heat), and whether the phrases
+    # are marked by a long freeze, a tape stop or a brake even when the house is quiet
+    drum_floor: int = 0
+    phrase_edits: bool = False
 
 
 MODES = (
-    Mode("heavy", (54, 60), 0.15, 0.2, 3, 1, 2.0, 0.2, swells=True),
+    Mode(
+        "heavy", (54, 60), 0.15, 0.2, 3, 1, 2.0, 0.2, swells=True, drum_floor=2, phrase_edits=True
+    ),
     Mode("half-time", (64, 68), 0.5, 0.5, 4, 4, 1.0, 0.5, swells=False),
     Mode("driving", (70, 72), 0.85, 0.9, 5, 5, 1.0, 0.5, swells=False),
 )
@@ -109,6 +115,13 @@ SLOTS = 4
 ROLE_VARIANT = {INTRO: 0, BUILD: 0, CLIMAX: 1, RELEASE: 3, PLATEAU: 2, OUTRO: 0}
 # the bars after which the variant of a pattern turns over
 VARIANT_BARS = 4
+# the softest kick that each role of the form plays: a build and a release keep the downbeat, a peak every kick
+ROLE_KICK_FLOOR = {INTRO: 0.9, BUILD: 0.9, CLIMAX: 0.0, RELEASE: 0.9, PLATEAU: 0.7, OUTRO: 0.9}
+# a phrase mark of a heavy day: the bar of each phrase that it falls on, the day (0 to 1) it needs, the bars it keeps clear of a drop
+PHRASE_MARK_BARS = (2, 5)
+PHRASE_MARK_DAY = 0.5
+PHRASE_MARK_CLEAR = 3
+PHRASE_MARK_KINDS = ("tape", "spectral", "grain", "brake")
 # the share of the tape stops that are long (a wind down of a beat and a half), times the stretch of the mode
 TAPE_LONG_SHARE = 0.5
 
@@ -257,6 +270,8 @@ DUCK = {
     "wash": (0.35, 0.22),
     "stab": (0.3, 0.12),
 }
+# the gain of the drum buses: the kick sits within a few dB of the strings, the hats about ten under the snare
+KICK_GAIN, SNARE_GAIN, HATS_GAIN = 6.0, 1.8, 1.8
 # the constant gain of the master, in dB: the arrangement is the dynamics of the style
 MASTER_GAIN_DB = -4.2
 GROWL_STATE_AT = (0.26, 0.34, 0.44, 0.56, 0.70, 0.84)
@@ -630,6 +645,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         raw = sum(1 for key in ("kick", "hat", "ghost", "full", "big") if h >= limits[key])
         if not drums_ok(t0) or not drums_ok(t0 + 2 * bar - 0.1):
             raw = 0
+        elif plan.at(form, t0) > 0.0 and state_by_bar and b0 > min(state_by_bar):
+            raw = max(raw, mode.drum_floor)
         level = max(min(raw, last_level + 1), last_level - 2) if raw else 0
         level = min(level, mode.level_cap)
         if b0 in drop_bars:
@@ -648,6 +665,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         variants = pats[kind]
         role = role_of_bar.get(b0, PLATEAU)
         into = b0 + 2 in section_starts and b0 + 2 not in drop_bars
+        floor = 0.0 if b0 in drop_bars else ROLE_KICK_FLOOR[role]
         span = variants[0]["span"]
         slot = 0
         while slot < SLOTS:
@@ -655,7 +673,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             last = slot + span >= SLOTS
             pattern = variants[(ROLE_VARIANT[role] + b0 // VARIANT_BARS + last) % len(variants)]
             window = (SLOTS - 1 - slot) * STEPS if into and last else None
-            drum_events += _place_half_bar(put, kicks, kit_hits, pattern, t0, step, light, window)
+            drum_events += _place_half_bar(
+                put, kicks, kit_hits, pattern, t0, step, light, window, floor
+            )
             slot += span
         if into:
             fill = family.fills[section_starts.index(b0 + 2) % len(family.fills)]
@@ -709,6 +729,23 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     ) -> bool:
         return edit(t, "tape", layers, {"stop": stop, "span": span, "wind": wind}, why)
 
+    def freeze_edit(t: float, seed: int, why: str) -> bool:
+        if light or edit_rng.random() < mode.grain_share:
+            return edit(
+                t,
+                "grain",
+                ("stab", "pad", "str"),
+                {"length": beat * 1.5 * mode.stretch, "grain": 0.11, "seed": seed, "jitter": 0.02},
+                why,
+            )
+        return edit(
+            t,
+            "spectral",
+            ("pad", "str", "wash"),
+            {"length": beat * 2.0 * mode.stretch, "back": 0.9, "seed": seed},
+            why,
+        )
+
     # the structure of the phrases: beat repeats, kick retriggers, snare rolls, a reversed snare into the accent
     phrase_edits = 0
     if mode.swells and not light:
@@ -761,6 +798,24 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             ):
                 phrase_edits += 1
                 stats["stutter"] += 1
+        b_mark = 8 * (p - 1) + int(drum_rng.choice(PHRASE_MARK_BARS))
+        if (
+            mode.phrase_edits
+            and b_mark not in section_starts
+            and plan.at(day, b_mark * bar) > PHRASE_MARK_DAY
+            and all(abs(b_mark - d) > PHRASE_MARK_CLEAR for d in drops)
+        ):
+            t = b_mark * bar
+            buses = WHOLE if levels.get(2 * (b_mark // 2), 0) > 0 else SOFT
+            mark = str(drum_rng.choice(PHRASE_MARK_KINDS))
+            if mark == "tape":
+                done = tape_edit(t - 1.5 * beat, buses, 0.45, 1.5 * beat, 0.18, "phrase")
+            elif mark == "brake":
+                done = brake_edit(t - 2 * step, buses, 0.1, 2 * step, "phrase")
+            else:
+                done = freeze_edit(t, int(t), "phrase")
+            stats["freeze" if mark in {"spectral", "grain"} else mark] += int(done)
+            phrase_edits += int(done)
         b_start = 8 * p
         if (
             b_start < bars
@@ -926,27 +981,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             stats["gate"] += int(done)
             end = t_beat + len(gate_pattern) * u16
         elif choice == "freeze":
-            if light or edit_rng.random() < mode.grain_share:
-                done = edit(
-                    t_beat,
-                    "grain",
-                    ("stab", "pad", "str"),
-                    {
-                        "length": beat * 1.5 * mode.stretch,
-                        "grain": 0.11,
-                        "seed": int(second),
-                        "jitter": 0.02,
-                    },
-                    "event",
-                )
-            else:
-                done = edit(
-                    t_beat,
-                    "spectral",
-                    ("pad", "str", "wash"),
-                    {"length": beat * 2.0 * mode.stretch, "back": 0.9, "seed": int(second)},
-                    "event",
-                )
+            done = freeze_edit(t_beat, int(second), "event")
             stats["freeze"] += int(done)
             end = t_beat + 2.5 * beat * mode.stretch
         else:  # crush: one snare hit
@@ -974,9 +1009,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         "wash": Layer("wash", 0.55, None, str_cut, 0.0, reverb=0.4, title="stretched washes"),
         "stab": Layer("stab", 1.0, None, None, 0.0, reverb=0.45, title="brass-like stabs"),
         "bass": Layer("bass", 1.0, None, None, 0.0, reverb=0.0, title="growl bass"),
-        "kick": Layer("kick", 1.0, None, None, 0.0, reverb=0.0, title="kick"),
-        "snare": Layer("snare", 1.0, None, None, 0.0, reverb=0.18, title="snare"),
-        "hats": Layer("hats", 1.0, None, None, 0.0, reverb=0.0, title="hats, ticks and rim"),
+        "kick": Layer("kick", KICK_GAIN, None, None, 0.0, reverb=0.0, title="kick"),
+        "snare": Layer("snare", SNARE_GAIN, None, None, 0.0, reverb=0.18, title="snare"),
+        "hats": Layer("hats", HATS_GAIN, None, None, 0.0, reverb=0.0, title="hats, ticks and rim"),
         "fx": Layer(
             "fx", 1.0, None, None, 0.0, reverb=0.3, title="booms, reversed swells and taiko"
         ),
@@ -1055,11 +1090,13 @@ def _place_half_bar(  # noqa: C901, PLR0913, PLR0917
     step: float,
     light: bool,  # noqa: FBT001
     until: int | None = None,
+    kick_floor: float = 0.0,
 ) -> int:
     """
     Place a pattern of the kit from second t0; return how many hits.
 
     :param until: Place only the steps before this one (the rest of the pattern gives way to a fill).
+    :param kick_floor: Leave out the kicks softer than this.
     """
     count = 0
     place = put
@@ -1069,7 +1106,7 @@ def _place_half_bar(  # noqa: C901, PLR0913, PLR0917
         return t0 + s * step
 
     for s, v in pattern["kick"]:
-        if s < limit:
+        if s < limit and v >= kick_floor:
             place(at(s), 0.5, 0.0, v, "glitch:kick", "kick")
             kicks.append((at(s), min(1.0, 0.5 + 0.5 * v)))
             kit_hits["kick"].append(at(s))

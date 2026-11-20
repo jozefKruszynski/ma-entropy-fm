@@ -3,7 +3,7 @@ Names and words for the tracks and albums of Entropy FM, made from what a day wa
 
 A track gets a title of its own, built from a few facts of the day (the busiest hour, an appliance that ran,
 a door that opened at a notable time, the weather inside) and a word bank per style: ceremonial for Ritual,
-warm for Lo-fi, sparse and geometric for Minimal, and so on. The same room, day and style always give the same
+warm for Lo-fi, and so on. The same room, day and style always give the same
 title. The facts hold kinds of things ("dishwasher", "door") and times, never an entity id, a name or a person.
 
 Besides the titles this module holds the short text of each style (its history and what inspired it, how the
@@ -297,8 +297,6 @@ class Words:
     weekdays: tuple[str, ...]
     climates: dict[str, str]
     styles: dict[str, StyleWords]
-    # a few words for the geometry of Minimal
-    geometry: tuple[str, ...]
 
 
 EN = Words(
@@ -328,17 +326,6 @@ EN = Words(
     moods=("Quiet", "Lived-in", "Busy"),
     weekdays=("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
     climates={"warm": "Warm", "cool": "Cool"},
-    geometry=(
-        "Grid",
-        "Lattice",
-        "Axis",
-        "Interval",
-        "Module",
-        "Offset",
-        "Vector",
-        "Angle",
-        "Square",
-    ),
     styles={
         "ambient": StyleWords(
             adjectives=(
@@ -408,21 +395,6 @@ EN = Words(
             ),
             plain=("Cosy Corner", "Dusty Tape", "Warm Blanket", "Sleepy Beats", "Mellow Hours"),
         ),
-        "minimal": StyleWords(
-            adjectives=("Sparse", "Plain", "Even", "Narrow"),
-            nouns=("Phasing", "Repeat", "Step", "Line"),
-            templates=(
-                "{thing}, {n} Times",
-                "{geo} for {the_thing}",
-                "{thing} {geo}",
-                "{n} Steps, {part}",
-                "{geo} {time}",
-                "{part} {geo}",
-                "{thing} Phasing",
-                "{adj} {geo}",
-            ),
-            plain=("Plain Grid", "Even Steps", "Narrow Line", "Slow Offset", "Sparse Module"),
-        ),
         "ritual": StyleWords(
             adjectives=("Lantern", "Silent", "Veiled", "Slow", "Candlelit"),
             nouns=("Procession", "Vigil", "Rite", "Offering", "Gathering", "Ceremony"),
@@ -483,7 +455,6 @@ NL = Words(
     moods=("Stille", "Bewoonde", "Drukke"),
     weekdays=("Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"),
     climates={"warm": "Warme", "cool": "Koele"},
-    geometry=("Raster", "Rooster", "As", "Interval", "Module", "Verschuiving", "Vector", "Hoek"),
     styles={
         "ambient": StyleWords(
             adjectives=("Trage", "Gedempte", "Zwevende", "Bleke", "Zachte", "Verre", "Rustige"),
@@ -532,26 +503,6 @@ NL = Words(
                 "Warme Deken",
                 "Slaperige Beats",
                 "Zachte Uren",
-            ),
-        ),
-        "minimal": StyleWords(
-            adjectives=("Schaarse", "Kale", "Gelijke", "Smalle"),
-            nouns=("Fasering", "Herhaling", "Stap", "Lijn"),
-            templates=(
-                "{thing}, {n} Keer",
-                "{geo} voor {the_thing}",
-                "{thing} {geo}",
-                "{n} Stappen, {part}",
-                "{geo} {time}",
-                "{part} {geo}",
-                "{thing}fasering",
-            ),
-            plain=(
-                "Kaal Raster",
-                "Gelijke Stappen",
-                "Smalle Lijn",
-                "Trage Verschuiving",
-                "Schaarse Module",
             ),
         ),
         "ritual": StyleWords(
@@ -605,7 +556,6 @@ def _slots(
     slots: dict[str, str] = {
         "adj": rng.choice(style.adjectives),
         "noun": rng.choice(style.nouns),
-        "geo": rng.choice(words.geometry),
         "weekday": words.weekdays[facts.weekday % 7],
     }
     bare, at = rng.choice(words.parts[part_of(facts.busiest_hour)])
@@ -621,8 +571,6 @@ def _slots(
     if facts.event in words.things:
         slots["event_thing"] = words.things[facts.event][0][0]
         slots["time"] = f"{facts.event_minute // 60:02d}:{facts.event_minute % 60:02d}"
-    if facts.count >= 2:
-        slots["n"] = str(facts.count)
     if facts.climate in words.climates:
         slots["climate"] = words.climates[facts.climate]
     return slots
@@ -687,12 +635,6 @@ HISTORY = {
             "keys, a round bass and the crackle of old vinyl. It became music for studying, cooking and "
             "winding down."
         ),
-        "minimal": (
-            "In the 1960s Steve Reich found that two copies of one pattern, played at slightly different "
-            "speeds, drift apart and make new shapes without a note being added. Minimal techno brought the same "
-            "patience to the dance floor: a plain kick, few sounds, changes so small that you notice them only "
-            "afterwards."
-        ),
         "ritual": (
             "Geinoh Yamashirogumi, the collective behind the Akira soundtrack, mixed folk festival with temple "
             "sounds, and Doll's Polyphony is the mood this style chases: pentatonic plucks, breathing drones and "
@@ -721,12 +663,6 @@ HISTORY = {
             "drums, stoffige toetsen, een ronde bas en het geknetter van oud vinyl. Het werd muziek om bij te "
             "studeren, koken en tot rust te komen."
         ),
-        "minimal": (
-            "In de jaren zestig ontdekte Steve Reich dat twee kopieën van één patroon, met een iets ander tempo "
-            "afgespeeld, uit elkaar drijven en nieuwe vormen maken zonder dat er een noot bijkomt. Minimal techno "
-            "bracht dezelfde geduldigheid naar de dansvloer: een kale kick, weinig geluiden, veranderingen die je "
-            "pas achteraf opmerkt."
-        ),
         "ritual": (
             "Geinoh Yamashirogumi, het collectief achter de Akira-soundtrack, mengde volksfeest met tempelklanken, "
             "en Doll's Polyphony is de sfeer die deze stijl zoekt: pentatonische tokkels, ademende drones en het "
@@ -754,10 +690,6 @@ DRIVES = {
             "Here the house sets the dust and the swing: lamps and kettles warm the keys, "
             "and a busy hour loosens the drums."
         ),
-        "minimal": (
-            "The house sets how many layers take part and how slowly they drift apart; "
-            "each event nudges one pattern a step."
-        ),
         "ritual": (
             "The house breathes into the drone: movement lifts the plucks, and the taiko "
             "answers the busiest hours."
@@ -779,10 +711,6 @@ DRIVES = {
         "lofi": (
             "Hier bepaalt het huis het stof en de swing: lampen en waterkokers verwarmen de toetsen, "
             "en een druk uur maakt de drums losser."
-        ),
-        "minimal": (
-            "Het huis bepaalt hoeveel lagen meedoen en hoe langzaam ze uit elkaar drijven; "
-            "elke gebeurtenis schuift één patroon een stap op."
         ),
         "ritual": (
             "Het huis ademt in de drone: beweging tilt de tokkels op en de taiko "

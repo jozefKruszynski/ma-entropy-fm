@@ -9,7 +9,7 @@ corner. This module makes the covers of Entropy FM the same way.
 - The cover that is always there is drawn locally as a 1024 pixel JPEG in that look (players need
   a raster image; Music Assistant passes an SVG through as it is): the
   gradient follows the style and the key and mode of the day, the glyph is that of the style (a
-  sequencer for Berlin School, a horizon for Ambient, a dot grid for Minimal, a record for Lo-fi, a drum for Ritual, torn slices of a waveform for Cinematic Glitch)
+  sequencer for Berlin School, a horizon for Ambient, a record for Lo-fi, a drum for Ritual, torn slices of a waveform for Cinematic Glitch)
   and is shaped by the events of the day, the dots-to-wave of the icon is a small
   detail, and the title is set lower left by the overlay of the covers. It is the same every time for the same area, day, style.
 - When the user turns it on, an AI image engine of Music Assistant makes the cover instead, from
@@ -64,7 +64,6 @@ JPEG_MAGIC = b"\xff\xd8\xff"
 PALETTES: dict[str, tuple[tuple[int, int, int], ...]] = {
     "ambient": ((14, 40, 66), (46, 120, 140), (130, 210, 205), (255, 214, 140)),
     "berlin_school": ((34, 10, 52), (170, 52, 100), (255, 150, 84), (255, 214, 120)),
-    "minimal": ((30, 34, 44), (88, 108, 128), (214, 224, 232), (255, 170, 84)),
     "lofi": ((46, 26, 24), (140, 84, 62), (244, 176, 104), (214, 124, 150)),
     "ritual": ((26, 14, 22), (126, 40, 48), (226, 112, 66), (255, 206, 138)),
     "glitch": ((10, 12, 24), (52, 38, 112), (214, 62, 96), (120, 230, 255)),
@@ -73,7 +72,6 @@ PALETTES: dict[str, tuple[tuple[int, int, int], ...]] = {
 STYLE_WORDS: dict[str, str] = {
     "ambient": "soft drifting light and slow breathing shapes",
     "berlin_school": "glowing sequences of light over a quiet machine landscape at sunset",
-    "minimal": "small repeating shapes on a calm plain ground",
     "lofi": "a dusty warm evening, worn textures and tape grain",
     "ritual": "embers and slow ripples around a great drum in the dark, a quiet ceremony",
     "glitch": "a dark film title sequence, a waveform cut into slices and torn out of place",
@@ -251,22 +249,6 @@ def _glyph_horizon(profile: DayProfile, rng: np.random.Generator) -> list[Op]:  
     return ops
 
 
-def _glyph_dots(profile: DayProfile, rng: np.random.Generator) -> list[Op]:  # noqa: ARG001
-    """Return a grid of dots, 7 by 7: ringed where the day was quiet, filled where it was busy."""
-    levels = profile.parts(49)
-    first = int(np.argmax(levels))
-    ops: list[Op] = []
-    for index, level in enumerate(levels):
-        x, y = -300 + (index % 7) * 100, -300 + (index // 7) * 100
-        if index == first:
-            ops.append(("disc", x, y, 38, "a"))
-        elif level > 0.55:
-            ops.append(("disc", x, y, 30 + 14 * level, "w"))
-        else:
-            ops.append(("ring", x, y, 26, 9, "w", 1.0))
-    return ops
-
-
 def _glyph_record(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
     """Return a record with grooves, a label and a tonearm."""
     grooves = 3 + int(rng.integers(0, 4))
@@ -334,7 +316,6 @@ def _glyph_slices(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
 GLYPHS = {
     "berlin_school": _glyph_sequencer,
     "ambient": _glyph_horizon,
-    "minimal": _glyph_dots,
     "lofi": _glyph_record,
     "ritual": _glyph_drum,
     "glitch": _glyph_slices,
@@ -343,7 +324,6 @@ GLYPHS = {
 REACH = {
     "berlin_school": 380,
     "ambient": 330,
-    "minimal": 350,
     "lofi": 420,
     "ritual": 450,
     "glitch": 420,

@@ -38,7 +38,7 @@
     },
     "piece_length": {
       "label": "Lengte van het stuk",
-      "description": "Full: zo lang als de dag druk was, 10 tot 22 minuten. Condensed: dezelfde dag en hetzelfde plan in een korter stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi, Minimal en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Full- en Condensed-stukken worden apart gecachet en vooraf gerenderd."
+      "description": "Full: zo lang als de dag druk was, 10 tot 22 minuten. Condensed: dezelfde dag en hetzelfde plan in een korter stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Full- en Condensed-stukken worden apart gecachet en vooraf gerenderd."
     },
     "key": {
       "label": "Toonsoort",
@@ -50,7 +50,7 @@
     },
     "styles": {
       "label": "Aangeboden stijlen",
-      "description": "In welke stijlen elk klanklandschap wordt aangeboden: Ambient, Berlin School, Lo-fi, Minimal, Ritual en Cinematic Glitch. Elke stijl is een versie van dezelfde dag, zoals \"Vaatwasser bij Schemering (Lo-fi)\", zodat je ze kunt vergelijken."
+      "description": "In welke stijlen elk klanklandschap wordt aangeboden: Ambient, Berlin School, Lo-fi, Ritual en Cinematic Glitch. Elke stijl is een versie van dezelfde dag, zoals \"Vaatwasser bij Schemering (Lo-fi)\", zodat je ze kunt vergelijken."
     },
     "default_style": {
       "label": "Standaardstijl",

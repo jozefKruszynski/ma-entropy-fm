@@ -39,7 +39,7 @@ BUSY = replace(NEUTRAL, energy=0.95, level=HIGH, shape=ALL_DAY, warmth=0.8, stre
 HOME = Scale(2, "dorian")
 ROOMS = ("kitchen", "bedroom", "office", "bathroom", "living_room", "_house")
 SEEDS = range(40)
-STYLE_KEYS = ("ambient", "berlin_school", "lofi", "minimal", "ritual", "glitch")
+STYLE_KEYS = ("ambient", "berlin_school", "lofi", "ritual", "glitch")
 FIRST_DAY = date(2026, 11, 16)
 
 

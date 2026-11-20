@@ -3,7 +3,7 @@ Entropy FM for Music Assistant.
 
 A music source that turns the history of your Home Assistant into generative soundscapes.
 Every area of the house is an artist, every day of an area an album, and the track of an album
-is one long, slowly evolving piece in each of six styles. The house steers the texture, the
+is one long, slowly evolving piece in each of five styles. The house steers the texture, the
 density, the brightness, the space and the movement of the piece; it never writes the notes. The
 audio is synthesised while it plays, from samples that ship with the provider; no audio is
 stored, and nothing leaves the server.
@@ -117,6 +117,7 @@ from .const import (
     HASS_DOMAIN,
     LEGACY_TARGETS,
     LIBRARY_SYNC_DELAY,
+    MAX_CONCURRENT_STREAMS,
     MAX_DAYS,
     MAX_ENERGY_OFFSET,
     MIN_SCAPE_SECONDS_OF_DAY,
@@ -314,12 +315,17 @@ class EntropyFMProvider(MusicProvider):
     @property
     def is_streaming_provider(self) -> bool:
         """
-        Return True: what the source offers is larger than the library.
+        Return False: the soundscapes are made from this house, not fetched from a service.
 
-        Browsing and search show every day that Home Assistant still has; the library only holds
-        what the user added, and those days are pinned.
+        A library sync then removes what is no longer listed, such as a day that left the window
+        unpinned or a track of the other *Piece length*.
         """
-        return True
+        return False
+
+    @property
+    def max_concurrent_streams(self) -> int:
+        """Return how many soundscapes may play at once; each is rendered on the CPU of the server."""
+        return MAX_CONCURRENT_STREAMS
 
     async def _room_entries(self) -> tuple[ConfigEntry, ...]:
         """Return the settings that pick the rooms: which are offered, what the house is made of, which are kept."""

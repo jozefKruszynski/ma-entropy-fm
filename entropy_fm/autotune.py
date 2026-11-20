@@ -33,7 +33,7 @@ BENCH_SECONDS = 6
 # a piece makes notes as it goes, which the measure of a short stretch with the notes made leaves out
 NOTE_FACTOR = 1.5
 # the styles from the dearest to the cheapest, by the CPU that scripts/bench.py measures at every tier
-COST_ORDER = ("glitch", "berlin_school", "ritual", "lofi", "ambient", "minimal")
+COST_ORDER = ("glitch", "berlin_school", "ritual", "lofi", "ambient")
 
 
 def heaviest_style(offered: Iterable[str]) -> str:

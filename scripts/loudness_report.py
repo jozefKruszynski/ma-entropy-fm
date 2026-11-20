@@ -7,7 +7,7 @@ Integrated LUFS, the highest short-term loudness (3 s), true peak and loudness r
 
 Renders a three minute excerpt of the demo day in each style (the same points of the piece as the demo files: the
 night, the active daytime and the evening) and prints a table. The caps of the soundscapes: integrated -18 to -20
-LUFS for Ambient, -16 to -18 for Berlin School and Lo-fi, -15 to -17 for Minimal, -18 to -20 for Ritual, -14.5 to -15.5 for Cinematic Glitch; the highest short-term loudness
+LUFS for Ambient, -16 to -18 for Berlin School and Lo-fi, -18 to -20 for Ritual, -14.5 to -15.5 for Cinematic Glitch; the highest short-term loudness
 at most one LU above the integrated one; true peak at most -1 dBTP; the limiter takes at most 2 dB.
 """
 
@@ -27,7 +27,6 @@ TARGETS = {
     "ambient": (-20.0, -18.0),
     "berlin_school": (-18.0, -16.0),
     "lofi": (-18.0, -16.0),
-    "minimal": (-17.0, -15.0),
     "ritual": (-20.0, -18.0),
     "glitch": (-15.5, -14.5),
 }

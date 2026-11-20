@@ -4,7 +4,7 @@ The harmony the styles with chords share: voice leading, held tones, the voices 
 A voice is tagged with the energy and the warmth it suits, and the character of the day picks the voice that fits it
 best; the progressions are chord roots as scale degrees, from which the ones that rest on a diminished chord in the
 mode of the day are left out; `voice_lead` keeps the voices of the strings and the pads moving as little as possible
-and `held_runs` turns the result into long notes. Berlin School and Minimal use it, each with its own vocabulary.
+and `held_runs` turns the result into long notes. Berlin School uses it with its own vocabulary.
 
 The module imports nothing from Music Assistant.
 """

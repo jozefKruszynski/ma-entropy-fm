@@ -43,7 +43,6 @@ STYLE_TITLES = {
     "ambient": "Ambient",
     "berlin_school": "Berlin School",
     "lofi": "Lo-fi",
-    "minimal": "Minimal",
     "ritual": "Ritual",
     "glitch": "Cinematic Glitch",
 }

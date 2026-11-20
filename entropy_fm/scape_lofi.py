@@ -12,7 +12,7 @@ piece of electric piano and vinyl.
 
 How the house steers it: the energy of the day picks the tempo inside 70 to 88, how long a chord lasts (four to eight
 bars on a quiet day, one or two on a busy one), the swing (a quiet day lies back, a busy one plays straighter), the
-comping, the bass pattern and the drum pattern (half time or no kit when quiet, a rolling syncopated kit when busy);
+comping, the bass pattern and the drum pattern (a soft half time kit when quiet, a rolling syncopated kit when busy);
 the warmth picks the rounder or the glassier keys, bass, pluck and strings. The shape of the day is the form: intro,
 build, peak, release and outro enter and leave on phrases of eight bars, a build ends in a fill, and the motif of the
 room is played on the plucked line in the first and the last peak or plateau. The strongest event of the day turns the next phrase into
@@ -195,9 +195,12 @@ DRUMS_FLOOR = (0.2, 0.85)
 LIGHT_DRUMS_FLOOR = (0.15, 0.55)
 LIGHT_LAYERS = 4
 STRINGS_FLOOR = 0.35
-# the kit comes in over this stretch of energy: a day under the first has no kit
+# the kit comes in over this stretch of energy, and a quiet day outside the night keeps this much of it
 KIT_FROM = 0.1
 KIT_FULL = 0.4
+KIT_SOFT = 0.6
+# the chord chops are a short accent, so their layer plays louder than the other layers to be heard
+CHOP_GAIN = 1.2
 # how much of the kit, the comping and the bass each role of the form plays
 KIT_BY_ROLE = {INTRO: 0.0, BUILD: 0.6, CLIMAX: 1.0, RELEASE: 0.5, PLATEAU: 0.85, OUTRO: 0.0}
 COMP_BY_ROLE = {INTRO: 0.4, BUILD: 0.7, CLIMAX: 1.0, RELEASE: 0.7, PLATEAU: 0.85, OUTRO: 0.4}
@@ -319,11 +322,12 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         + SWING_DETAIL * float(plan.rng("swing").uniform(-1.0, 1.0))
     )
 
-    # the kit is part of the base of the day: the house moves how hard it plays, the energy of the day whether it
-    # plays at all, and the night lets it rest
+    # the kit is part of the base of the day: the house moves how hard it plays, the energy of the day how much of it
+    # plays, and the night lets it rest
     floor_quiet, floor_busy = LIGHT_DRUMS_FLOOR if light else DRUMS_FLOOR
     kit_scale = float(np.clip((energy - KIT_FROM) / (KIT_FULL - KIT_FROM), 0.0, 1.0))
     kit_scale = kit_scale * kit_scale * (3.0 - 2.0 * kit_scale)
+    kit_scale = KIT_SOFT + (1.0 - KIT_SOFT) * kit_scale
     drums_on = (
         plan.lift(
             np.maximum(plan.gate(activity, 0.22, 0.5), plan.runs["dish"]),
@@ -563,6 +567,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                         continue
                     if k % 2 == 1 and (light or level < 0.5 or rng.random() > sixteenths):
                         continue
+                elif kit_scale < 1.0 and rng.random() > kit_scale:
+                    continue
                 accent = 1.0 if k % 4 == 0 else 0.75 if k % 2 == 0 else 0.45
                 notes.append(
                     Note(
@@ -649,7 +655,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         ),
         "drums": Layer("drums", 0.85, None, drums_cut, 0.1, reverb=0.1, title="drums"),
         "chop": Layer(
-            "chop", 0.8, None, keys_cut * 0.6, 0.2, reverb=0.35, echo=0.2, title="chord chops"
+            "chop", CHOP_GAIN, None, keys_cut * 0.6, 0.2, reverb=0.35, echo=0.2, title="chord chops"
         ),
         "pluck": Layer("pluck", 0.8, None, None, 0.0, reverb=0.4, echo=0.15, title="plucked line"),
         "strings": Layer(

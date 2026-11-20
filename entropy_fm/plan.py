@@ -58,7 +58,6 @@ CONDENSED_SECONDS = {
     "berlin_school": 420,
     "ritual": 420,
     "lofi": 300,
-    "minimal": 300,
     "glitch": 300,
 }
 CONDENSED_DEFAULT_SECONDS = 300

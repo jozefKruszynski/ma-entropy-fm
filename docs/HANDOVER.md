@@ -47,11 +47,11 @@ Per style, the choices that must follow the data (each with music-theory constra
 
 | Choice | Driven by | Music-theory rules |
 |---|---|---|
-| Tempo | energy level and shape | Stay inside the style's idiomatic range (Lo-fi 70 to 90, Minimal 118 to 126, Berlin 100 to 140 sequencer rates, Glitch half-time 68 to 74). Change tempo only between pieces, never mid-piece. |
+| Tempo | energy level and shape | Stay inside the style's idiomatic range (Lo-fi 70 to 90, Berlin 100 to 140 sequencer rates, Glitch half-time 68 to 74). Change tempo only between pieces, never mid-piece. |
 | Key and mode | warmth, day off, season | Bright modes (lydian, ionian, mixolydian) for warm, busy days; dorian, aeolian, phrygian for cold, quiet or late days. Keep the circle-of-fifths walk between consecutive days so adjacent days stay related. Ritual stays in its pentatonics (hirajoshi, in, kumoi) and picks among them. |
 | Harmonic rhythm and progression family | energy shape | Slow harmonic rhythm (4 to 8 bars a chord) on quiet days, faster (1 to 2 bars) on busy ones. Use functional progressions where the style is tonal (Lo-fi ii-V-I and backdoor moves, Ambient modal plateaus, Berlin pedal-point with chord-root moves by fourth or fifth). Voice-lead between chords: common tones held, other voices by step. |
-| Lead and bass voices | warmth and energy | Warm days: rounder voices (felt piano, Juno, strings). Cold or late: glassier, darker voices. Busy days may bring the growl bass in Berlin, Minimal and Glitch. Keep register separation: bass below C3, pads in the middle, lead above. |
-| Groove and kit | energy and rhythm of life | Quiet days: half-time or no kit, more swing in Lo-fi, fewer Minimal elements. Busy days: full kit, straighter, more syncopation. Patterns from real genre vocabularies (boom-bap, Euclidean minimal, 140 half-time), never random hits. |
+| Lead and bass voices | warmth and energy | Warm days: rounder voices (felt piano, Juno, strings). Cold or late: glassier, darker voices. Busy days may bring the growl bass in Berlin and Glitch. Keep register separation: bass below C3, pads in the middle, lead above. |
+| Groove and kit | energy and rhythm of life | Quiet days: half-time or no kit, more swing in Lo-fi. Busy days: full kit, straighter, more syncopation. Patterns from real genre vocabularies (boom-bap, 140 half-time), never random hits. |
 | Form | energy shape | A morning-heavy day builds early and fades; an evening day builds late; a single-peak day has one clear climax at the peak's position; a flat day is a plateau with slow evolution. Sections in multiples of 4 or 8 bars, transitions on phrase boundaries, a build always resolves. |
 | Room signature | the room (fixed) | A short motif (3 to 5 notes) or a signature timbre per room, transposed into the day's key and mode, appearing at least once per piece. It makes "this is the kitchen" recognisable across days and styles. |
 | Contrast range | the room's own week | Quiet days are really sparse and slow, busy days really full. Use the full range of the parameters, not 10 % either way. |
@@ -103,7 +103,7 @@ series only, generic entity ids, kept out of the shipped package).
 
 ## Decided so far (don't redo)
 
-- Library: the sync shows the shown rooms, the recent days and all six tracks of each day; hearts
+- Library: the sync shows the shown rooms, the recent days and all five tracks of each day; hearts
   keep days (pins). The library button does nothing special.
 - Settings: "Rooms to show" (multi-select), "Keep every day forever", "Piece length" (Full or
   Condensed, 5 to 7 minutes), "Pre-render past days", "Render quality" (Auto benchmarks the

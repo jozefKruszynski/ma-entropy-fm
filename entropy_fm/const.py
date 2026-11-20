@@ -86,6 +86,8 @@ HISTORY_CHUNK = 25
 # for when the rooms that are offered have changed
 LIBRARY_SYNC_DELAY = 10.0
 OFFERED_FILE = "offered_rooms.json"
+# soundscapes that may be rendered at once on the CPU of the server
+MAX_CONCURRENT_STREAMS = 5
 # the number of the last redraw of the covers: it is part of every cover path, so that the image cache
 # of the server cannot show a cover that was thrown away
 COVER_GENERATION_FILE = "cover_generation.json"

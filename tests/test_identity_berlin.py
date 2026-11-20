@@ -1,4 +1,4 @@
-"""Tests that the character of a day picks the identity of Berlin School and Minimal: a quiet day and a busy one of the same room."""
+"""Tests that the character of a day picks the identity of Berlin School: a quiet day and a busy one of the same room."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from entropy_fm.quality import STANDARD
 from entropy_fm.references import rescale
 from entropy_fm.scape import COMPOSERS, analysis_of, scape_score
 from entropy_fm.scape_berlin import PROGRESSIONS, RELATIVE_SHIFT
-from entropy_fm.scape_minimal import PAD_PROGRESSIONS
 from entropy_fm.score import Score
 from entropy_fm.styles import STYLES
 from entropy_fm.synth import SCALES, Scale
@@ -33,8 +32,8 @@ from .scape_tools import the_demo
 
 HOME = Scale(2, "dorian")
 DAY_SECONDS = 86400.0
-STYLE_KEYS = ("berlin_school", "minimal")
-MODES = {"berlin_school": ("aeolian", "dorian", "mixolydian", "phrygian"), "minimal": tuple(SCALES)}
+STYLE_KEYS = ("berlin_school",)
+MODES = {"berlin_school": ("aeolian", "dorian", "mixolydian", "phrygian")}
 BARS_PER_PHRASE = 8
 BEATS_PER_BAR = 4
 QUARTER_BARS = 240.0
@@ -145,8 +144,7 @@ def test_the_voices_the_patterns_and_the_growl_follow_the_day(style: str) -> Non
     """A quiet cold day and a busy warm one differ in voices and patterns, and only the busy one has a growling bass."""
     quiet, _ = _made(style, QUIET)
     busy, _ = _made(style, BUSY)
-    patterns = ("sequence A", "kit") if style == "berlin_school" else ("percussion", "figure")
-    for key in patterns:
+    for key in ("sequence A", "kit"):
         assert quiet.choices[key] != busy.choices[key], key
     assert quiet.choices["growl bass"] == "none"
     assert busy.choices["growl bass"] != "none"
@@ -172,12 +170,6 @@ def test_the_form_sits_on_eight_bar_lines(style: str, character: DayCharacter) -
         assert start / (BARS_PER_PHRASE * bar) == pytest.approx(
             round(start / (BARS_PER_PHRASE * bar))
         )
-    if style == "minimal":
-        kicks = sorted(note.t for note in score.notes if note.layer == "kick")
-        entries = [b for a, b in pairwise(kicks) if b - a > 2 * bar]
-        entries.append(kicks[0])
-        for second in entries:
-            assert second % (BARS_PER_PHRASE * bar) < bar + 0.1
 
 
 @pytest.mark.parametrize("style", STYLE_KEYS)
@@ -191,11 +183,7 @@ def test_the_motif_of_the_room_is_stated_in_the_first_peak_or_plateau(
     octave = lead_octave(plan.scale, motif)
     wanted = [round(plan.scale.midi(degree, octave)) for degree, _ in motif]
     assert min(wanted) >= LEAD_FLOOR
-    layer, voice = ("lead", None) if style == "berlin_school" else ("figure", "blip_synth")
-    played = sorted(
-        (n for n in score.notes if n.layer == layer and (voice is None or n.voice == voice)),
-        key=lambda note: note.t,
-    )
+    played = sorted((n for n in score.notes if n.layer == "lead"), key=lambda note: note.t)
     pitches = [round(note.midi) for note in played]
     found = [
         played[index].t
@@ -227,16 +215,14 @@ def test_berlin_harmony_is_idiomatic_in_every_mode(mode: str, character: DayChar
 
 
 def test_every_progression_family_moves_by_a_fourth_or_a_fifth_and_every_mode_has_one() -> None:
-    """The families of Berlin School and of the Minimal pad close by fourths and fifths, and each mode has some."""
-    for family in (PROGRESSIONS, PAD_PROGRESSIONS):
-        for _, roots, drive in family:
-            assert 0.0 <= drive <= 1.0
-            for first, second in pairwise((*roots, roots[0])):
-                if len(roots) > 1:
-                    assert (second - first) % STEPS_IN_MODE in {FOURTH, FIFTH}
-        for mode in SCALES:
-            if mode in MODES["minimal"][:4]:
-                assert progressions_for(mode, family)
+    """The families of Berlin School close by fourths and fifths, and each of its modes has some."""
+    for _, roots, drive in PROGRESSIONS:
+        assert 0.0 <= drive <= 1.0
+        for first, second in pairwise((*roots, roots[0])):
+            if len(roots) > 1:
+                assert (second - first) % STEPS_IN_MODE in {FOURTH, FIFTH}
+    for mode in MODES["berlin_school"]:
+        assert progressions_for(mode, PROGRESSIONS)
 
 
 def test_the_chords_are_voice_led_and_the_strings_hold_what_they_share() -> None:
@@ -281,15 +267,3 @@ def test_the_strongest_anomaly_moves_berlin_to_the_relative_key_for_a_phrase() -
     assert line(plain, start, start + phrase) != line(moved, start, start + phrase)
     assert line(plain, start + phrase, 900.0) == line(moved, start + phrase, 900.0)
     assert RELATIVE_SHIFT[mode] == 2
-
-
-def test_the_strongest_anomaly_is_a_breakdown_in_minimal() -> None:
-    """The kit stops for a phrase after the strongest anomaly and the groove comes back."""
-    plan = _plan("minimal", "aeolian", BUSY, ((300.0, 0.9),))
-    score = COMPOSERS["minimal"](plan)
-    bar = _bar(score)
-    phrase = BARS_PER_PHRASE * bar
-    start = -(-300.0 // phrase) * phrase
-    kicks = [n.t for n in score.notes if n.layer == "kick"]
-    assert not [t for t in kicks if start + bar <= t < start + phrase - bar]
-    assert [t for t in kicks if start + phrase + bar <= t < start + 2 * phrase]

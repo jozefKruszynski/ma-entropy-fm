@@ -54,9 +54,7 @@ def _loudness_module() -> ModuleType:
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
-@pytest.mark.parametrize(
-    "style", ["ambient", "berlin_school", "lofi", "minimal", "ritual", "glitch"]
-)
+@pytest.mark.parametrize("style", ["ambient", "berlin_school", "lofi", "ritual", "glitch"])
 def test_every_style_lands_in_its_loudness_band_with_the_limiter_hardly_working(style: str) -> None:
     """A stretch of the busy part of the piece: integrated loudness in the band, true peak under -1 dBTP, limiter under 2 dB."""
     from .scape_tools import demo, window  # noqa: PLC0415
