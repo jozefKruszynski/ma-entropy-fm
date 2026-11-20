@@ -136,7 +136,7 @@ def _mutate(
 # line, the dearest voice, comes with the busy stretches of the day)
 LINE_FLOORS = (0.7, 0.0)
 CHOIR_FLOOR = 0.5
-# below this strength of its gate a line plays on every second step only (always in the cheapest tier)
+# below this strength of its gate a line plays on every second step only
 THIN_BELOW = 0.85
 
 
@@ -203,9 +203,14 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         cell: list[int | None] = list(base)
         presence = np.ones(plan.count) if line_key == "seqA" else None
         if line_key == "seqB":
-            # the second line is part of the base: the day moves how far it sounds, never whether; the third comes with the busy day
+            # the second line is part of the base: the day moves how far it sounds, never whether; the third comes with the busy day.
+            # The cheapest tier has no floor under it: the line is the dearest thing that tier plays, so it comes with the day
             presence = plan.lift(
-                np.maximum(plan.gate(plan.activity, 0.3, 0.55), plan.runs["dish"]), LINE_FLOORS[0]
+                np.maximum(
+                    plan.gate(plan.activity, 0.3, 0.55),
+                    plan.runs["dish"],
+                ),
+                0.0 if light_tier else LINE_FLOORS[0],
             )
         if line_key == "seqC":
             presence = plan.lift(
@@ -236,7 +241,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             if (
                 line_key != "seqA"
                 and global_step % 2 == 1
-                and (light_tier or plan.at(calm_line, second) < THIN_BELOW)
+                and plan.at(calm_line, second) < THIN_BELOW
             ):
                 continue
             accent = (global_step % len(cell)) % 4 == 0

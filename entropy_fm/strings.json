@@ -34,7 +34,7 @@
     },
     "prerender": {
       "label": "Pre-render past days",
-      "description": "Shortly after midnight, and once after the start, render the tracks of the day that just ended into the audio cache, so that they play at once and cost no processor. Off does nothing. Pinned rooms renders the rooms you keep every day of, in every style you offer, and the days you added. All rooms also renders every room and the whole house in the default style. It works one track at a time at low priority, waits while a track plays, never fills more than 80 percent of the audio cache and does nothing when the cache is off."
+      "description": "Shortly after midnight, and once after the start, render the tracks of the day that just ended into the audio cache, so that they play at once and cost no processor. Off does nothing. Pinned rooms renders the rooms you keep every day of, in every style you offer, and the days and tracks you hearted. All rooms also renders every room and the whole house in the default style. It works one track at a time at low priority, waits while a track plays, never fills more than 80 percent of the audio cache and does nothing when the cache is off."
     },
     "piece_length": {
       "label": "Piece length",
@@ -54,7 +54,7 @@
     },
     "default_style": {
       "label": "Default style",
-      "description": "The style the library lists for every day, and the one an old track id plays. It is always offered."
+      "description": "The style that an old track id without a version plays, and that the All rooms pre-render uses for every room. It is always offered. The library lists every style that is offered, not only this one."
     },
     "energy_offset": {
       "label": "Activity offset",
@@ -74,11 +74,11 @@
     },
     "role_overrides": {
       "label": "Role overrides",
-      "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, dryer, fridge, oven, drone, pluck, chord, blip, pad, temperature, humidity, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; a label wins over this list."
+      "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; a label wins over this list."
     },
     "library_days": {
       "label": "Days in library",
-      "description": "How many of the last days of every room are in the library (counted back from today, at most the recorder retention below). Days you add to the library stay for good, however old."
+      "description": "How many of the last days of every room are in the library (counted back from today, at most the recorder retention below). Days you heart stay for good, however old; the window only decides which recent days the library shows."
     },
     "rooms": {
       "label": "Rooms to show",

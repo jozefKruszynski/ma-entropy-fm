@@ -108,13 +108,13 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 | Setting | Default | Values | What it does |
 |---|---|---|---|
 | Days to browse | 10 | 1 to 10 | How many days back you can browse and search. The recorder of Home Assistant keeps 10 days by default. Days you hearted stay, however old. |
-| Days in library | 7 | 1 to 10 | How many of the last days of every room are in the library, counted back from today (never more than *Days to browse*). The window rolls on at midnight. Every style of every one of these days is a track in the library. Days you heart stay for good. To hide a room, untick it in *Rooms to show*. |
+| Days in library | 7 | 1 to 10 | How many of the last days of every room are in the library, counted back from today (never more than *Days to browse*). The window rolls on at midnight. Every style of every one of these days is a track in the library. Days you heart stay for good, however old; the window only decides which recent days the library shows. To hide a room, untick it in *Rooms to show*. |
 | Rooms to show | all (nothing ticked) | any of your rooms | The rooms that appear in Music Assistant: in browsing, search, the library and the pre-render. Nothing ticked shows every room, including rooms that Home Assistant gets later. A room you leave out disappears from those lists; what you pinned or cached for it is kept (hidden, not deleted) and is back when you tick the room again. A room is still found by its id, so a queue that holds it keeps playing. When this changes, the provider asks Music Assistant to re-sync its own items, so that the library views follow. |
 | Whole House uses only these rooms | on | on, off | On: the *Whole House* soundscape is made of the ticked rooms only (every room when none is ticked). Off: it is made of every room, whatever is ticked. |
 | Hide quiet rooms | on | on, off | Do not offer a room in which nothing that would make a note or an event (a door, a motion sensor, a light, an appliance and the like) has changed over the days you can browse. A room that has only temperature, humidity, sun or other static sensors after the role filtering counts as quiet too. A room that is merely quiet on one day still offers that day. |
 | Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) as soon as they are over, even after Home Assistant purges its history. Hearting a room does the same. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
 | Styles offered | all six | any of the six styles | Which styles each day comes in, as versions of the same soundscape. |
-| Default style | Ambient | one of the six styles | The one an id without a version plays. It is always offered. |
+| Default style | Ambient | one of the six styles | The style that an id without a version plays, and that the *All rooms* pre-render uses for every room. It is always offered. The library lists every style that is offered, not only this one. |
 
 ### Sound
 
@@ -126,7 +126,7 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 | Activity offset | 0 | -50 to 50 | Points added to how lively the house seems. The activity brings layers in and out and sets how dense and how fast they are; it never writes notes. |
 | Character of the day | on | on, off | Baseline, surprise, the palette of the day and the drift of the key. Off: the plain sound, and no extra history is read. |
 | Include presence | off | on, off | Also play persons and device trackers, which tells who is home (advanced). |
-| Role overrides | empty | `entity_id=role` lines | Choose the role of an entity yourself, one line each (advanced). A label in Home Assistant is the other way. |
+| Role overrides | empty | `entity_id=role` lines | Choose the role of an entity yourself, one line each (advanced). Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. A label in Home Assistant (`entropy_fm_<role>`) is the other way and wins over this list. |
 | Extra exclusions | empty | comma separated patterns | Entities to keep out, such as `sensor.bedroom_*, light.hall_*` (advanced). |
 
 ### Covers
@@ -165,14 +165,14 @@ CPU milliseconds per second of audio, kitchen, cold, one core:
 | style | Light | Standard | Rich |
 |---|---|---|---|
 | ambient | 13.8 | 22.9 | 24.2 |
-| berlin_school | 30.2 | 43.2 | 46.0 |
+| berlin_school | 18.0 | 43.2 | 46.0 |
 | lofi | 17.5 | 30.3 | 30.5 |
 | minimal | 10.8 | 20.1 | 22.8 |
 | ritual | 14.9 | 34.6 | 32.6 |
 | glitch (Cinematic Glitch) | 15.8 | 46.6 | 45.5 |
 | budget | 20 | 60 | 120 |
 
-The budget is what a tier aims at. Light meets its 20 ms in every style except Berlin School (30.2 ms), and every
+The budget is what a tier aims at. Light meets its 20 ms in every style, and every
 style is inside the budget of Standard and Rich. Berlin School is the dearest style in Light and, by a hair, in Rich;
 Cinematic Glitch is in Standard. Glitch's swells and its growling bass are its dearest notes: each is made once and kept (the cache
 of notes keeps them in a pool of their own, so that nothing pushes them out and none is made twice), and the swells of

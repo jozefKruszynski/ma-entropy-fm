@@ -62,7 +62,7 @@ class Layer:
 
 @dataclass
 class Texture:
-    """A layer that is made from noise, not from notes: air, vinyl, hiss."""
+    """A layer that is made from noise, not from notes: the room rumble of Ambient and the vinyl of Lo-fi."""
 
     key: str
     kind: str

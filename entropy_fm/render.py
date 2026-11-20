@@ -245,14 +245,12 @@ class Renderer:
 
     # -- textures ----------------------------------------------------------------------------------
 
-    def _loop(self, key: str, kind: str) -> np.ndarray:
+    def _loop(self, key: str) -> np.ndarray:
         if key not in self._noise:
             rng = np.random.default_rng((self.seed + stable_hash(key)) % (2**63))
             n = 14 * SR
-            if kind == "air":
-                low, high = 500.0, 6500.0
-            else:
-                low, high = 40.0, 260.0
+            # the room is a low rumble, nothing above 260 Hz
+            low, high = 40.0, 260.0
             stereo = np.stack(
                 [dsp.band_noise(rng, n, low, high), dsp.band_noise(rng, n, low, high)], axis=1
             )
@@ -266,8 +264,8 @@ class Renderer:
         return self._noise[key]
 
     def _texture(self, texture: Texture, block: int) -> np.ndarray:
-        if texture.kind in {"air", "room"}:
-            loop = self._loop(texture.key, texture.kind)
+        if texture.kind == "room":
+            loop = self._loop(texture.key)
             start = (block * SR) % len(loop)
             piece = loop[start : start + SR]
             if len(piece) < SR:
@@ -281,9 +279,6 @@ class Renderer:
             return piece * ramp[:, None]
         fade = self._ramp(texture.level, block)
         rng = np.random.default_rng((self.seed + block * 7919 + stable_hash(texture.key)) % (2**63))
-        if texture.kind == "hiss":
-            wave = dsp.noise(rng, SR) * texture.gain
-            return np.stack([wave, np.roll(wave, 7)], axis=1) * fade[:, None]
         # vinyl: crackle, a few pops a second of random size, and a very quiet rumble of dust
         out = np.zeros((SR, 2), dtype=np.float32)
         count = int(rng.poisson(9.0))

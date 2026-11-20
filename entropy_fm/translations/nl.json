@@ -22,7 +22,7 @@
     },
     "days": {
       "label": "Dagen om te bladeren",
-      "description": "Hoeveel dagen terug je kunt bladeren en zoeken, van 1 tot 10. De recorder van Home Assistant bewaart standaard 10 dagen. Dagen die je aan de bibliotheek toevoegt blijven bewaard."
+      "description": "Hoeveel dagen terug je kunt bladeren en zoeken, van 1 tot 10. De recorder van Home Assistant bewaart standaard 10 dagen. Dagen die je een hartje gaf blijven bewaard, hoe oud ook."
     },
     "render_quality": {
       "label": "Renderkwaliteit",
@@ -34,7 +34,7 @@
     },
     "prerender": {
       "label": "Afgelopen dagen vooraf renderen",
-      "description": "Kort na middernacht, en eenmaal na het starten, worden de tracks van de dag die net voorbij is in de audiocache gerenderd, zodat ze meteen spelen en geen processor kosten. Uit doet niets. Vastgezette kamers rendert de kamers waarvan je elke dag bewaart, in elke stijl die je aanbiedt, en de dagen die je hebt toegevoegd. Alle kamers rendert ook elke kamer en het hele huis in de standaardstijl. Het werkt één track tegelijk met lage prioriteit, wacht zolang er een track speelt, vult de audiocache nooit voor meer dan 80 procent en doet niets als de cache uit staat."
+      "description": "Kort na middernacht, en eenmaal na het starten, worden de tracks van de dag die net voorbij is in de audiocache gerenderd, zodat ze meteen spelen en geen processor kosten. Uit doet niets. Vastgezette kamers rendert de kamers waarvan je elke dag bewaart, in elke stijl die je aanbiedt, en de dagen en tracks waaraan je een hartje gaf. Alle kamers rendert ook elke kamer en het hele huis in de standaardstijl. Het werkt één track tegelijk met lage prioriteit, wacht zolang er een track speelt, vult de audiocache nooit voor meer dan 80 procent en doet niets als de cache uit staat."
     },
     "piece_length": {
       "label": "Lengte van het stuk",
@@ -54,7 +54,7 @@
     },
     "default_style": {
       "label": "Standaardstijl",
-      "description": "De stijl die de bibliotheek voor elke dag toont, en die een oud nummer-id afspeelt. Hij wordt altijd aangeboden."
+      "description": "De stijl die een oud nummer-id zonder versie afspeelt en die de voorrendering Alle kamers voor elke kamer gebruikt. Hij wordt altijd aangeboden. De bibliotheek toont elke stijl die wordt aangeboden, niet alleen deze."
     },
     "energy_offset": {
       "label": "Activiteitsverschuiving",
@@ -74,11 +74,11 @@
     },
     "role_overrides": {
       "label": "Rolkeuze",
-      "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, dryer, fridge, oven, drone, pluck, chord, blip, pad, temperature, humidity, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; een label wint van deze lijst."
+      "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; een label wint van deze lijst."
     },
     "library_days": {
       "label": "Dagen in de bibliotheek",
-      "description": "Hoeveel van de laatste dagen van elke kamer in de bibliotheek staan (vanaf vandaag teruggeteld). Dagen die je toevoegt blijven altijd bewaard."
+      "description": "Hoeveel van de laatste dagen van elke kamer in de bibliotheek staan (vanaf vandaag teruggeteld). Dagen die je een hartje geeft blijven altijd bewaard; het venster bepaalt alleen welke recente dagen de bibliotheek toont."
     },
     "rooms": {
       "label": "Kamers om te tonen",
