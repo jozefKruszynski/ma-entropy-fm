@@ -18,7 +18,16 @@ from .pitch_tools import find_glides
 
 RATE = 44100
 # the voices that are made of samples: real pianos and strings are not harmonic to the last cent
-SAMPLED = {"felt_piano", "grand_piano", "tx_ep", "strum_pluck", "tape_strings", "chant_cello"}
+SAMPLED = {
+    "felt_piano",
+    "grand_piano",
+    "tx_ep",
+    "strum_pluck",
+    "tape_strings",
+    "chant_cello",
+    "slit_drum",
+    "woodblock",
+}
 
 
 def _print(key: str, midi: float | None = None) -> tuple[voice_report.Fingerprint, float]:

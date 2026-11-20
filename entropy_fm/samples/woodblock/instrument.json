@@ -1,0 +1,25 @@
+{
+ "name": "Woodblock, VCSL",
+ "zones": [
+  {
+   "file": "block_pp.ogg",
+   "root": 88.7,
+   "vlo": 1,
+   "vhi": 50
+  },
+  {
+   "file": "block_mp.ogg",
+   "root": 88.76,
+   "vlo": 51,
+   "vhi": 92
+  },
+  {
+   "file": "block_f.ogg",
+   "root": 88.95,
+   "vlo": 93,
+   "vhi": 127
+  }
+ ],
+ "release": 0.15,
+ "voices": 6
+}

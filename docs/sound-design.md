@@ -20,9 +20,9 @@ modulation and the energy that is not on a harmonic (under 2 percent for the syn
 
 ## Samples
 
-Only CC0 and public domain samples are bundled (about 6 MB of OGG), and every license was read at
+Only CC0 and public domain samples are bundled (about 6.4 MB of OGG), and every license was read at
 the original repository, not at a mirror: the upright piano and the string sections of VSCO 2
-Community Edition, the FM electric piano, strumstick and drum one-shots of the VCSL (both by
+Community Edition, the FM electric piano, strumstick, drum one-shots, slit drum and woodblock of the VCSL (all by
 Versilian Studios, CC0 1.0) and the Splendid Grand Piano (public domain, AKAI). The list with the
 source, author and license of every folder, and of what was looked at and refused, is in
 `entropy_fm/samples/LICENSES.md`; `scripts/fetch_samples.py` rebuilds all of it. The Mellotron archive

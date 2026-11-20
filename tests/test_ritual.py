@@ -10,7 +10,16 @@ from entropy_fm import dsp, stretch
 from entropy_fm.drums import render_hit
 from entropy_fm.plan import Plan
 from entropy_fm.quality import LIGHT, STANDARD
-from entropy_fm.scape_ritual import LENGTHS, TUNINGS
+from entropy_fm.scape_ritual import (
+    BLOCK_PATTERNS,
+    CELLS,
+    CLACK_DELAY,
+    LENGTHS,
+    MIN_GAP,
+    PLUCKS,
+    SLIT_PATTERNS,
+    TUNINGS,
+)
 from entropy_fm.score import Score
 from entropy_fm.voices import NOTES, render_note
 
@@ -19,6 +28,9 @@ from .scape_tools import demo, window
 RATE = 44100
 # no bell, chime, gong or glassy voice is allowed anywhere in Ritual
 FORBIDDEN = {"glass_pad", "fm_ep", "tx_ep", "fm_growl", "reese", "juno_pluck", "blip_synth"}
+# every voice that is plucked or struck on a string or a key: there is one of them at a time
+PLUCKED = {"strum_pluck", "nylon_ks", "felt_piano", "grand_piano", "juno_pluck", "moog_seq"}
+WOOD = {"slit", "block", "clack"}
 
 
 def _scale_of(score: Score) -> tuple[int, set[int]]:
@@ -42,17 +54,35 @@ def _frequency_track(wave: np.ndarray, seconds: tuple[float, float]) -> np.ndarr
     return track[int(seconds[0] * RATE) : int(seconds[1] * RATE)]
 
 
-def test_the_loop_lengths_share_no_simple_ratio_and_are_unequal() -> None:
-    """The three plucks of every set phase: no two lengths are within 2 percent of a ratio of small whole numbers."""
-    for lengths in LENGTHS:
-        assert len(set(lengths)) == 3
-        for a, b in itertools.combinations(sorted(lengths), 2):
-            assert b / a > 1.1, lengths
-            for p in range(1, 6):
-                for q in range(1, 6):
-                    assert abs(b / a - p / q) > 0.02 * p / q, (lengths, a, b)
-        assert min(lengths) >= 4.0
-        assert max(lengths) <= 8.0
+def test_the_wood_loops_are_of_other_lengths_than_the_pluck_and_phase_against_it() -> None:
+    """The cell is eight pulses; the slit drum and the woodblock loop in 9 to 19 pulses, none a multiple or a simple fraction of it."""
+    assert len(LENGTHS) >= 4
+    assert all(6.0 <= seconds <= 7.2 for _, seconds in LENGTHS)
+    lengths = [pulses for _, pulses, _ in (*SLIT_PATTERNS, *BLOCK_PATTERNS)]
+    assert len(set(lengths)) >= 5
+    for pulses in lengths:
+        assert pulses % 2 == 1, pulses
+    for _, pulses, hits in SLIT_PATTERNS:
+        assert 9 <= pulses <= 13
+        assert 3 <= len(hits) <= 6
+    for _, pulses, hits in BLOCK_PATTERNS:
+        assert 15 <= pulses <= 19
+        assert len(hits) <= 3
+    # the slit drum and the woodblock do not share a length
+    assert not {p for _, p, _ in SLIT_PATTERNS} & {p for _, p, _ in BLOCK_PATTERNS}
+
+
+def test_every_hit_of_the_wood_is_on_an_off_beat_of_the_pluck_pulse() -> None:
+    """A pattern has a core that always plays and extras that activity calls in, and every hit is off the beat (a half or three quarters)."""
+    for _, pulses, hits in (*SLIT_PATTERNS, *BLOCK_PATTERNS):
+        assert any(need == 0.0 for *_, need in hits), "a core"
+        assert len({pulse for pulse, *_ in hits}) == len(hits)
+        for pulse, frac, _tone, need in hits:
+            assert 0 <= pulse < pulses
+            assert frac in {0.5, 0.75}
+            assert 0.0 <= need < 1.0
+    # a pulse is at least 0.75 s, so even a late off-beat is 0.19 s from the next plucked note
+    assert min(seconds for _, seconds in LENGTHS) / 8.0 * 0.25 > 1.5 * MIN_GAP
 
 
 def test_the_vibrato_is_a_few_cents_at_five_hertz_and_begins_late() -> None:
@@ -120,19 +150,21 @@ def test_a_vibrato_note_stays_within_the_limit_and_does_not_glide() -> None:
 
 
 def test_the_score_gives_vibrato_to_the_choir_voices_and_the_leader_only() -> None:
-    """The cello section and the pad of the drone and the chant leader sing a vibrato of 4 to 8 cents; the sub and the plucks do not."""
+    """The cello section and the pad of the drone and the chant leader sing a vibrato of 4 to 8 cents; the sub, the pluck and the wood do not."""
     score, _ = demo("ritual")
     sung = {n.voice for n in score.notes if n.vib > 0.0}
     assert sung <= {"tape_strings", "juno_pad", "chant_cello"}
     assert {"tape_strings", "juno_pad", "chant_cello"} <= sung
     assert all(4.0 <= n.vib <= 8.0 for n in score.notes if n.vib > 0.0)
     assert all(
-        n.vib == 0.0 for n in score.notes if n.layer in {"sub", "plucks", "heart", "taiko", "wash"}
+        n.vib == 0.0
+        for n in score.notes
+        if n.layer in {"sub", "plucks", "heart", "taiko", "wash", *WOOD}
     )
 
 
-def test_the_night_is_drone_and_washes_alone_and_the_plucks_enter_in_turn() -> None:
-    """No pluck, lead or drum in the night; the loops come in one after another as the day wakes."""
+def test_the_night_is_drone_and_washes_alone_and_the_pluck_comes_before_the_wood() -> None:
+    """No pluck, wood, lead or drum in the night; the pluck wakes first, then the slit drum, then the woodblock."""
     score, plan = demo("ritual")
     night = _arc(plan, "night")
     in_night = {n.layer for n in score.notes if n.t < night[1]}
@@ -142,31 +174,143 @@ def test_the_night_is_drone_and_washes_alone_and_the_plucks_enter_in_turn() -> N
     assert not [
         n for n in score.notes if n.voice.startswith("drum:") and n.t >= _arc(plan, "late night")[0]
     ]
-    firsts = sorted(
-        min(n.t for n in score.notes if n.layer == "plucks" and n.voice == voice)
-        for voice in {n.voice for n in score.notes if n.layer == "plucks"}
-    )
-    assert len(firsts) == 3
-    assert firsts[1] - firsts[0] > 3.0, firsts
-    assert firsts[2] - firsts[1] > 3.0, firsts
+    first = {
+        layer: min(n.t for n in score.notes if n.layer == layer)
+        for layer in ("plucks", "slit", "block")
+    }
+    assert first["plucks"] < first["slit"] < first["block"], first
+    assert first["slit"] - first["plucks"] > 3.0, first
     last_plucks = max(n.t for n in score.notes if n.layer == "plucks")
     assert last_plucks < plan.length - 20.0, "the evening settles"
+    # the wood leaves with the evening too
+    assert max(n.t for n in score.notes if n.layer in {"slit", "block"}) < plan.length - 10.0
+
+
+def test_there_is_one_plucked_voice_at_a_time_and_never_two_plucks_together() -> None:
+    """The day deals one of strumstick, nylon and felt piano; no other voice is plucked and the notes of the line never overlap."""
+    seen = set()
+    for index in (13, 10, 7, 4, 1):
+        score, _ = demo("ritual", index)
+        voices = {n.voice for n in score.notes if n.voice in PLUCKED}
+        assert len(voices) == 1, (index, voices)
+        assert voices <= {key for _, key, _ in PLUCKS}
+        assert {n.voice for n in score.notes if n.layer == "plucks"} == voices
+        seen |= voices
+        line = sorted(n.t for n in score.notes if n.layer == "plucks")
+        # a cell is one line: its onsets sit on the grid of eight and are at least a fraction of a slot apart
+        assert min(b - a for a, b in itertools.pairwise(line)) > 0.2, index
+        # nothing plucked sounds on any other layer
+        assert not [n for n in score.notes if n.voice in PLUCKED and n.layer != "plucks"]
+    assert len(seen) >= 2, "the day changes the voice"
+    assert {key for _, key, _ in PLUCKS} == {"strum_pluck", "nylon_ks", "felt_piano"}
+    assert len(CELLS) >= 6
+
+
+def _onsets(score: Score, layers: set[str]) -> list[float]:
+    return sorted(n.t for n in score.notes if n.layer in layers)
+
+
+def test_the_wood_keeps_a_gap_to_the_pluck_and_the_hits_are_syncopated() -> None:
+    """No hit of the slit drum or the woodblock is within 120 ms of a plucked note; they fall between the plucks, on off-beats."""
+    for index in (13, 10, 7):
+        score, _ = demo("ritual", index)
+        plucks = np.array(_onsets(score, {"plucks"}))
+        assert len(plucks) > 20
+        for layer in ("slit", "block"):
+            hits = _onsets(score, {layer})
+            assert len(hits) > 5, (index, layer)
+            nearest = [float(np.abs(plucks - h).min()) for h in hits]
+            assert min(nearest) >= MIN_GAP, (index, layer, min(nearest))
+            # off the beat, not just clear of it: the typical hit is far from the nearest pluck
+            assert float(np.median(nearest)) > 0.25, (index, layer, np.median(nearest))
+        both = np.array(_onsets(score, {"slit", "block"}))
+        assert min(np.diff(both)) > 0.2, "the slit drum and the woodblock never sound together"
+
+
+def test_the_slit_drum_is_sparse_in_the_scale_and_the_busy_part_calls_in_more_of_it() -> None:
+    """Slit drum hits are low notes of the day's pentatonic, a few seconds apart; an active stretch plays more of the pattern than a calm one."""
+    score, plan = demo("ritual")
+    _, allowed = _scale_of(score)
+    slit = [n for n in score.notes if n.layer == "slit"]
+    assert slit
+    assert all(round(n.midi) % 12 in allowed for n in slit)
+    assert all(42.0 <= n.midi <= 55.0 and n.voice == "slit_drum" for n in slit)
+    assert len(slit) < 0.4 * plan.length, "sparse: well under one hit in two seconds on average"
+    block = [n for n in score.notes if n.layer == "block"]
+    assert block
+    assert all(round(n.midi) % 12 in allowed and n.voice == "woodblock" for n in block)
+    assert len(block) < 0.35 * len(slit), "very few accents"
+    assert np.mean([n.vel for n in block]) < np.mean([n.vel for n in slit]), "lower in the mix"
+    # the activity steers the density: in the busiest quarter of the awake day more of the pattern plays than in the calmest
+    awake = np.where(plan.daylight[: plan.count] > 0.5)[0] / 10.0
+    assert len(awake) > 100
+    per_second = np.array([plan.activity[int(t * 10)] for t in awake])
+    busy_t = set(np.round(awake[per_second >= np.quantile(per_second, 0.75)]).astype(int))
+    calm_t = set(np.round(awake[per_second <= np.quantile(per_second, 0.25)]).astype(int))
+    busy_hits = sum(round(n.t) in busy_t for n in slit) / max(len(busy_t), 1)
+    calm_hits = sum(round(n.t) in calm_t for n in slit) / max(len(calm_t), 1)
+    assert busy_hits >= calm_hits, (busy_hits, calm_hits)
+
+
+def test_a_few_shishi_odoshi_clacks_fall_in_a_piece_a_tick_then_a_deep_knock() -> None:
+    """A soft woodblock tick, then a lowered slit drum knock 0.14 s later; a few in a piece, apart, on a scale tone, none in the night."""
+    for index in (13, 10, 7):
+        score, plan = demo("ritual", index)
+        clack = sorted((n for n in score.notes if n.layer == "clack"), key=lambda n: n.t)
+        ticks = [n for n in clack if n.voice == "woodblock"]
+        knocks = [n for n in clack if n.voice == "slit_drum"]
+        assert 1 <= len(knocks) <= 5, (index, len(knocks))
+        assert len(ticks) == len(knocks)
+        _, allowed = _scale_of(score)
+        for tick, knock in zip(ticks, knocks, strict=True):
+            assert knock.t - tick.t == pytest.approx(CLACK_DELAY)
+            assert tick.vel < 0.5 < knock.vel, "a soft tick, then the clack"
+            assert knock.midi <= 50.0
+            assert round(knock.midi) % 12 in allowed
+            assert 80.0 <= tick.midi < 92.0
+            assert round(tick.midi) % 12 in allowed
+        if len(knocks) > 1:
+            assert min(b.t - a.t for a, b in itertools.pairwise(knocks)) >= 30.0
+        assert min(n.t for n in clack) > _arc(plan, "night")[1]
+        # a clack is clear of the plucked notes and of the other wood
+        plucks = np.array(_onsets(score, {"plucks"}))
+        assert min(float(np.abs(plucks - n.t).min()) for n in clack) >= 0.3
+        other = np.array(_onsets(score, {"slit", "block"}))
+        assert min(float(np.abs(other - n.t).min()) for n in clack) >= 0.3
+    light, _ = demo("ritual", tier=LIGHT)
+    assert not [n for n in light.notes if n.layer in {"clack", "block"}]
+    assert [n for n in light.notes if n.layer == "slit"]
+
+
+def test_the_wood_voices_are_the_vcsl_samples_and_make_no_noise_or_ring() -> None:
+    """The slit drum and the woodblock are rendered from the bundled VCSL samples; neither rings for long nor has a bright edge."""
+    for key, midi, ring in (("slit_drum", 47.0, 1.0), ("woodblock", 85.0, 0.55)):
+        wave = render_note(key, midi, 0.5, 0.7, STANDARD).mean(axis=1)
+        assert np.isfinite(wave).all()
+        assert np.abs(wave).max() > 0.01
+        assert len(wave) / RATE < ring + 0.3
+        spectrum = np.abs(np.fft.rfft(wave * np.hanning(len(wave)), 1 << 16)) ** 2
+        freqs = np.fft.rfftfreq(1 << 16, 1.0 / RATE)
+        assert spectrum[freqs > 6000.0].sum() / spectrum.sum() < 2e-3, key
+    slit = render_note("slit_drum", 47.0, 0.5, 0.7, STANDARD).mean(axis=1)
+    spectrum = np.abs(np.fft.rfft(slit[: RATE // 2] * np.hanning(RATE // 2), 1 << 16))
+    freqs = np.fft.rfftfreq(1 << 16, 1.0 / RATE)
+    band = (freqs > 60.0) & (freqs < 400.0)
+    peak = float(freqs[band][np.argmax(spectrum[band])])
+    assert abs(12.0 * np.log2(peak / 440.0) + 69.0 - 47.0) < 1.0, "the knock is read onto the note"
 
 
 def test_the_plucks_are_in_the_scale_and_the_cells_drift_by_one_step() -> None:
-    """Plucks, the leader and the drone are in the pentatonic of the day; a cell never drifts more than a step from its shape."""
+    """The pluck, the wood, the leader and the drone are in the pentatonic of the day; a cell never drifts more than a step from its shape."""
     score, plan = demo("ritual")
     root, allowed = _scale_of(score)
-    plucks = [n for n in score.notes if n.layer in {"plucks", "lead"}]
+    plucks = [n for n in score.notes if n.layer in {"plucks", "lead", *WOOD}]
     assert plucks
     assert all(round(n.midi) % 12 in allowed for n in plucks)
     drone = [n for n in score.notes if n.layer in {"drone", "sub"}]
     assert {(round(n.midi) - root) % 12 for n in drone} <= {0, 5, 7}
-    # a cell of six or seven notes moves one note at most a step either way: a voice never takes many pitches
-    for voice in {n.voice for n in score.notes if n.layer == "plucks"}:
-        assert (
-            len({n.midi for n in score.notes if n.voice == voice and n.layer == "plucks"}) <= 16
-        ), voice
+    # a cell of five to seven notes moves one note at most a step either way: the line never takes many pitches
+    assert len({n.midi for n in score.notes if n.layer == "plucks"}) <= 14
     assert not set(score.voices_used()) & FORBIDDEN
     assert plan.scale  # the day's scale is not what Ritual plays in: it has its own tuning
 
@@ -291,16 +435,19 @@ def test_ritual_has_no_noise_bed_and_a_quiet_top_end() -> None:
 
 
 def test_light_thins_the_layers_and_costs_less() -> None:
-    """Light has two plucked loops, no washes and no leader; Standard has all of them."""
+    """Light has the pluck and the slit drum, no washes, leader, woodblock or clack; Standard has all of them."""
     light, _ = demo("ritual", tier=LIGHT)
     standard, _ = demo("ritual", tier=STANDARD)
-    assert len({n.voice for n in light.notes if n.layer == "plucks"}) <= 2
-    assert len({n.voice for n in standard.notes if n.layer == "plucks"}) == 3
+    assert len({n.voice for n in light.notes if n.layer == "plucks"}) == 1
+    assert len({n.voice for n in standard.notes if n.layer == "plucks"}) == 1
     assert {n.layer for n in standard.notes} >= {
         "drone",
         "sub",
         "wash",
         "plucks",
+        "slit",
+        "block",
+        "clack",
         "lead",
         "heart",
         "taiko",

@@ -51,7 +51,7 @@ the reverb and the echo. A note names its layer.
 See the module docstrings of `scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_minimal.py`, `scape_ritual.py` and `scape_glitch.py`; each says
 what the system is and how the house steers it. In short: tape loops that phase (Ambient), a step sequencer with
 mutation rules and transposition (Berlin School), a band that varies a composed loop (Lo-fi), euclidean percussion, a
-mutating figure and an arrangement state machine (Minimal), and plucked call-and-response loops of unequal length over a
+mutating figure and an arrangement state machine (Minimal), and a plucked call-and-response line answered by a slit drum and a woodblock of other loop lengths over a
 breathing choir drone with stretched washes, a chant leader, a heartbeat and taiko (Ritual), and a film score of swells, brass-like stabs and a growling bass over half-time drums that the events of the house cut up with stutters, tape stops, brakes and freezes (Cinematic Glitch).
 
 Ritual has three rules of its own. A voice that sustains has a hint of vibrato (4 to 6 cents, 4.5 to 5.5 Hz) that

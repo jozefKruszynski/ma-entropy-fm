@@ -13,6 +13,8 @@ seamless loop, which are the only changes. `entropy_fm/samples/<instrument>/inst
 | ep/ | FM electric piano sampled from a Yamaha TX81Z, three velocity layers | VCSL, Electrophones/TX81Z/FM Piano, https://github.com/sgossner/VCSL | Versilian Studios (patches made with TX81Z Programmer, sampled from the hardware) | CC0 1.0, `LICENSE` and `README` of the repository |
 | pluck/ | strumstick played with the finger | VCSL, Chordophones/Composite Chordophones/Strumstick, https://github.com/sgossner/VCSL | Versilian Studios | CC0 1.0 |
 | drums/ | soft bass drum, snare, cross stick, claves (one-shots) | VCSL, Membranophones/Struck Membranophones and Idiophones/Struck Idiophones, https://github.com/sgossner/VCSL | Versilian Studios | CC0 1.0 |
+| slit_drum/ | slit (log) drum, both tongues, three velocities each | VCSL, Idiophones/Struck Idiophones/Slit Drum, https://github.com/sgossner/VCSL | Versilian Studios | CC0 1.0, `LICENSE` and `README` of the repository |
+| woodblock/ | woodblock, three velocities | VCSL, Idiophones/Struck Idiophones/Woodblock, https://github.com/sgossner/VCSL | Versilian Studios | CC0 1.0, `LICENSE` and `README` of the repository |
 | grand_piano/ | Splendid Grand Piano, two velocity layers, a note every three semitones | https://github.com/sfzinstruments/splendidgrandpiano | AKAI (Steinway samples released in the early 2000s), mapped by kinwie | Public Domain (README of the repository: "Public Domain samples by AKAI") |
 
 Everything else in Entropy FM (oscillators, drums that are not listed, noise, vinyl and tape) is made with

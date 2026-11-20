@@ -1,35 +1,46 @@
 """
-Ritual: three plucked loops of unequal length that phase over a deep choir drone, stretched string washes, a slow chant leader and taiko.
+Ritual: one plucked line, a slit drum and a woodblock that answer it off the beat, over a deep choir drone, stretched string washes, a slow chant leader and taiko.
 
 The generative system is a slow ceremony in a Japanese pentatonic (hirajoshi, in or kumoi, on a root the day deals).
-Three short call-and-response cells of different lengths (4 to 8 seconds, no two in a simple ratio) are plucked on a
-strumstick, a nylon string and a felt piano, round and low-passed, and drift against each other as they repeat; about
-one repeat in three moves a single note by one step of the scale and never further from where the cell began, so it
-stays a chant and never becomes noodling. Below them a drone of a cello section and a pad, and the pad an octave up (with a hint of
+One short call-and-response cell, 6 to 7.2 seconds long on a pulse of eight, is plucked on a strumstick, a nylon
+string or a felt piano (the day deals which, and there is never a second plucked voice), round and low-passed;
+about one repeat in three moves a single note by one step of the scale and never further from where the cell began,
+so it stays a chant and never becomes noodling. The cell is the only thing that is plucked: two instruments of
+wood answer it. A slit drum (the CC0 log drum of the VCSL, its two tongues read a few semitones up or down onto
+the scale) plays a slow, sparse pattern of nine, eleven or thirteen pulses, always on an off-beat of the pluck's
+pulse, so that it rests where the pluck plays, answers in the gaps and, being of another length, phases slowly
+against the cell without ever sounding on the same instant (a hit within 120 ms of a pluck is dropped). A woodblock adds a very few
+accents on off-beats, lower in the mix, in a pattern of fifteen to nineteen pulses. A few times in a piece, at a
+calm moment or after an anomaly or a shower, a deep wooden shishi-odoshi clack falls: a soft tick of the
+woodblock and, a moment later, a hollow knock of the slit drum, lowered by about six semitones. Below them a
+drone of a cello section and a pad, and the pad an octave up (with a hint of
 vibrato that begins after a second or two and is different for every voice) moves root, fifth, root, fourth over
 minutes, its low-pass opening and closing like breath over a dozen seconds and its level swelling over eleven.
 Stretched washes of string sections and piano (`stretch`) overlap under everything. Now and then a chant leader, a
-cello section playing two or three long notes of the scale with rests, answers the end of a pluck cell. In the
+cello section playing two or three long notes of the scale with rests, answers the end of the pluck cell. In the
 busy part of the day a soft heartbeat drum (a low tom, no click) keeps a slow pulse and a few big taiko strikes
 fall on that pulse, with a short accelerating roll into a strike at an unusual moment. There are no bells, no
-chimes, no gongs and no noise: the only things that are not tones are the skins of the drums.
+chimes, no gongs and no noise: the only things that are not tones are the skins of the drums and the wood.
 
-The day is spread over the piece as in the other styles. The night is drone and washes alone; the plucks come in one
-loop after another as the day wakes and leave one after another as the evening settles; the lead and the drums
-are for the awake and busy stretches.
+The day is spread over the piece as in the other styles. The night is drone and washes alone; the pluck comes in
+as the day wakes, the slit drum a little later and the woodblock last, and they leave in the same order as the
+evening settles; the lead and the drums are for the awake and busy stretches.
 
-How the house steers it: activity (with the daylight) brings the loops in and out and sets their loudness, the
-heartbeat and how often a taiko is struck; the brightness opens the filters of the plucks and the drone; the power of
+How the house steers it: activity (with the daylight and the presence in the room) brings the pluck and the wood
+in and out and sets their loudness, how many of the hits of the slit drum and the woodblock play (a pattern has
+a core that always plays and extra hits that the activity calls in), the heartbeat and how often a taiko is struck;
+the brightness opens the filters of the pluck and the drone; the power of
 the appliances thickens the drone and hardens the strikes; humidity makes the room bigger; the lights and the evening
-make the chant leader more likely; an anomaly is a roll into one big strike, a swell, a dip of the filters and a
-move of the drone to a fourth or a fifth. The house never writes a note: the notes come from the cells, the path of
-the drone, the pulse and the phrases of the leader, and the day deals which of each.
+make the chant leader more likely; an anomaly is a roll into one big strike, a swell, a dip of the filters, a
+move of the drone to a fourth or a fifth and, in its quiet after, a clack (so is a shower). The house never writes a note: the notes
+come from the cell, the patterns, the path of the drone, the pulse and the phrases of the leader, and the day deals which of each.
 
 The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -56,41 +67,82 @@ TUNINGS: tuple[tuple[str, int, tuple[int, ...]], ...] = (
     ("hirajoshi on E", 4, HIRAJOSHI),
     ("kumoi on G", 7, KUMOI),
 )
-# loop lengths in seconds of the mid, the high and the low pluck: none is in a simple ratio to another, so they keep phasing
-LENGTHS: tuple[tuple[float, float, float], ...] = (
-    (4.6, 6.5, 7.3),
-    (4.3, 6.8, 7.7),
-    (4.2, 6.6, 7.5),
-    (4.8, 6.8, 7.6),
+# the length in seconds of the pluck cell (eight pulses of a slot each), and what the day calls it
+LENGTHS: tuple[tuple[str, float], ...] = (
+    ("6.0 seconds", 6.0),
+    ("6.4 seconds", 6.4),
+    ("6.8 seconds", 6.8),
+    ("7.2 seconds", 7.2),
 )
-# which voice plays which pluck: the mid, the high and the low
-VOICE_TRIOS: tuple[tuple[str, tuple[str, str, str]], ...] = (
-    ("strumstick, nylon, felt piano", ("strum_pluck", "nylon_ks", "felt_piano")),
-    ("nylon, strumstick, soft grand", ("nylon_ks", "strum_pluck", "grand_piano")),
-    ("strumstick, felt piano, nylon", ("strum_pluck", "felt_piano", "nylon_ks")),
-    ("felt piano, nylon, strumstick", ("felt_piano", "nylon_ks", "strum_pluck")),
+# which voice plucks the line: the only plucked voice of the day, and how loud its notes are
+PLUCKS: tuple[tuple[str, str, float], ...] = (
+    ("strumstick", "strum_pluck", 0.62),
+    ("nylon", "nylon_ks", 0.62),
+    ("felt piano", "felt_piano", 0.56),
 )
-# the cells: (a slot on the grid of eight of the loop, a step of the scale from the root; 0 is the root at about D4).
+# the cells: (a slot on the grid of eight of the loop, a step of the scale from the root; 0 is the root at about G3).
 # Three notes, a rest, and the answer: every cell calls and responds.
 Cell = tuple[tuple[int, int], ...]
-MID_CELLS: tuple[tuple[str, Cell], ...] = (
+CELLS: tuple[tuple[str, Cell], ...] = (
     ("call and fall", ((0, 3), (1, 5), (2, 7), (4, 6), (5, 5), (6, 3))),
     ("upper turn", ((0, 5), (1, 7), (2, 5), (4, 3), (5, 5), (6, 3))),
     ("rising answer", ((0, 3), (2, 5), (3, 6), (5, 5), (6, 3), (7, 2))),
     ("descent", ((0, 7), (1, 6), (2, 5), (4, 3), (5, 5))),
-)
-HIGH_CELLS: tuple[tuple[str, Cell], ...] = (
-    ("rocking", ((0, 5), (1, 6), (2, 5), (4, 4), (5, 3), (6, 4), (7, 3))),
+    ("rocking", ((0, 5), (1, 6), (2, 5), (4, 4), (5, 3), (6, 4))),
     ("leap", ((0, 6), (1, 5), (3, 7), (4, 6), (6, 5))),
     ("sigh", ((0, 5), (2, 6), (3, 5), (5, 3), (6, 4))),
     ("bright call", ((0, 7), (1, 5), (2, 6), (4, 5), (5, 4), (6, 3))),
 )
-LOW_CELLS: tuple[tuple[str, Cell], ...] = (
-    ("root and fifth", ((0, 0), (1, 3), (2, 0), (4, 2), (5, 1), (6, 0))),
-    ("wide", ((0, 0), (2, 2), (3, 0), (4, 3), (6, 1))),
-    ("falling", ((0, 3), (1, 2), (2, 0), (4, 1), (6, 0))),
-    ("deep step", ((0, 0), (2, 3), (4, 2), (5, 0), (6, -2))),
+# a hit of the wood: (a pulse of the pluck's grid in the pattern, where in the pulse it falls (0.5 is the off-beat, 0.75
+# the late one), which of the tones of the scale in the register, how much activity is needed to call it in (0 is the core))
+Hit = tuple[int, float, int, float]
+# the patterns of the slit drum: the length of the loop in pulses (never a multiple or a half of the pluck's eight) and the hits
+SLIT_PATTERNS: tuple[tuple[str, int, tuple[Hit, ...]], ...] = (
+    (
+        "log walk",
+        11,
+        (
+            (1, 0.5, 0, 0.0),
+            (4, 0.5, 3, 0.0),
+            (6, 0.75, 1, 0.55),
+            (8, 0.5, 5, 0.0),
+            (10, 0.5, 2, 0.8),
+        ),
+    ),
+    ("limp", 9, ((0, 0.5, 2, 0.0), (3, 0.75, 0, 0.0), (5, 0.5, 3, 0.6), (7, 0.5, 5, 0.0))),
+    (
+        "long answer",
+        13,
+        (
+            (2, 0.5, 0, 0.0),
+            (5, 0.5, 5, 0.0),
+            (7, 0.75, 3, 0.5),
+            (9, 0.5, 1, 0.0),
+            (12, 0.5, 4, 0.8),
+        ),
+    ),
+    (
+        "stumble",
+        11,
+        (
+            (0, 0.75, 3, 0.0),
+            (3, 0.5, 0, 0.0),
+            (5, 0.5, 1, 0.5),
+            (8, 0.75, 5, 0.0),
+            (9, 0.5, 2, 0.8),
+        ),
+    ),
 )
+# the patterns of the woodblock: a few accents far apart, in loops of another length again
+BLOCK_PATTERNS: tuple[tuple[str, int, tuple[Hit, ...]], ...] = (
+    ("sparse taps", 17, ((3, 0.5, 0, 0.0), (10, 0.5, 2, 0.3), (14, 0.75, 1, 0.6))),
+    ("far apart", 19, ((6, 0.5, 1, 0.0), (13, 0.5, 0, 0.35), (17, 0.5, 2, 0.65))),
+    ("one and a late one", 15, ((4, 0.5, 2, 0.0), (11, 0.75, 0, 0.45))),
+)
+# no wood sounds within this many seconds of a plucked note (or of another wooden hit, twice as far)
+MIN_GAP = 0.12
+# the shishi-odoshi: the tick of the woodblock, then the knock of the slit drum, this many seconds later
+CLACK_DELAY = 0.14
 # the path of the drone: the interval above the root of each stretch (seven is the fifth, five the fourth), repeated
 DRONE_PATHS: tuple[tuple[str, tuple[int, ...]], ...] = (
     ("settled", (0, 7, 0, 5)),
@@ -142,11 +194,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     light = quality.max_layers <= 4
 
     tuning_name, root_pc, steps = plan.deal("tuning", TUNINGS)
-    lengths = plan.deal("loop lengths", LENGTHS)
-    trio_name, trio = plan.deal("pluck voices", VOICE_TRIOS)
-    mid_name, mid_cell = plan.deal("mid cell", MID_CELLS)
-    high_name, high_cell = plan.deal("high cell", HIGH_CELLS)
-    low_name, low_cell = plan.deal("low cell", LOW_CELLS)
+    _, pluck_len = plan.deal("pluck cell length", LENGTHS)
+    pluck_name, pluck_voice, pluck_loud = plan.deal("pluck voice", PLUCKS)
+    cell_name, cell = plan.deal("pluck cell", CELLS)
+    slit_name, slit_pulses, slit_hits = plan.deal("slit drum pattern", SLIT_PATTERNS)
+    block_name, block_pulses, block_hits = plan.deal("woodblock pattern", BLOCK_PATTERNS)
     path_name, path = plan.deal("drone path", DRONE_PATHS)
     wash_name, wash_order = plan.deal("wash set", WASH_SETS)
     lead_name, lead_gap = plan.deal("chant leader", LEAD_PRESENCE)
@@ -170,8 +222,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         plan.daylight * (0.4 + 0.6 * activity) + 0.3 * plan.evening * activity, 0.0, 1.0
     )
     busy = plan.gate(awake, 0.34, 0.6)
-    # the plucks and the chant are the base of the day: a room that is calm is awake enough for all three loops by
-    # day and in the evening, and the house moves how loud they are and how often they are moved
+    # the plucks and the chant are the base of the day: a room that is calm is awake enough for the pluck by day
+    # and in the evening, and the house moves how loud it is and how often it is moved
     awake_base = np.clip(
         plan.daylight * (0.62 + 0.38 * activity) + 0.6 * plan.evening * (0.6 + 0.4 * activity),
         0.0,
@@ -231,55 +283,209 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             second += float(rng.uniform(15.0, 24.0))
             turn += 1
 
-    # -- the plucks: three loops that enter one after another as the day wakes and leave as the evening settles
-    loops = 2 if light else 3
-    slots = (
-        ("mid", mid_cell, lengths[0], trio[0], 0.62, 0.26),
-        ("high", high_cell, lengths[1], trio[1], 0.55, 0.42),
-        ("low", low_cell, lengths[2], trio[2], 0.5, 0.10),
-    )
-    entering = sorted(slots, key=lambda s: s[5])[:loops]
+    # -- the pluck: one cell that comes in as the day wakes and leaves as the evening settles; the only plucked voice
+    slot = pluck_len / 8.0
+    pluck_rng = plan.rng("loop", "pluck")
+    base_index = [step for _, step in cell]
+    current = list(base_index)
+    origin = float(pluck_rng.uniform(0.0, pluck_len))
+    occupied = {where for where, _ in cell}
+    pluck_onsets: list[float] = []
     last_cells: list[
         tuple[float, float, float]
     ] = []  # (end of the response, the pitch it ended on, length of the loop)
-    for name, cell, loop_len, voice, loud, threshold in entering:
-        loop_rng = plan.rng("loop", name)
-        base_index = [step for _, step in cell]
-        current = list(base_index)
-        second = float(loop_rng.uniform(0.0, loop_len))
-        slot = loop_len / 8.0
-        while second < length - 2.0:
-            presence = float(np.clip((plan.at(awake_base, second) - threshold) / 0.26, 0.0, 1.0))
-            presence = float(smoothstep(np.array(presence)))
-            if presence > 0.04 and loop_rng.random() < presence**0.5:
-                if loop_rng.random() < 0.33:
-                    pick = int(loop_rng.integers(0, len(current)))
-                    current[pick] = int(
-                        np.clip(
-                            current[pick] + int(loop_rng.choice((-1, 1))),
-                            base_index[pick] - 1,
-                            base_index[pick] + 1,
-                        )
+    second = origin
+    while second < length - 2.0:
+        presence = float(np.clip((plan.at(awake_base, second) - 0.1) / 0.26, 0.0, 1.0))
+        presence = float(smoothstep(np.array(presence)))
+        if presence > 0.04 and pluck_rng.random() < presence**0.5:
+            if pluck_rng.random() < 0.33:
+                pick = int(pluck_rng.integers(0, len(current)))
+                current[pick] = int(
+                    np.clip(
+                        current[pick] + int(pluck_rng.choice((-1, 1))),
+                        base_index[pick] - 1,
+                        base_index[pick] + 1,
                     )
-                pitch = pluck_base
-                for number, ((where, _), step) in enumerate(zip(cell, current, strict=True)):
-                    when = second + where * slot + float(loop_rng.uniform(-0.008, 0.008))
-                    accent = 1.12 if number == 0 else 1.0
-                    vel = (
-                        loud
-                        * accent
-                        * (0.78 + 0.3 * presence)
-                        * (0.92 + 0.12 * plan.at(plan.bright, when))
-                        * float(loop_rng.uniform(0.92, 1.06))
+                )
+            pitch = pluck_base
+            for number, ((where, _), step) in enumerate(zip(cell, current, strict=True)):
+                when = second + where * slot + float(pluck_rng.uniform(-0.008, 0.008))
+                accent = 1.12 if number == 0 else 1.0
+                vel = (
+                    pluck_loud
+                    * accent
+                    * (0.78 + 0.3 * presence)
+                    * (0.92 + 0.12 * plan.at(plan.bright, when))
+                    * float(pluck_rng.uniform(0.92, 1.06))
+                )
+                pitch = ladder(step, pluck_base)
+                notes.append(
+                    Note(
+                        when,
+                        0.7,
+                        pitch,
+                        float(np.clip(vel, 0.1, 1.0)),
+                        pluck_voice,
+                        "plucks",
+                        patch,
                     )
-                    pitch = ladder(step, pluck_base)
-                    notes.append(
-                        Note(
-                            when, 0.7, pitch, float(np.clip(vel, 0.1, 1.0)), voice, "plucks", patch
-                        )
+                )
+                pluck_onsets.append(when)
+            last_cells.append((second + (cell[-1][0] + 1.0) * slot, pitch, pluck_len))
+        second += pluck_len
+    pluck_onsets.sort()
+
+    # -- the wood: everything of the wood is placed on the pulse of the pluck's grid, on its off-beats, and checked against
+    # the notes that are plucked, so that nothing of the wood ever sounds with a pluck
+    def tones(low: int, high: int) -> list[float]:
+        """Return the notes of the day's scale from `low` to `high`, lowest first."""
+        return [float(m) for m in range(low, high + 1) if (m - root_pc) % 12 in steps]
+
+    slit_tones = tones(42, 56)
+    block_tones = tones(83, 90)
+    knock_tone = tones(39, 50)[0]
+    tick_tone = block_tones[0]
+    wood_hits: list[float] = []  # every sound of the wood, for the gaps between them
+    slit_count = block_count = 0
+
+    def free(when: float, gap: float = MIN_GAP, wood_gap: float = 0.0) -> bool:
+        """Return True when `when` is clear of the plucked notes by `gap` and of the other wooden hits by `wood_gap`."""
+        for sorted_times, apart in ((pluck_onsets, gap), (sorted(wood_hits), wood_gap)):
+            if not sorted_times or apart <= 0.0:
+                continue
+            k = bisect_left(sorted_times, when)
+            near = sorted_times[max(k - 1, 0) : k + 1]
+            if any(abs(when - other) < apart for other in near):
+                return False
+        return True
+
+    # the shishi-odoshi: a soft tick of the woodblock, then a hollow knock of the slit drum, lowered; at the quiet after an
+    # anomaly or a shower and at a few calm moments, a few times in a piece and never close to each other
+    clack_rng = plan.rng("clack")
+    wanted_clacks = int(np.clip(length / 100.0, 1, 5))
+    clack_times: list[float] = []
+    candidates = [
+        (second + 2.8, "event")
+        for second, _ in plan.events
+        if plan.at(plan.night, second) < 0.6 and plan.at(awake_base, second) > 0.15
+    ]
+    wander = float(clack_rng.uniform(25.0, 60.0))
+    while wander < length - 12.0:
+        if (
+            plan.at(awake_base, wander) > 0.3
+            and plan.at(activity, wander) < 0.55
+            and clack_rng.random() < 0.7
+        ):
+            candidates.append((wander, "calm"))
+        wander += float(clack_rng.uniform(35.0, 70.0))
+    for at, _kind in sorted(candidates, key=lambda c: (c[1] != "event", c[0])):
+        if len(clack_times) >= wanted_clacks or at > length - 8.0:
+            continue
+        if any(abs(at - other) < 30.0 for other in clack_times):
+            continue
+        for push in (0.0, 0.3, -0.3, 0.6):
+            when = at + push
+            if free(when - 0.2, 0.3) and free(when, 0.3) and free(when + CLACK_DELAY + 0.2, 0.3):
+                clack_times.append(when)
+                break
+    if not light:
+        for when in clack_times:
+            notes.append(
+                Note(
+                    when, 0.12, tick_tone, float(clack_rng.uniform(0.3, 0.4)), "woodblock", "clack"
+                )
+            )
+            notes.append(
+                Note(
+                    when + CLACK_DELAY,
+                    0.14,
+                    knock_tone,
+                    float(clack_rng.uniform(0.74, 0.86)),
+                    "slit_drum",
+                    "clack",
+                )
+            )
+            wood_hits.extend((when, when + CLACK_DELAY))
+
+    def lay_pattern(  # noqa: PLR0913, PLR0917
+        hits: tuple[Hit, ...],
+        pulses: int,
+        tone_list: list[float],
+        voice: str,
+        layer: str,
+        gate: np.ndarray,
+        loud: float,
+        pattern_rng: np.random.Generator,
+        clear_of_wood: float,
+        rest_share: float,
+    ) -> int:
+        """Place a pattern on the pulses of the pluck, loop after loop; return how many hits were played."""
+        played = 0
+        loop = 0
+        while origin + loop * pulses * slot < length - 2.0:
+            # now and then a whole loop is left out, so that the pattern breathes
+            resting = pattern_rng.random() < rest_share
+            for pulse, frac, tone, need in hits:
+                if resting:
+                    continue
+                when = origin + (loop * pulses + pulse + frac) * slot
+                if when >= length - 2.0:
+                    continue
+                here = plan.at(gate, when)
+                drive = 0.25 + 0.75 * plan.at(activity, when)
+                roll = pattern_rng.random()
+                if (
+                    here < 0.05
+                    or roll > here**0.5
+                    or need > drive
+                    or not free(when, MIN_GAP, clear_of_wood)
+                ):
+                    continue
+                # a hit that falls where the pluck rests is the answer: a little firmer than one that fills a gap
+                answer = 1.1 if pulse % 8 not in occupied else 0.95
+                vel = loud * answer * (0.8 + 0.25 * drive) * float(pattern_rng.uniform(0.92, 1.06))
+                notes.append(
+                    Note(
+                        when,
+                        0.5,
+                        tone_list[tone % len(tone_list)],
+                        float(np.clip(vel, 0.1, 1.0)),
+                        voice,
+                        layer,
                     )
-                last_cells.append((second + (cell[-1][0] + 1.0) * slot, pitch, loop_len))
-            second += loop_len
+                )
+                wood_hits.append(when)
+                played += 1
+            loop += 1
+        return played
+
+    slit_gate = plan.gate(awake_base, 0.2, 0.5)
+    slit_count = lay_pattern(
+        slit_hits,
+        slit_pulses,
+        slit_tones,
+        "slit_drum",
+        "slit",
+        slit_gate,
+        0.62,
+        plan.rng("slit"),
+        0.45,
+        0.2,
+    )
+    if not light:
+        block_count = lay_pattern(
+            block_hits,
+            block_pulses,
+            block_tones,
+            "woodblock",
+            "block",
+            plan.gate(awake_base, 0.4, 0.7),
+            0.5,
+            plan.rng("block"),
+            0.3,
+            0.1,
+        )
 
     # -- the chant leader: a cello section answers the end of a pluck cell with two or three long notes and rests
     lead_notes = 0
@@ -472,6 +678,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     low_cut, high_cut = 520.0, 2100.0
     drone_cut = low_cut * (high_cut / low_cut) ** breath * (0.85 + 0.3 * bright) * dips(plan, 0.85)
     pluck_cut = 2500.0 * (0.75 + 0.45 * bright) * dips(plan, 0.6)
+    block_cut = 3300.0 * (0.8 + 0.4 * bright) * dips(plan, 0.6)
     drone_presence = np.clip(surge * (0.9 + 0.12 * plan.power) * (1.0 + 0.25 * swell), 0.0, 1.25)
     wash_presence = np.clip(
         (0.45 + 0.45 * plan.night + 0.2 * swell) * (1.0 - 0.25 * busy), 0.0, 1.0
@@ -482,7 +689,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         ),
         "sub": Layer("sub", 0.9, drone_presence, None, 0.0, reverb=0.1, title="round sub"),
         "wash": Layer("wash", 1.0, wash_presence, None, 0.0, reverb=0.8, title="stretched washes"),
-        "plucks": Layer("plucks", 1.0, None, pluck_cut, 0.0, reverb=0.62, title="plucked loops"),
+        "plucks": Layer("plucks", 1.0, None, pluck_cut, 0.0, reverb=0.62, title="plucked line"),
+        "slit": Layer("slit", 1.0, None, None, 0.0, reverb=0.5, title="slit drum"),
+        "block": Layer("block", 1.0, None, block_cut, 0.0, reverb=0.5, title="woodblock"),
+        "clack": Layer("clack", 1.0, None, None, 0.0, reverb=0.65, title="shishi-odoshi"),
         "lead": Layer("lead", 1.0, None, None, 0.0, reverb=0.6, title="chant leader"),
         "taiko": Layer("taiko", 1.0, None, None, 0.0, reverb=0.5, title="taiko"),
         "heart": Layer("heart", 1.0, None, None, 0.0, reverb=0.25, title="heartbeat"),
@@ -503,8 +713,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     used = score.voices_used()
     score.notes_about = [
         (
-            f"{tuning_name}; plucks of {lengths[0]:.1f}, {lengths[1]:.1f} and {lengths[2]:.1f} seconds ({loops} entering by how awake the room is) on {trio_name}, "
-            f"cells '{mid_name}', '{high_name}' and '{low_name}', about one repeat in three moving one note by a step."
+            f"{tuning_name}; one plucked line on {pluck_name} (cell '{cell_name}' of {pluck_len:.1f} seconds, about one repeat in three moving one note by a step), "
+            f"the only plucked voice. Slit drum '{slit_name}' ({slit_pulses} pulses, {slit_count} hits) and woodblock '{block_name}' "
+            f"({block_pulses} pulses, {block_count} hits) on the off-beats of the pluck's pulse, never within {int(MIN_GAP * 1000)} ms of a plucked note; "
+            f"{len(clack_times)} shishi-odoshi clacks."
         ),
         (
             f"Drone on a cello section and a Juno pad (and a quiet one an octave up) with a vibrato of 4 to 6 cents that begins after a second or two (rate and phase of each note its own), path '{path_name}' "

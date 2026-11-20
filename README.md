@@ -47,7 +47,7 @@ style always sound the same.
 | Berlin School | Interlocking sequencer lines that mutate by rule, strings, choir and a slow lead, a soft pulse when busy |
 | Lo-fi | A boom-bap band that never plays the loop the same way twice, electric piano, vinyl crackle |
 | Minimal | Euclidean percussion with a shuffle, a short figure that mutates, a deep rolling bass, 118 to 124 BPM |
-| Ritual | Three plucked loops in a Japanese scale over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko |
+| Ritual | One plucked line in a Japanese scale, answered off the beat by a slit drum and a woodblock, over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko |
 | Cinematic Glitch | Film-score swells and brass stabs, a growling bass and hard half-time drums, cut up by the doors, switches and appliances of the house |
 
 **No motion sensors needed.** A motion or occupancy sensor is still the first sign that someone is in a room, but a

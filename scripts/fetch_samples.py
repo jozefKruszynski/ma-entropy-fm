@@ -418,6 +418,55 @@ def drums(vcsl: Path) -> dict[str, object]:
     return {"name": "Drum one-shots, VCSL", "shots": shots}
 
 
+def _levelled(wave: np.ndarray, peak: float) -> np.ndarray:
+    """Return a wave scaled so that its highest sample is `peak`."""
+    return wave * (peak / max(float(np.abs(wave).max()), 1e-6))
+
+
+def slit_drum(vcsl: Path) -> dict[str, object]:
+    """
+    Make the slit drum (log drum) of the VCSL: its two tongues, three velocities each, a short ring.
+
+    There are only two pitches, a minor sixth apart (about 108 and 156 Hz); a note of the scale is the nearer
+    tongue read a few semitones up or down by the sampler. The layers are brought to peaks of 0.45, 0.65 and 0.9,
+    a gentler spread than the recording's.
+    """
+    folder = vcsl / "Idiophones" / "Struck Idiophones" / "Slit Drum"
+    items: list[dict[str, object]] = []
+    layers = {"v1": (1, 50, 0.45), "v2": (51, 92, 0.65), "v3": (93, 127, 0.9)}
+    for tongue in ("Hi", "Lo"):
+        for layer, (vlo, vhi, peak) in layers.items():
+            wave = trim(decode(folder / f"LogDrum{tongue}_MedM_{layer}_rr1_Sum.wav"), 0.8, fade=0.3)
+            root = checked_root(wave, 51 if tongue == "Hi" else 45)
+            name = f"{tongue.lower()}_{layer}.ogg"
+            write_ogg(OUT / "slit_drum" / name, _levelled(wave, peak), quality=3)
+            items.append({"file": name, "root": root, "vlo": vlo, "vhi": vhi})
+    return {
+        "name": "Slit drum, VCSL",
+        "zones": sorted(items, key=lambda i: (i["root"], i["vlo"])),  # type: ignore[arg-type,return-value]
+        "release": 0.25,
+        "voices": 6,
+    }
+
+
+def woodblock(vcsl: Path) -> dict[str, object]:
+    """A woodblock of the VCSL (one pitch, about 1.37 kHz), three velocities, trimmed to its short ring."""  # noqa: D401
+    folder = vcsl / "Idiophones" / "Struck Idiophones" / "Woodblock"
+    items: list[dict[str, object]] = []
+    layers = {
+        "pp": ("wood_click_pp_rr1", 1, 50, 0.45),
+        "mp": ("wood_click_mp", 51, 92, 0.65),
+        "f": ("wood_click3_vl2", 93, 127, 0.9),
+    }
+    for layer, (source, vlo, vhi, peak) in layers.items():
+        wave = trim(decode(folder / f"{source}.wav"), 0.35, fade=0.12)
+        root = checked_root(wave, 89)
+        name = f"block_{layer}.ogg"
+        write_ogg(OUT / "woodblock" / name, _levelled(wave, peak), quality=3)
+        items.append({"file": name, "root": root, "vlo": vlo, "vhi": vhi})
+    return {"name": "Woodblock, VCSL", "zones": items, "release": 0.15, "voices": 6}
+
+
 def grand_piano(piano: Path) -> dict[str, object]:
     """Splendid Grand Piano (public domain): two velocity layers, a note every three semitones."""
     folder = piano / "Samples"
@@ -458,6 +507,8 @@ seamless loop, which are the only changes. `entropy_fm/samples/<instrument>/inst
 | ep/ | FM electric piano sampled from a Yamaha TX81Z, three velocity layers | VCSL, Electrophones/TX81Z/FM Piano, {vcsl} | Versilian Studios (patches made with TX81Z Programmer, sampled from the hardware) | CC0 1.0, `LICENSE` and `README` of the repository |
 | pluck/ | strumstick played with the finger | VCSL, Chordophones/Composite Chordophones/Strumstick, {vcsl} | Versilian Studios | CC0 1.0 |
 | drums/ | soft bass drum, snare, cross stick, claves (one-shots) | VCSL, Membranophones/Struck Membranophones and Idiophones/Struck Idiophones, {vcsl} | Versilian Studios | CC0 1.0 |
+| slit_drum/ | slit (log) drum, both tongues, three velocities each | VCSL, Idiophones/Struck Idiophones/Slit Drum, {vcsl} | Versilian Studios | CC0 1.0, `LICENSE` and `README` of the repository |
+| woodblock/ | woodblock, three velocities | VCSL, Idiophones/Struck Idiophones/Woodblock, {vcsl} | Versilian Studios | CC0 1.0, `LICENSE` and `README` of the repository |
 | grand_piano/ | Splendid Grand Piano, two velocity layers, a note every three semitones | {piano} | AKAI (Steinway samples released in the early 2000s), mapped by kinwie | Public Domain (README of the repository: "Public Domain samples by AKAI") |
 
 Everything else in Entropy FM (oscillators, drums that are not listed, noise, vinyl and tape) is made with
@@ -488,7 +539,16 @@ def main() -> None:
     parser.add_argument(
         "--only",
         nargs="*",
-        default=["felt_piano", "strings", "ep", "pluck", "drums", "grand_piano"],
+        default=[
+            "felt_piano",
+            "strings",
+            "ep",
+            "pluck",
+            "drums",
+            "slit_drum",
+            "woodblock",
+            "grand_piano",
+        ],
     )
     args = parser.parse_args()
     if shutil.which("ffmpeg") is None:
@@ -505,7 +565,7 @@ def main() -> None:
             "Strings/Cello Section/susvib",
             "LICENSE",
         )
-    if {"ep", "pluck", "drums"} & set(args.only):
+    if {"ep", "pluck", "drums", "slit_drum", "woodblock"} & set(args.only):
         vcsl = clone(
             VCSL_URL,
             cache / "vcsl",
@@ -514,6 +574,8 @@ def main() -> None:
             "Membranophones/Struck Membranophones/Bass Drum 2",
             "Membranophones/Struck Membranophones/Snare Drum, Modern 2",
             "Idiophones/Struck Idiophones/Claves",
+            "Idiophones/Struck Idiophones/Slit Drum",
+            "Idiophones/Struck Idiophones/Woodblock",
             "LICENSE",
         )
     if "grand_piano" in args.only:
@@ -524,6 +586,8 @@ def main() -> None:
         "ep": lambda: electric_piano(vcsl),  # type: ignore[arg-type]
         "pluck": lambda: pluck(vcsl),  # type: ignore[arg-type]
         "drums": lambda: drums(vcsl),  # type: ignore[arg-type]
+        "slit_drum": lambda: slit_drum(vcsl),  # type: ignore[arg-type]
+        "woodblock": lambda: woodblock(vcsl),  # type: ignore[arg-type]
         "grand_piano": lambda: grand_piano(piano),  # type: ignore[arg-type]
     }
     for name in args.only:

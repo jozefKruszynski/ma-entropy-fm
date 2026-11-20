@@ -87,3 +87,21 @@ def test_no_sample_of_the_old_experiment_is_left() -> None:
     )
     for path in SAMPLES.rglob("*.ogg"):
         assert not path.name.startswith(("bd_", "hat_", "sn_", "elec_", "tabla_"))
+
+
+def test_the_wooden_percussion_is_bundled_small_cc0_and_rebuilt_by_the_script() -> None:
+    """The VCSL slit drum and woodblock are in the folder with a license row, under 1 MB together, and the fetch script makes them."""
+    sizes = 0
+    for folder in ("slit_drum", "woodblock"):
+        files = list((SAMPLES / folder).glob("*.ogg"))
+        assert len(files) >= 3, folder
+        sizes += sum(path.stat().st_size for path in files)
+        data = json.loads((SAMPLES / folder / "instrument.json").read_text())
+        assert {zone["file"] for zone in data["zones"]} == {path.name for path in files}
+        row = next(line for line in _text().splitlines() if line.startswith(f"| {folder}/"))
+        assert "Idiophones/Struck Idiophones" in row
+        assert "CC0 1.0" in row
+    assert sizes < 1_000_000
+    script = SCRIPT.read_text()
+    for name in ("Slit Drum", "Woodblock", "def slit_drum", "def woodblock"):
+        assert name in script

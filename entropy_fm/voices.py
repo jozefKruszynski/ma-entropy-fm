@@ -440,6 +440,22 @@ def _strum_pluck(c: Ctx) -> np.ndarray:
     return _sampled("pluck", c)
 
 
+def _struck(name: str, c: Ctx) -> np.ndarray:
+    """Return a struck wooden sample, closed with silence to the length of the note (a hit that rings shorter than it is held)."""
+    wave = _sampled(name, c)
+    if len(wave) < c.n:
+        wave = np.concatenate((wave, np.zeros((c.n - len(wave), 2), dtype=wave.dtype)))
+    return wave
+
+
+def _slit_drum(c: Ctx) -> np.ndarray:
+    return _struck("slit_drum", c)
+
+
+def _woodblock(c: Ctx) -> np.ndarray:
+    return _struck("woodblock", c)
+
+
 def _juno_pluck(c: Ctx) -> np.ndarray:
     t = _t(c.n)
     f = c.freq
@@ -543,6 +559,10 @@ VOICES: dict[str, Voice] = {
         Voice("juno_pluck", "Juno-style pluck", "pluck", 64, 0.4, _juno_pluck),
         Voice("nylon_ks", "Nylon pluck (Karplus-Strong)", "pluck", 60, 0.6, _nylon_ks),
         Voice("strum_pluck", "Strumstick pluck", "pluck", 55, 0.4, _strum_pluck, sampled=True),
+        Voice(
+            "slit_drum", "Slit drum (wooden log drum)", "pluck", 48, 0.25, _slit_drum, sampled=True
+        ),
+        Voice("woodblock", "Woodblock", "pluck", 84, 0.15, _woodblock, sampled=True),
     )
 }
 

@@ -1,0 +1,43 @@
+{
+ "name": "Slit drum, VCSL",
+ "zones": [
+  {
+   "file": "lo_v3.ogg",
+   "root": 44.57,
+   "vlo": 93,
+   "vhi": 127
+  },
+  {
+   "file": "lo_v2.ogg",
+   "root": 44.61,
+   "vlo": 51,
+   "vhi": 92
+  },
+  {
+   "file": "lo_v1.ogg",
+   "root": 44.68,
+   "vlo": 1,
+   "vhi": 50
+  },
+  {
+   "file": "hi_v3.ogg",
+   "root": 50.97,
+   "vlo": 93,
+   "vhi": 127
+  },
+  {
+   "file": "hi_v2.ogg",
+   "root": 51.02,
+   "vlo": 51,
+   "vhi": 92
+  },
+  {
+   "file": "hi_v1.ogg",
+   "root": 51.06,
+   "vlo": 1,
+   "vhi": 50
+  }
+ ],
+ "release": 0.25,
+ "voices": 6
+}
