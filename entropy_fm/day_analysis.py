@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .energy import activity
+from .references import showers
 from .timeline import VoiceKind
 
 if TYPE_CHECKING:
@@ -37,6 +38,11 @@ QUIET_KINDS = frozenset(
     {VoiceKind.SUN, VoiceKind.TEMPERATURE, VoiceKind.HUMIDITY, VoiceKind.PAD_PARTIAL}
 )
 POWER_KINDS = frozenset({VoiceKind.DISHWASHER, VoiceKind.DRUM, VoiceKind.DRONE})
+# kinds that are read as a level, not counted as things that happen: the CO2 of a room changes all the time
+LEVEL_KINDS = QUIET_KINDS | {VoiceKind.AIR}
+# when the series are measured against their own days, a quiet day stays quiet: the curve is stretched to at least this
+# range (the range of 1 stretches every day to the full scale, which is what a day without a reference gets)
+REFERENCE_SPAN = 0.4
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,8 @@ class DayAnalysis:
     busyness: float = 0.5
     warmth: float = 0.5
     brightness: float = 0.5
+    # the series were measured against their own previous days, so the curve says how lively the day was
+    measured: bool = False
 
     def moments_of(self, kind: str) -> list[Moment]:
         """Return the moments of one kind, in the order of the day."""
@@ -91,6 +99,8 @@ def activity_curve(series: Sequence[Series], covered: float = DAY_SECONDS) -> np
 
     It is what the energy macro says (appliances working, lights on, things happening) and the
     density of events, so that a day of many small events counts as busy even without a big load.
+    Series that are measured against their own days (`references.rescale`) keep a quiet day quiet:
+    the curve is stretched to at least `REFERENCE_SPAN` of the scale. Others are stretched to all of it.
 
     :param series: Every voice of the day.
     :param covered: How many seconds of the day have happened (less than a day for today).
@@ -100,7 +110,7 @@ def activity_curve(series: Sequence[Series], covered: float = DAY_SECONDS) -> np
     base = activity(series, times, smooth=STEP * 2.0)
     density = np.zeros(count)
     for item in series:
-        if item.kind in QUIET_KINDS:
+        if item.kind in LEVEL_KINDS:
             continue
         moved = np.flatnonzero(np.abs(np.diff(item.norm)) > 0.05) + 1
         if len(moved):
@@ -113,6 +123,8 @@ def activity_curve(series: Sequence[Series], covered: float = DAY_SECONDS) -> np
     low, high = float(curve.min()), float(curve.max())
     if high - low < 1e-9:
         return np.full(count, 0.5)
+    if any(item.ref is not None for item in series):
+        return np.asarray(np.clip((curve - low) / max(high - low, REFERENCE_SPAN), 0.0, 1.0))
     return np.asarray((curve - low) / (high - low), dtype=np.float64)
 
 
@@ -201,9 +213,12 @@ def sections_of(curve: np.ndarray, covered: float) -> tuple[DaySection, ...]:
 
 
 def _moments(
-    series: Sequence[Series], curve: np.ndarray, anomalies: Sequence[tuple[float, float, str]]
+    series: Sequence[Series],
+    curve: np.ndarray,
+    anomalies: Sequence[tuple[float, float, str]],
+    covered: float = DAY_SECONDS,
 ) -> tuple[Moment, ...]:
-    """Collect the salient moments: appliance runs, hob cooking, anomalies and the busiest time."""
+    """Collect the salient moments: appliance runs, hob cooking, anomalies, showers and the busiest time."""
     found: list[Moment] = []
     for item in series:
         if item.kind in POWER_KINDS and item.kind != VoiceKind.DRONE:
@@ -224,6 +239,11 @@ def _moments(
     found.extend(
         Moment(float(t), "anomaly", float(score), entity) for t, score, entity in anomalies
     )
+    for item in series:
+        found.extend(
+            Moment(float(t), "shower", float(strength), item.entity_id)
+            for t, strength in showers(item, covered)
+        )
     found.append(Moment((int(np.argmax(curve)) + 0.5) * STEP, "peak", float(curve.max())))
     return tuple(sorted(found, key=lambda m: (m.time, m.kind, m.source)))
 
@@ -249,15 +269,16 @@ def analyze_day(
     busyness = float(np.clip(curve.mean() * 1.4 + 0.15 * len(anomalies), 0.0, 1.0))
     # a flat curve is normalised to 0.5, so how much really happened is told by the events
     events = sum(
-        int((np.abs(np.diff(s.norm)) > 0.05).sum()) for s in series if s.kind not in QUIET_KINDS
+        int((np.abs(np.diff(s.norm)) > 0.05).sum()) for s in series if s.kind not in LEVEL_KINDS
     )
     busyness = float(np.clip(0.5 * busyness + 0.5 * min(events / 400.0, 1.0), 0.0, 1.0))
     return DayAnalysis(
         curve,
         min(covered, DAY_SECONDS),
         sections,
-        _moments(series, curve, anomalies),
+        _moments(series, curve, anomalies, covered),
         busyness,
         warmth,
         brightness,
+        any(item.ref is not None for item in series),
     )

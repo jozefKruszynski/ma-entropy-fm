@@ -68,6 +68,9 @@ LENGTHS: tuple[tuple[float, ...], ...] = (
 LOOP_VOICES = ("tape_strings", "tape_choir", "bowed_pad", "glass_pad", "juno_pad", "string_machine")
 PIANOS = ("felt_piano", "grand_piano")
 DRONES = ("sub_round", "bowed_pad", "drawbar_organ")
+# the least presence of each loop: the first three are the base of the piece
+STRINGS_FLOOR = 0.4
+LOOP_FLOORS = (0.6, 0.5, 0.42, 0.0, 0.0)
 # the register of each loop: octaves of the root (4 holds middle C)
 OCTAVES = (3, 4, 3, 4, 5, 3, 4)
 
@@ -94,7 +97,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     plan.choices["patch"] = str(patch)
 
     busy = plan.analysis.busyness
-    loops = int(np.clip(2 + round(3.0 * busy), 2, max(quality.max_layers - 2, 2)))
+    # three loops are the floor of a full piece (two in the cheapest tier); a busy day brings in up to five
+    loops = int(np.clip(3 + round(2.0 * busy), 2, max(quality.max_layers - 2, 2)))
     activity = plan.activity
     night = plan.night
 
@@ -136,7 +140,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     notes: list[Note] = []
     # -- the tape loops
     order = rng.permutation(len(lengths))[:loops]
-    thresholds = np.linspace(-0.3, 0.45, loops)
+    thresholds = np.linspace(-0.4, 0.2, loops)
     for index, which in enumerate(order):
         loop_length = float(lengths[int(which)])
         voice = voice_a if index % 2 == 0 else voice_b
@@ -147,8 +151,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             presence = float(
                 np.clip((plan.at(activity, second) - thresholds[index]) / 0.3, 0.0, 1.0)
             )
-            presence = max(presence, 0.45 if index == 0 else 0.0) * (
-                1.0 - 0.35 * plan.at(night, second) * (index > 0)
+            # the first three loops are the base and never leave; the activity brings in the rest
+            presence = max(presence, LOOP_FLOORS[min(index, len(LOOP_FLOORS) - 1)]) * (
+                1.0 - 0.45 * plan.at(night, second) * (index > 0)
             )
             if degree is None or rng.random() < 0.18 + 0.25 * plan.at(plan.lights, second):
                 degree = pick_degree(second, degree)
@@ -169,7 +174,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     second = float(rng.uniform(4.0, 12.0))
     while second < length:
         night_here = plan.at(night, second)
-        rate = (0.03 + 0.1 * plan.at(activity, second)) * (1.0 - 0.7 * night_here)
+        rate = (0.05 + 0.1 * plan.at(activity, second)) * (1.0 - 0.55 * night_here)
         second += float(rng.exponential(1.0 / max(rate, 0.01))) + 2.2
         if second >= length:
             break
@@ -222,12 +227,16 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         second += 22.0
     drone_presence = np.clip(0.4 + 0.6 * plan.power + 0.25 * activity, 0.0, 1.0)
 
-    # -- the evening strings: a triad of a string machine or a Juno pad, swelling in when the lights are on
+    # -- the strings: a triad of a string machine or a Juno pad all day, swelling in when the lights are on in the evening
     second = 8.0
     while second < length:
-        warm = plan.at(plan.lights, second) * plan.at(plan.evening, second)
+        # a quiet triad of the string machine plays all day; the lights and the evening make it warmer and fuller
+        warm = max(
+            plan.at(plan.lights, second) * plan.at(plan.evening, second),
+            STRINGS_FLOOR * (1.0 - 0.6 * plan.at(night, second)),
+        )
         second += float(rng.uniform(26.0, 40.0))
-        if warm > 0.3 and rng.random() < 0.5 + 0.5 * warm:
+        if warm > 0.2 and rng.random() < 0.5 + 0.5 * warm:
             root = centre_at(second)
             strings = "string_machine" if patch == 0 else "juno_pad"
             for k, offset in enumerate((0, 2, 4)):
@@ -295,11 +304,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         "strings": Layer(
             "strings",
             0.8,
-            plan.gate(plan.lights * plan.evening, 0.15, 0.5),
+            plan.lift(plan.gate(plan.lights * plan.evening, 0.15, 0.5), STRINGS_FLOOR),
             None,
             0.0,
             reverb=0.8,
-            title="evening strings",
+            title="strings",
         ),
         "growl": Layer("growl", 0.5, growl_presence, None, 0.0, reverb=0.2, title="growl"),
     }
@@ -325,6 +334,6 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             f"{loops} tape loops of {', '.join(f'{lengths[int(i)]:.1f}' for i in order)} seconds (no two share a measure), on {voice_a} and {voice_b}, "
             f"pitch set '{set_name}', harmonic centres '{centre_name}' ({sum(1 for _ in centres)} moves)."
         ),
-        f"Piano '{piano}' as a Poisson process (about {0.03 + 0.1 * float(np.mean(activity)):.2f} a second at the mean activity), drone on {drone_voice}.",
+        f"Piano '{piano}' as a Poisson process (about {0.05 + 0.1 * float(np.mean(activity)):.2f} a second at the mean activity), drone on {drone_voice}.",
     ]
     return score

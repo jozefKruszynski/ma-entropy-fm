@@ -96,6 +96,8 @@ GROWLS: tuple[tuple[str, int], ...] = (
     ("wide, bright formants", 1),
     ("dark, narrow formants", 2),
 )
+# the least of the heat that the base of the day (the bass, the first drums) is made from
+BODY_FLOOR = 0.3
 # what the house heat has to be for each part to enter (the day moves them by a few hundredths)
 THRESHOLDS = {"bass": 0.26, "kick": 0.40, "hat": 0.50, "ghost": 0.58, "full": 0.70, "big": 0.84}
 # the patterns of one half bar of the drums: sixteen steps of the 140 grid (an eighth of a beat of the tempo)
@@ -289,14 +291,18 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         * (1.0 - 0.6 * smoothstep((hour - 18.0) / 3.5))
         * (1.0 - smoothstep((hour - 22.5) / 1.5))
     )
-    heat = np.clip(np.clip(plan.activity + 0.5 * plan.power, 0.0, 1.0) * day * 1.1, 0.0, 1.0)
+    lively = np.clip(plan.activity + 0.5 * plan.power, 0.0, 1.0)
+    heat = np.clip(lively * day * 1.1, 0.0, 1.0)
+    # the body of the day: the bass and the first drums are the base by day, and the house adds the rest; the drops,
+    # the stabs and the edits follow the heat itself, which is how lively it is
+    body = np.clip(plan.lift(lively, BODY_FLOOR) * day * 1.1, 0.0, 1.0)
     limits = {k: v + float(rng.uniform(-0.04, 0.04)) for k, v in THRESHOLDS.items()}
     first_drum = plan.piece_second_of_hour(6.5)
     last_drum = plan.piece_second_of_hour(21.5)
 
-    def heat_in(a: float, b: float) -> float:
+    def heat_in(a: float, b: float, curve: np.ndarray = heat) -> float:
         i, j = int(a * CR), max(int(b * CR), int(a * CR) + 1)
-        return float(heat[min(i, count - 1) : min(j, count)].mean())
+        return float(curve[min(i, count - 1) : min(j, count)].mean())
 
     def drums_ok(second: float) -> bool:
         return first_drum <= second < last_drum and plan.at(day, second) > 0.5
@@ -426,7 +432,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         for k in range(0, chord.bars, 2):
             b0 = chord.bar + k
             t0 = b0 * bar
-            h = heat_in(t0, t0 + 2 * bar)
+            h = heat_in(t0, t0 + 2 * bar, body)
             loud_drop = chord.drop and drops.get(chord.bar) != "far"
             if not (h >= limits["bass"] and plan.at(day, t0) > 0.35) and not loud_drop:
                 previous_state = -1
@@ -473,7 +479,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     variant = int(drum_rng.integers(0, 2))
     for b0 in range(0, bars, 2):
         t0 = b0 * bar
-        h = heat_in(t0, t0 + 2 * bar)
+        h = heat_in(t0, t0 + 2 * bar, body)
         raw = sum(1 for key in ("kick", "hat", "ghost", "full", "big") if h >= limits[key])
         if not drums_ok(t0) or not drums_ok(t0 + 2 * bar - 0.1):
             raw = 0

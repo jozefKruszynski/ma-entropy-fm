@@ -69,7 +69,7 @@ CACHE_SCHEMA = 1
 # the baseline of a day is built from the days before it, which no longer change
 BASELINE_DAYS = 7
 BASELINE_EXPIRATION = 86400
-BASELINE_SCHEMA = 1
+BASELINE_SCHEMA = 2
 HISTORY_CHUNK = 25
 
 # after a load the server is given this long to register the provider, before a library sync is asked

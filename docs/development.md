@@ -37,7 +37,7 @@ from the demo on their own.
 | `entropy_fm/render.py`, `limiter.py` | The render loop, the buses, the room, the leveler, the limiter. |
 | `entropy_fm/quality.py`, `autotune.py` | The three tiers, and the benchmark that Auto uses (it renders the dearest style that is offered). |
 | `entropy_fm/covers.py`, `maart.py`, `imageapi.py` | Album covers. |
-| `scripts/` | `soundscapes.py`, `bench.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, the demo house. |
+| `scripts/` | `soundscapes.py`, `bench.py`, `measure_drivers.py`, `render_drivers.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, the demo house. |
 
 ## Run the demo
 
@@ -57,7 +57,17 @@ uv run python scripts/loudness_report.py         # integrated LUFS, short-term, 
 uv run python scripts/glide_report.py out/*.mp3  # the glide tracker of the tests
 uv run python scripts/voice_report.py            # the fingerprint of every voice
 uv run python scripts/bench.py                   # CPU milliseconds per second of audio, per style and tier
+uv run python scripts/measure_drivers.py         # layers, density and day to day distance, on both demo houses
+uv run python scripts/render_drivers.py out/ x   # three minutes per style on the sparse house (--engine PATH plays another checkout)
 ```
+
+The demo has a second house, `scripts/sparse_house.py`, that has no motion sensors: CO2 monitors in the living room,
+the bedroom (up to 3700 ppm while sleeping) and the office (higher on workdays), a bathroom humidity sensor with a
+shower almost every day, a TV plug in the evening, a desk feed on workdays, the total power with the kettle and the
+cooking, a fridge, kitchen lights that come on for a few minutes, an office backlight, a dishwasher door that opens
+about seven times a day, a washer three times a week, blinds, a dead plant sensor and a stuck thermometer. The
+numbers are made up from statistics of a real house; there is no recorded data in the repository.
+`Demo("sparse")` plays it in the same way as the first house.
 
 `scripts/soundscapes.py` writes, for each style, `entropy_fm_<style>_demo_excerpts.mp3` and
 `entropy_fm_<style>_kitchen_excerpts.mp3` (three minutes: one from the night, one from the active

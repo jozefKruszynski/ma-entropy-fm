@@ -113,6 +113,13 @@ def _voicing(scale_root: int, chord: Chord, extended: bool) -> list[int]:  # noq
     # drop the highest tone an octave for a wider voicing now and then; the caller decides by chance
 
 
+# the least strength of the drums by day, and of the strings
+DRUMS_FLOOR = 0.6
+LIGHT_DRUMS_FLOOR = 0.45
+LIGHT_LAYERS = 4
+STRINGS_FLOOR = 0.35
+
+
 def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     """
     Make the score of a Lo-fi soundscape.
@@ -140,9 +147,12 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     activity, power = plan.activity, plan.power
     chord_bars = 1 if plan.rng("chord bars").random() < 0.55 else 2
 
-    drums_on = np.maximum(plan.gate(activity, 0.22, 0.5), plan.runs["dish"]) * (
-        1.0 - 0.85 * plan.night
-    )
+    # the kit is part of the base of the day: the house moves how hard it plays, and the night lets it rest
+    # (in the cheapest tier at a floor under the one where the off-beat hats come in)
+    drums_floor = DRUMS_FLOOR if plan.quality.max_layers > LIGHT_LAYERS else LIGHT_DRUMS_FLOOR
+    drums_on = plan.lift(
+        np.maximum(plan.gate(activity, 0.22, 0.5), plan.runs["dish"]), drums_floor
+    ) * (1.0 - 0.85 * plan.night)
     notes: list[Note] = []
     variations = {"swap": 0, "comp": 0, "chop": 0, "pluck": 0}
     current = list(progression)
@@ -283,6 +293,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     continue
                 if k % 2 == 1 and k % 4 == 1 and level < 0.5:
                     continue
+                if k % 2 == 1 and plan.quality.max_layers <= LIGHT_LAYERS:
+                    continue
                 accent = 1.0 if k % 4 == 0 else 0.75 if k % 2 == 0 else 0.45
                 hit_at = swung(k, step, swing)
                 notes.append(
@@ -304,7 +316,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 notes.append(
                     Note(at + k * 0.006, 0.12, float(midi + 12), 0.5, keys_voice, "chop", patch)
                 )
-        if bar_index % 12 == 6 and plan.at(activity, second) > 0.3 and rng.random() < 0.7:
+        if bar_index % 12 == 6 and plan.at(activity, second) > 0.12 and rng.random() < 0.7:
             variations["pluck"] += 1
             scale_tones = (
                 [voicing[0] + 12 + o for o in (0, 2, 3, 7, 10)]
@@ -324,8 +336,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                         patch % 2,
                     )
                 )
-        # the evening strings: a soft triad swelling in when the lights are on
-        warm = plan.at(plan.lights, second) * plan.at(plan.evening, second)
+        # the strings: a soft triad all day, swelling in when the lights are on in the evening
+        warm = max(plan.at(plan.lights, second) * plan.at(plan.evening, second), STRINGS_FLOOR)
         if bar_index % 8 == 0 and warm > 0.3:
             strings = "juno_pad" if patch % 2 else "string_machine"
             for k, midi in enumerate(voicing[:3]):
@@ -368,11 +380,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         "strings": Layer(
             "strings",
             0.7,
-            plan.gate(plan.lights * plan.evening, 0.15, 0.5),
+            plan.lift(plan.gate(plan.lights * plan.evening, 0.15, 0.5), STRINGS_FLOOR),
             keys_cut * 0.8,
             0.1,
             reverb=0.6,
-            title="evening strings",
+            title="strings",
         ),
     }
     space = np.clip(0.18 + 0.25 * plan.humid + 0.2 * sweep, 0.0, 0.8)

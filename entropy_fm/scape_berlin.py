@@ -132,6 +132,14 @@ def _mutate(
     return rule
 
 
+# the least presence of the second and the third sequencer line, and of the choir: the base of the piece (the third
+# line, the dearest voice, comes with the busy stretches of the day)
+LINE_FLOORS = (0.7, 0.0)
+CHOIR_FLOOR = 0.5
+# below this strength of its gate a line plays on every second step only (always in the cheapest tier)
+THIN_BELOW = 0.85
+
+
 def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     """
     Make the score of a Berlin School soundscape.
@@ -158,6 +166,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     plan.choices["patch"] = str(patch)
     activity, power = plan.activity, plan.power
     lines = 3 if quality.max_layers >= 6 else 2
+    light_tier = quality.max_layers <= 4
 
     # -- the progression: a chord root every eight bars, a step on at an anomaly
     changes = []
@@ -194,10 +203,17 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         cell: list[int | None] = list(base)
         presence = np.ones(plan.count) if line_key == "seqA" else None
         if line_key == "seqB":
-            presence = np.maximum(plan.gate(plan.activity, 0.3, 0.55), plan.runs["dish"])
+            # the second line is part of the base: the day moves how far it sounds, never whether; the third comes with the busy day
+            presence = plan.lift(
+                np.maximum(plan.gate(plan.activity, 0.3, 0.55), plan.runs["dish"]), LINE_FLOORS[0]
+            )
         if line_key == "seqC":
-            presence = np.maximum(plan.gate(plan.activity, 0.55, 0.8), plan.runs["wash"])
+            presence = plan.lift(
+                np.maximum(plan.gate(plan.activity, 0.55, 0.8), plan.runs["wash"]), LINE_FLOORS[1]
+            )
         assert presence is not None
+        # a line that is only at its floor plays on every second step: the base is a lighter line, not a missing one
+        calm_line = presence if line_key != "seqA" else np.ones(plan.count)
         presence = (
             presence * (0.4 + 0.6 * (1.0 - plan.night))
             if line_key != "seqA"
@@ -216,6 +232,12 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 continue
             here = plan.at(presence, second)
             if here < 0.06:
+                continue
+            if (
+                line_key != "seqA"
+                and global_step % 2 == 1
+                and (light_tier or plan.at(calm_line, second) < THIN_BELOW)
+            ):
                 continue
             accent = (global_step % len(cell)) % 4 == 0
             vel = (0.62 + 0.28 * plan.at(power, second) if accent else 0.5) * (0.6 + 0.4 * here)
@@ -260,16 +282,15 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     patch,
                 )
             )
-        if (
-            plan.at(plan.lights, second) > 0.45 or plan.at(plan.evening, second) > 0.5
-        ) and quality.max_layers > 4:
+        if quality.max_layers > 4:
             for k, offset_ in enumerate((0, 4, 7)):
                 notes.append(
                     Note(
                         second + 0.2 * k,
                         bar * 8 + 3.0,
                         float(scale.midi(root + offset_, 4)),
-                        0.38,
+                        0.3
+                        + 0.1 * max(plan.at(plan.lights, second), plan.at(plan.evening, second)),
                         "tape_choir",
                         "choir",
                         patch,
@@ -308,8 +329,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     second = float(rng.uniform(12.0, 30.0))
     phrases_played: list[str] = []
     while second < length - 20.0:
-        here = plan.at(activity, second) * (1.0 - 0.6 * plan.at(plan.night, second))
-        if here > 0.25 and rng.random() < 0.4 + 0.6 * here:
+        here = (0.3 + 0.7 * plan.at(activity, second)) * (1.0 - 0.6 * plan.at(plan.night, second))
+        if here > 0.22 and rng.random() < 0.4 + 0.6 * here:
             name, phrase = weighted(rng, LEAD_PHRASES, (1.0,) * len(LEAD_PHRASES))
             phrases_played.append(name)
             clock = second
@@ -457,7 +478,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     layers["choir"] = Layer(
         "choir",
         0.8,
-        plan.gate(np.maximum(plan.lights, plan.evening), 0.35, 0.7),
+        plan.lift(plan.gate(np.maximum(plan.lights, plan.evening), 0.35, 0.7), CHOIR_FLOOR),
         None,
         0.0,
         reverb=0.8,

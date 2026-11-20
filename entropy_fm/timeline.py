@@ -54,6 +54,8 @@ class VoiceKind(StrEnum):
     MEDIA = "media"
     # a cover, a blind or a window shutter: open or closed
     COVER = "cover"
+    # an air quality monitor (CO2 in ppm): how many people are in the room, and when someone comes in
+    AIR = "air"
 
 
 # kinds whose value is 0 or 1
@@ -136,6 +138,9 @@ OPENING_DEVICE_CLASSES = frozenset({"door", "window", "opening", "garage_door"})
 MOTION_DEVICE_CLASSES = frozenset({"motion", "occupancy", "presence", "moving"})
 # last resort for a sensor without a device class, in a few languages
 OPENING_WORDS = ("door", "window", "gate", "tür", "tuer", "fenster", "deur", "raam")
+# roles of power sensors that cycle all day: what the house always draws, never something that happens
+BASELINE_ROLES = frozenset({"fridge"})
+ROLE_TEXT = re.compile(r"role: ([a-z_]+)")
 SUN_ELEVATION_ENTITY = "sensor.sun_solar_elevation"
 # the sun entity of Home Assistant only reports above or below the horizon in its history
 SUN_ENTITY = "sun.sun"
@@ -169,6 +174,30 @@ def stable_hash(*parts: object) -> int:
     """
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode()).digest()
     return int.from_bytes(digest[:8], "big")
+
+
+@dataclass(frozen=True)
+class Reference:
+    """
+    What an entity read on its own previous days: the scale that its values are measured against.
+
+    It is built from the baseline (`baseline.EntityBaseline.reference`) and is what makes every room its own
+    measure: a CO2 monitor that reads 400 to 900 is as lively on a busy day as one that reads 400 to 3000.
+    """
+
+    # how many days it is built from
+    days: int
+    # the 5th, 50th and 95th percentile of the values (weighted by how long each lasted)
+    low: float
+    mid: float
+    high: float
+    # the highest 98th percentile of a single day: the level of the loudest run of an appliance
+    peak: float
+    # for a binary entity: the hours it was on and the number of times it came on, in a day
+    on_hours: float
+    on_count: float
+    # nothing ever changed in all those days
+    flat: bool
 
 
 @dataclass(frozen=True)
@@ -342,6 +371,10 @@ class Series:
     device: str = ""
     # event times that rate limiting and merging have taken away, see `condense`
     suppressed: frozenset[float] = frozenset()
+    # the role of the entity ("fridge", "washer", ...), which `build_series` reads from why the entity plays
+    role: str = ""
+    # what the entity read on the days before, when they are known (see `references.rescale`)
+    ref: Reference | None = None
 
     def __post_init__(self) -> None:
         """Prepare the running integral that makes smoothing exact."""
@@ -357,6 +390,11 @@ class Series:
             return False
         text = f"{self.entity_id} {self.name}".lower()
         return any(word in text for word in OPENING_WORDS)
+
+    @property
+    def is_baseline_load(self) -> bool:
+        """Return True for a load that runs all day by itself (a fridge): it is the floor, never activity."""
+        return self.role in BASELINE_ROLES
 
     @property
     def is_motion(self) -> bool:
@@ -467,6 +505,7 @@ def build_series(info: EntityInfo, times: Sequence[float], values: Sequence[floa
     elif info.entity_id == SUN_ELEVATION_ENTITY:
         # an elevation in degrees becomes daylight
         v = np.clip((v + 6.0) / 18.0, 0.0, 1.0)
+    found = ROLE_TEXT.match(info.why)
     return Series(
         info.entity_id,
         info.name,
@@ -476,6 +515,7 @@ def build_series(info: EntityInfo, times: Sequence[float], values: Sequence[floa
         normalise(info.kind, v),
         info.device_class,
         info.device_id,
+        role=found.group(1) if found else "",
     )
 
 
@@ -526,6 +566,7 @@ DEFAULT_LIMITS: dict[VoiceKind, int] = {
     VoiceKind.HOB: 9,
     VoiceKind.MEDIA: 2,
     VoiceKind.COVER: 3,
+    VoiceKind.AIR: 4,
 }
 
 

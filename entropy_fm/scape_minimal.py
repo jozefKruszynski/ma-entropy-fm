@@ -78,6 +78,8 @@ PADS = ("string_machine", "juno_pad", "glass_pad")
 KICKS = ("kick_soft", "kick_deep")
 TEMPOS = (118.0, 119.0, 120.0, 121.0, 122.0, 123.0, 124.0)
 ELEMENTS = ("kick", "hat", "click", "perc", "shaker", "figure", "bass", "acid", "pad")
+# the elements of the base of a piece: they play from the start and never leave, the house adds the others
+BASE = frozenset({"kick", "hat", "figure", "bass"})
 # how readily each element comes in, and goes out
 ENTER = {
     "kick": 3.0,
@@ -137,14 +139,15 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             name == "acid" and plan.at(plan.runs["wash"], second) > 0.4
         )
 
-    on = {name: name in {"kick", "figure"} for name in ELEMENTS}
+    on = {name: name in BASE for name in ELEMENTS}
     timeline: dict[str, list[tuple[int, int]]] = {name: [] for name in ELEMENTS}
     started = {name: (0 if on[name] else -1) for name in ELEMENTS}
     boundary = 0
     moves: list[str] = []
     while boundary < bars:
         second = boundary * bar
-        target = 2.0 + 5.0 * plan.at(activity, second) * (1.0 - 0.3 * plan.at(plan.night, second))
+        # four elements are the base, the house brings in up to four more
+        target = 4.0 + 4.0 * plan.at(activity, second) * (1.0 - 0.3 * plan.at(plan.night, second))
         count = sum(on.values())
         if count < round(target) or (count == round(target) and rng.random() < 0.3):
             off = [n for n in ELEMENTS if not on[n]]
@@ -154,7 +157,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 started[pick] = boundary
                 moves.append(f"{pick} in at bar {boundary}")
         else:
-            live = [n for n in ELEMENTS if on[n] and not forced(n, second)]
+            live = [n for n in ELEMENTS if on[n] and not forced(n, second) and n not in BASE]
             if live:
                 pick = weighted(rng, live, [LEAVE[n] for n in live])
                 on[pick] = False

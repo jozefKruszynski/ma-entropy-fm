@@ -12,13 +12,13 @@ value every tenth of a second of the piece, and they set the parameters of the s
 
 | The house | Steers |
 |---|---|
-| Activity of the house (appliances working, things happening, lights on) | How many layers play, how dense they are, how fast the sequences mutate, how many elements the groove has |
+| Activity of the house (people about, appliances working, things happening, lights on; see *Rooms with and without motion sensors*) | How dense the layers are, how loud they play, how fast the sequences mutate, how many elements the groove has, and which of the extra layers come in on top of the base |
 | Power of appliances | The presence of the bass and the drone, the cutoff and the accent of the sequencer; when it is high, the **growling bass** enters (often in Minimal and Berlin School, rarely in Ambient) |
 | Temperature, the sun, the time | Brightness: the cutoff of the filters and the warmth of the sound |
-| Humidity | The size of the reverb and the echo: the space |
+| Humidity | The size of the reverb and the echo: the space. A spike far above what the room usually reads (a shower) is also a texture moment of its own |
 | Lights and the evening | The harmonic colour (more extended chords, a string machine or a Juno pad that swells in) |
 | An appliance running | A layer that fades in and out: the dishwasher brings in the second Berlin line, the drum loop of Lo-fi, the clicks and percussion of Minimal (Ritual does not use it); the washer the third line or the acid line |
-| An unusual moment (a door at 03:00, a wash on a strange day) | A distinct texture event: a dip of the filters like a tape slowing down, a swell, a step of the harmony. Never a pitch glide. |
+| An unusual moment (a door at 03:00, a wash on a strange day) or a shower | A distinct texture event: a dip of the filters like a tape slowing down, a swell, a step of the harmony. Never a pitch glide. At most four a piece, of which at most two are showers. |
 
 The material is dealt per room and day from a library: the days are dealt out in shuffled rounds of
 the whole family, so a progression, a sequence cell, a voice or a patch never plays on two days
@@ -38,13 +38,62 @@ in a row and comes back as late as the size of the family allows.
 ## Surprise and the character of the day
 
 A baseline per entity is built from the previous 7 days
-(the hours in which it is usually active, and how often); routine fades into the texture and anomalies
+(the hours in which it is usually active, how often, and the scale of its values, see *Rooms with and without motion sensors*); routine fades into the texture and anomalies
 come forward: a door at 03:00, a washing machine on a day or hour it does not usually run, a day far
 warmer or colder than usual. They become texture events (at most three a piece). The day picks its
 palette: weekday or weekend sets how dense it is, the mean temperature (or the weather) the mode,
 how much the house was doing the density, and the hours with motion how much it moves. The key walks the circle of
 fifths one step per week, up to three fifths either way and back over twelve weeks, and the season
 brightens or darkens the sound: two Tuesdays a month apart sound related, not identical.
+
+## Rooms with and without motion sensors
+
+Motion and occupancy sensors are the primary sign that someone is in a room, and a house that has them is
+read as it always was. The other sources are added alongside, and each is only there when the room has its
+sensors: the activity of a room is the weighted mean of the terms that exist, so a room is blended by what it has.
+
+| Source | What it says | Weight |
+|---|---|---|
+| Motion, occupancy, doors, windows, media players (binary) | How much happens | 0.4 |
+| **CO2** (`sensor` with device class `carbon_dioxide`, or ppm with `co2` in its id) | The **level** against the room's usual range is how many people are there; a **rise** within twenty minutes is someone coming in and counts a little more. A level that builds in the night is somebody asleep: present, and counted at 45 percent. Never a note | 0.25 next to motion, 0.5 when there is none |
+| Power: plugs, meters, a TV, a desk feed, the total | What is switched on. A load that cycles all day by itself (a fridge, by its role) is the floor and never counts. It also still feeds the power curve (the bass and the drone) | 0.4 (the loudest of them) |
+| Lights | How long they are on, **how often they are switched**, and against the hours the light usually burns: a lamp that stays on says less than a kitchen light that comes on three times, and a day with more light than usual says more | 0.2 |
+| Humidity over its usual level | Steam: someone is there (a shower, a pot) | 0.3 |
+| Appliance phases, the hob | Something is being cooked or washed | 0.3 |
+
+**A room is its own measure.** Numeric sensors are not scaled with the extremes of one day any more but with the
+percentiles (5th, 50th, 95th, weighted by how long each value lasted) of the same entity over the previous 7 days,
+which the baseline keeps (the same days as for surprise). A CO2 monitor in a bedroom that reaches 3700 ppm and one
+in an office that reaches 1200 are both at the top of their scale on their busiest day, a quiet day is a low curve
+and not stretched to the full scale, and a house with many sensors is not pinned at the maximum. A power sensor is
+measured against the highest 98th percentile of a day in the week (the level of its loudest run), a temperature against
+the usual level of its sensor. The curve of the day is stretched to at least 40 percent of its range only, and the rank
+of the day (which is what gives a quiet day its highs and lows) is a smaller part of the activity. With fewer than
+three days of history, or when the setting *Character of the day* is off, a sensor keeps the scale of its own day.
+
+**Sensors that say nothing are left out.** A numeric sensor that reads the same all day and has not moved on the days
+before (a temperature sensor that is stuck, a plant sensor that is unavailable), and a light or door that has not
+changed in any of the days and today (a lamp that is always on), are dropped before the plan is made. A TV that was
+off all day but was on the days before is only quiet, not dead. When every sensor of a track would be dropped, none is.
+
+**A shower is an event.** A stretch of at most three hours in which a humidity sensor is at least 12 points (and
+2.5 times its usual spread) over its usual level is a shower: a texture moment at the moment it climbs, in
+every style (the same texture machinery as an anomaly: a dip of the filters, a swell, a step of the harmony), at most two a piece
+and four texture moments together with the anomalies. The humidity still sets the reverb as before, and
+humidity that stays up all day (the weather) is not a shower.
+
+**A calm day is still a full piece.** Every style has a base: layers that always play, at a floor of their
+strength, and the house moves how loud, dense, bright and moving they are, and brings in the layers that are special.
+The appliance runs, the vacuum and the blinds are such special moments, never needed for a full sound.
+
+| Style | The base that plays on any day | What the house brings in on top |
+|---|---|---|
+| Ambient | Three tape loops (a fourth and fifth on a busy day), the drone, the felt piano at its own rate, a quiet string machine triad all day | More loops, a denser piano, the evening strings swelling in, the growl rarely |
+| Berlin School | Two sequencer lines (the second at 70 percent at least, and only on every second step while it is calm), strings, the organ bed, the choir at half strength, the slow lead | The third line, loudness and mutation of the lines, the pulse, toms and shaker, the growl |
+| Lo-fi | Keys, bass, the kit at 60 percent by day (it rests at night), comping, quiet strings, the plucked line | The kit at full strength, ghost notes, chops, the evening strings swelling in |
+| Minimal | Kick, hats, figure and bass from the first bar and never leaving; the state machine counts four elements on a calm day, up to eight | Clicks, percussion, shaker, acid line, pad |
+| Ritual | Drone, sub, washes, all three plucked loops by day and in the evening (the night is drone and washes alone), the chant | The heartbeat, the taiko, how often the cells move |
+| Cinematic Glitch | Swells, strings, washes, the growling bass and the first drums by day (the night is swells, washes and distant booms) | The harder patterns, the stabs, the glitch edits, the drop sequences |
 
 ## Browsing, the library, pins and the cache
 
@@ -178,7 +227,7 @@ the first that has an answer wins:
    for power and energy sensors. A small table of appliance words in English, which is how
    integrations such as Home Connect, Miele, SmartThings or LG ThinQ describe their devices. Best
    effort: it only helps when the integration exposes the appliance type.
-3. **Domain and device class.** Power, energy, temperature, humidity, motion, occupancy, door,
+3. **Domain and device class.** Power, energy, temperature, humidity, carbon dioxide, motion, occupancy, door,
    window, opening, light, switch, `sun.sun`. Language independent.
 4. **Name keywords, a last resort**, only to tell a dishwasher, washer, dryer, fridge or oven from a
    plain power meter. English, German, Dutch, French, Spanish, Italian and Polish.
@@ -186,7 +235,7 @@ the first that has an answer wins:
 To tell Entropy FM what a power sensor is, create a label in Home Assistant (Settings > Areas,
 labels & zones > Labels) called `entropy_fm_dishwasher`, `entropy_fm_washer`, `entropy_fm_dryer`,
 `entropy_fm_fridge`, `entropy_fm_oven`, `entropy_fm_drone`, `entropy_fm_pluck`, `entropy_fm_chord`,
-`entropy_fm_blip`, `entropy_fm_pad`, `entropy_fm_temperature`, `entropy_fm_humidity` or
+`entropy_fm_blip`, `entropy_fm_pad`, `entropy_fm_temperature`, `entropy_fm_humidity`, `entropy_fm_co2` or
 `entropy_fm_mute`, and put it on the entity or its device. `mute` keeps an entity out of the music.
 
 Every track says why an entity plays the part that it does, in its description, for example
@@ -200,14 +249,15 @@ system of the style (see *How the house drives the music*):
 
 | Entity | Feeds |
 |---|---|
-| `sensor` power or energy (W, kW; kWh as a rate): fridge, oven, TV, a plain meter | **Power**: the bass and the drone, the cutoff and the accent of the sequencer. A fridge that cycles all day is not load: only what rises above it counts. |
+| `sensor` power or energy (W, kW; kWh as a rate): oven, TV, a desk feed, the total, a plain meter | **Power**: the bass and the drone, the cutoff and the accent of the sequencer; and **activity**, as what is switched on (against the highest run of the week). A fridge that cycles all day is the floor: it counts for nothing, and only what rises above it is load. |
 | `sensor` power of a **dishwasher** | **A run**: while it works, a layer of its own fades in (the second Berlin line, the Lo-fi drum loop, the Minimal clicks and percussion) |
 | `sensor` power of a **washer or dryer** | **A run**: the third Berlin line, the acid line of Minimal |
 | `sensor` enum (operation state, program phase), `select`, the power level of a **hob** zone | **A run** (cooking) and activity |
-| `sensor` temperature | **Brightness**, with the sun and the time of day |
-| `sensor` humidity | **Space**: the size of the room and the echo |
+| `sensor` **carbon dioxide** (ppm) | **Presence**, where there are no motion sensors and alongside them where there are: the level is how many people, a rise is someone entering, a build in the night is a sleeper. Never a note |
+| `sensor` temperature | **Brightness**, with the sun and the time of day (against the usual level of the sensor) |
+| `sensor` humidity | **Space**: the size of the room and the echo. A spike far over the usual level is a **shower**, a texture moment of its own, and steam is a little activity |
 | `binary_sensor` motion, occupancy, door, window, opening; `media_player`; other on/off entities | **Activity** (how many things happen). Never a note: fifty times as many events give less than two and a half times the notes. |
-| `light`, `switch` | **Lights**: how extended the chords are and when strings and choir swell in |
+| `light`, `switch` | **Lights**: how extended the chords are and when strings and choir swell in; and **activity**: how long they are on, how often they are switched, against the hours of the week. A light that never changes is left out |
 | `sun.sun`, or `sensor.sun_solar_elevation` when you have it | **Brightness** and the arc of the day |
 | `cover`, `sensor` progress and the like | Activity, or nothing |
 

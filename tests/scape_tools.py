@@ -25,6 +25,31 @@ def the_demo() -> demo_render.Demo:
     return demo_render.Demo()
 
 
+@lru_cache(maxsize=1)
+def the_sparse() -> demo_render.Demo:
+    """Return the invented fortnight of the sparse house, the one without motion sensors."""
+    return demo_render.Demo("sparse")
+
+
+def layers_playing(score: object) -> list[int]:
+    """Return, for each minute of a piece without its first and last, how many layers have a note sounding in it."""
+    length = int(score.length)  # type: ignore[attr-defined]
+    minutes = max(length // 60, 1)
+    found: list[set[str]] = [set() for _ in range(minutes)]
+    for note in score.notes:  # type: ignore[attr-defined]
+        layer = score.layers.get(note.layer)  # type: ignore[attr-defined]
+        first = int(note.t // 60)
+        last = int(min(note.t + note.dur, length - 1) // 60)
+        for minute in range(first, min(last, minutes - 1) + 1):
+            if layer is not None and layer.presence is not None:
+                at = int(min(max((minute * 60 + 30) * 10, 0), len(layer.presence) - 1))
+                if layer.presence[at] < 0.12:
+                    continue
+            found[minute].add(note.layer)
+    counts = [len(item) for item in found]
+    return counts[1:-1] if len(counts) > 4 else counts
+
+
 @lru_cache(maxsize=64)
 def demo(
     style: str,
@@ -51,4 +76,4 @@ def window(
     return render_all(score, tier, "test", stats, start_s=start, end_s=start + seconds)  # type: ignore[arg-type]
 
 
-__all__ = ["LIGHT", "STANDARD", "demo", "the_demo", "window"]
+__all__ = ["LIGHT", "STANDARD", "demo", "layers_playing", "the_demo", "the_sparse", "window"]

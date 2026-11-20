@@ -79,6 +79,12 @@ TRIGGER_PRIORITY = {
     "blip": 4,
 }
 # the arc: where the five stretches of the day sit in the piece, as shares of its length
+# how much of the activity of a day that is measured against its own days is the curve itself, and how much its rank
+MEASURED_CURVE = 0.5
+# showers: a couple at most in a piece, 60 seconds apart; with the anomalies at most four texture moments
+MAX_SHOWERS = 2
+MAX_EVENTS = 4
+SHOWER_GAP = 60.0
 ARC_NAMES = ("night", "morning", "daytime", "evening", "late night")
 POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 RUN_KINDS = {
@@ -211,6 +217,18 @@ class Plan:
         high = min(low + 1, len(curve) - 1)
         return float(curve[low] + (curve[high] - curve[low]) * (position - low))
 
+    def lift(self, curve: np.ndarray, floor: float) -> np.ndarray:
+        """
+        Return a 0 to 1 curve that never falls below a floor: the data shapes what is above it.
+
+        This is what keeps an arrangement full: a layer that is part of the base plays at its floor on a calm day,
+        and the house only makes it louder, denser or brighter.
+
+        :param curve: A curve between 0 and 1.
+        :param floor: The least value, 0 to 1.
+        """
+        return np.asarray(floor + (1.0 - floor) * np.clip(curve, 0.0, 1.0))
+
     def gate(self, curve: np.ndarray, low: float, high: float) -> np.ndarray:
         """Return a curve as a smooth 0 to 1 gate: 0 below `low`, 1 above `high`."""
         return np.asarray(smoothstep((curve - low) / max(high - low, 1e-6)))
@@ -302,6 +320,41 @@ def _thin_triggers(
     return sorted(kept)
 
 
+def _with_showers(
+    events: list[tuple[float, float]],
+    analysis: DayAnalysis,
+    covered: float,
+    length: int,
+    *,
+    condensed: bool,
+) -> list[tuple[float, float]]:
+    """
+    Add the showers (a spike of humidity well over what a room usually reads) to the unusual moments.
+
+    A shower is a texture moment of its own, a little softer than an anomaly: at most `MAX_SHOWERS` of them, apart
+    from each other and from the anomalies, and `MAX_EVENTS` moments in all, the strongest kept.
+
+    :param events: The unusual moments as (second of the piece, strength).
+    :param analysis: The analysis of the day, which found the showers.
+    :param covered: The seconds of the day that happened.
+    :param length: The length of the piece in seconds.
+    :param condensed: Whether the piece is condensed.
+    """
+    gap = CONDENSED_EVENT_GAP if condensed else SHOWER_GAP
+    found: list[tuple[float, float]] = []
+    for moment in sorted(analysis.moments_of("shower"), key=lambda m: (-m.strength, m.time)):
+        audio = moment.time / covered * length
+        strength = float(np.clip(0.8 * moment.strength, 0.25, 0.85))
+        if 4.0 <= audio < length - 6.0 and all(
+            abs(audio - other) >= gap for other, _ in [*events, *found]
+        ):
+            found.append((float(audio), strength))
+        if len(found) == MAX_SHOWERS:
+            break
+    merged = sorted([*events, *found], key=lambda item: (-item[1], item[0]))[:MAX_EVENTS]
+    return sorted(merged)
+
+
 def _events_and_triggers(
     series: Sequence[Series],
     analysis: DayAnalysis,
@@ -317,6 +370,7 @@ def _events_and_triggers(
         if 4.0 <= audio < length - 6.0:
             events.append((float(audio), float(np.clip(moment.strength, 0.2, 1.0))))
     events = _thin_events(events, CONDENSED_EVENT_GAP) if condensed else sorted(events)[:3]
+    events = _with_showers(events, analysis, covered, length, condensed=condensed)
     triggers = _triggers(series, covered, length)
     if condensed:
         triggers = _thin_triggers(triggers, CONDENSED_TRIGGER_GAP)
@@ -364,11 +418,16 @@ def build_plan(  # noqa: PLR0913, PLR0917
     centres = (np.arange(len(analysis.curve)) + 0.5) * 900.0
     # the curve is stretched by its rank, so that a day with one big spike still has a quiet and a lively half
     ranks = np.argsort(np.argsort(analysis.curve)) / max(len(analysis.curve) - 1, 1)
-    activity = np.interp(house, centres, 0.5 * analysis.curve**0.6 + 0.5 * ranks)
+    if analysis.measured:
+        # measured against its own days the curve already says how lively this day was: the rank is a smaller part
+        mixed = MEASURED_CURVE * analysis.curve**0.7 + (1.0 - MEASURED_CURVE) * ranks
+    else:
+        mixed = 0.5 * analysis.curve**0.6 + 0.5 * ranks
+    activity = np.interp(house, centres, mixed)
     activity = np.clip(_smooth(activity, smooth) + energy_offset, 0.0, 1.0)
 
     def combine(kinds: frozenset[VoiceKind], window: float) -> np.ndarray | None:
-        found = [item for item in series if item.kind in kinds]
+        found = [item for item in series if item.kind in kinds and not item.is_baseline_load]
         if not found:
             return None
         return np.max([item.at(house, window) for item in found], axis=0)

@@ -177,6 +177,7 @@ from .quality import (
     choose_tier,
     get_quality,
 )
+from .references import rescale
 from .render import render_pcm
 from .roles import parse_overrides
 from .roomart import artist_fanart, artist_thumb, room_kind
@@ -2157,6 +2158,11 @@ class EntropyFMProvider(MusicProvider):
                 baselines.update(await self._baselines(area_id, infos, ref, tz, now))
         if catalog.sun is not None:
             series.extend(await self._series_of("_sun", [catalog.sun], ref.day, tz, now))
+        # every sensor is measured against its own previous days, and the dead ones play nothing
+        series, dropped = rescale(series, baselines)
+        whole_day, _ = rescale(whole_day, baselines)
+        if dropped:
+            self.logger.debug("Left out %d sensors that say nothing: %s", len(dropped), dropped)
         return _Gathered(series, whole_day, baselines, covered_seconds(ref.day, tz, now))
 
     async def _scape_of(self, ref: TrackRef) -> _Scape:

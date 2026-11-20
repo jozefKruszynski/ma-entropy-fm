@@ -28,7 +28,7 @@ import numpy as np
 from .baseline import DAY_SECONDS, episodes
 from .energy import activity
 from .synth import Scale
-from .timeline import PRESENCE_DOMAINS
+from .timeline import PRESENCE_DOMAINS, VoiceKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -212,6 +212,10 @@ def derive_palette(style: Style, day: date, home: Scale, traits: DayTraits) -> D
     )
 
 
+# a room whose CO2 is this far up its usual range has someone in it
+AIR_HOME_LEVEL = 0.3
+
+
 def measure_traits(
     series: Sequence[Series],
     baselines: Mapping[str, EntityBaseline],
@@ -246,9 +250,16 @@ def measure_traits(
         item.is_motion and item.entity_id.partition(".")[0] not in PRESENCE_DOMAINS
         for item in series
     )
+    home_hours = float(len(hours)) if has_motion else None
+    air = [item for item in series if item.kind == VoiceKind.AIR]
+    if home_hours is None and air:
+        # without motion sensors the CO2 of the rooms says when someone was about: the hours it is up
+        steps = (np.arange(int(min(covered, DAY_SECONDS) // 3600)) + 0.5) * 3600.0
+        level = np.mean([item.at(steps, 1800.0) for item in air], axis=0)
+        home_hours = float(np.count_nonzero(level > AIR_HOME_LEVEL))
     return DayTraits(
         temp_z=float(np.mean(z_values)) if z_values else None,
         weather=weather,
         energy=energy,
-        home_hours=float(len(hours)) if has_motion else None,
+        home_hours=home_hours,
     )

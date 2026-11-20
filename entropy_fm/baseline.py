@@ -18,18 +18,20 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .timeline import BINARY_KINDS, MIN_POWER_PEAK, VoiceKind
+from .timeline import BINARY_KINDS, MIN_POWER_PEAK, Reference, VoiceKind
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .timeline import Series
 
-SCHEMA = 1
+SCHEMA = 2
 DAY_SECONDS = 86400.0
 # a baseline of fewer days than this is trusted only in part
 MIN_EVIDENCE_DAYS = 4
 POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
+# the percentiles of the values that make the scale of an entity (see `timeline.Reference`)
+REFERENCE_LOW, REFERENCE_MID, REFERENCE_HIGH = 5.0, 50.0, 95.0
 # a power sensor has episodes only when it has a clear on and off level
 MIN_POWER_SPAN = 3.0
 
@@ -82,6 +84,29 @@ class EntityBaseline:
     # for climate sensors: the mean of the day means, and how much they vary
     mean: float
     spread: float
+    # the scale of the values over those days: the 5th, 50th and 95th percentile, the highest daily 98th
+    # percentile, the hours on and the times on in a day (binary entities), and whether nothing ever changed
+    low: float = 0.0
+    mid: float = 0.0
+    high: float = 0.0
+    peak: float = 0.0
+    on_hours: float = 0.0
+    on_count: float = 0.0
+    flat: bool = False
+
+    @property
+    def reference(self) -> Reference:
+        """Return the scale of the entity, to measure a new day against."""
+        return Reference(
+            self.days,
+            self.low,
+            self.mid,
+            self.high,
+            self.peak,
+            self.on_hours,
+            self.on_count,
+            self.flat,
+        )
 
     @property
     def evidence(self) -> float:
@@ -112,6 +137,13 @@ class EntityBaseline:
             "cycle": round(self.cycle_s, 1),
             "mean": round(self.mean, 4),
             "spread": round(self.spread, 4),
+            "low": round(self.low, 4),
+            "mid": round(self.mid, 4),
+            "high": round(self.high, 4),
+            "peak": round(self.peak, 4),
+            "on_hours": round(self.on_hours, 3),
+            "on_count": round(self.on_count, 3),
+            "flat": self.flat,
         }
 
     @classmethod
@@ -130,7 +162,37 @@ class EntityBaseline:
             float(data["cycle"]),
             float(data["mean"]),
             float(data["spread"]),
+            float(data.get("low", 0.0)),
+            float(data.get("mid", 0.0)),
+            float(data.get("high", 0.0)),
+            float(data.get("peak", 0.0)),
+            float(data.get("on_hours", 0.0)),
+            float(data.get("on_count", 0.0)),
+            bool(data.get("flat", False)),
         )
+
+
+def weighted_percentiles(
+    values: np.ndarray, weights: np.ndarray, percentiles: Sequence[float]
+) -> list[float]:
+    """
+    Return percentiles of values that each count for as long as they lasted.
+
+    :param values: The values.
+    :param weights: How long each lasted, in seconds.
+    :param percentiles: The percentiles to return, 0 to 100.
+    """
+    if len(values) == 0 or float(weights.sum()) <= 0.0:
+        return [0.0 for _ in percentiles]
+    order = np.argsort(values, kind="stable")
+    ordered, share = values[order], np.cumsum(weights[order])
+    share = (share - 0.5 * weights[order]) / share[-1]
+    return [float(np.interp(p / 100.0, share, ordered)) for p in percentiles]
+
+
+def day_weights(series: Series, end: float = DAY_SECONDS) -> np.ndarray:
+    """Return how long (seconds) each value of a series lasted, to the end of the day."""
+    return np.maximum(np.diff(np.append(series.times, max(end, float(series.times[-1])))), 0.0)
 
 
 def has_data(day: Sequence[Series]) -> bool:
@@ -155,8 +217,27 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
     total = 0
     gaps: list[float] = []
     means: list[float] = []
+    pooled: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    peaks: list[float] = []
+    on_seconds = 0.0
+    on_periods = 0
+    changed = False
+    first_value: float | None = None
     for series in days:
+        if float(np.ptp(series.values)) > 1e-9 or (
+            first_value is not None and abs(float(series.values[0]) - first_value) > 1e-9
+        ):
+            changed = True
+        first_value = float(series.values[0])
+        span = day_weights(series)
+        pooled.append(series.values)
+        weights.append(span)
+        peaks.append(weighted_percentiles(series.values, span, (98.0,))[0])
+        if series.kind in BINARY_KINDS:
+            on_seconds += float(span[series.values > 0.5].sum())
         found = episodes(series)
+        on_periods += len(found) if series.kind in BINARY_KINDS else 0
         active += bool(found)
         total += len(found)
         for hour in {int(start // 3600) % 24 for start, _ in found}:
@@ -164,6 +245,12 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
         gaps.extend(np.diff([start for start, _ in found]).tolist())
         means.append(float(np.mean(series.values)))
     scale = max(count, 1)
+    values = np.concatenate(pooled) if pooled else np.zeros(0)
+    low, mid, high = weighted_percentiles(
+        values,
+        np.concatenate(weights) if weights else np.zeros(0),
+        (REFERENCE_LOW, REFERENCE_MID, REFERENCE_HIGH),
+    )
     return EntityBaseline(
         entity_id,
         count,
@@ -173,6 +260,13 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
         float(np.median(gaps)) if gaps else 0.0,
         float(np.mean(means)) if means else 0.0,
         float(np.std(means)) if means else 0.0,
+        low,
+        mid,
+        high,
+        max(peaks, default=0.0),
+        on_seconds / 3600.0 / scale,
+        on_periods / scale,
+        not changed,
     )
 
 

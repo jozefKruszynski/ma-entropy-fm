@@ -17,6 +17,7 @@ import wave
 from datetime import date, timedelta
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import numpy as np
 
@@ -412,8 +413,13 @@ def render_to(out: Path, name: str, audio: np.ndarray) -> Path:
 class Demo:
     """The fortnight, and what the provider would work out from it for one of its days."""
 
-    def __init__(self) -> None:
-        """Build the fortnight."""
+    def __init__(self, house: str = "motion") -> None:
+        """
+        Build the fortnight.
+
+        :param house: `motion` for the invented house with motion sensors, `sparse` for the one without
+            (`sparse_house`).
+        """
         from entropy_fm import (  # noqa: PLC0415
             baseline,
             palette,
@@ -433,7 +439,13 @@ class Demo:
             synth,
             timeline,
         )
-        self.days = [build_day(timeline, index) for index in range(DAYS)]
+        self.house = house
+        if house == "sparse":
+            import sparse_house  # noqa: PLC0415
+
+            self.days = [sparse_house.build_day(timeline, index) for index in range(DAYS)]
+        else:
+            self.days = [build_day(timeline, index) for index in range(DAYS)]
 
     def day_of(self, index: int) -> date:
         """Return the date of a day of the fortnight."""
@@ -461,6 +473,14 @@ class Demo:
         chosen = self.styles.get_style(style)
         home = self.synth.Scale(2, "dorian")
         found = baselines or {}
+        try:
+            from entropy_fm.references import rescale  # noqa: PLC0415
+        except ImportError:  # an older engine measures every day by itself
+            rescale_series: Any = None
+        else:
+            rescale_series = rescale
+        if rescale_series is not None:
+            series, _ = rescale_series(series, found)
         traits = self.palette.measure_traits(series, found, DAY)
         palette = self.palette.derive_palette(chosen, day, home, traits)
         anomalies = [

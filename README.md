@@ -50,6 +50,13 @@ style always sound the same.
 | Ritual | Three plucked loops in a Japanese scale over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko |
 | Cinematic Glitch | Film-score swells and brass stabs, a growling bass and hard half-time drums, cut up by the doors, switches and appliances of the house |
 
+**No motion sensors needed.** A motion or occupancy sensor is still the first sign that someone is in a room, but a
+house without them is read from what it has: the CO2 of its rooms (the level is how many people, a rise is someone
+coming in), plugs and meters, how long and how often the lights are on, and the humidity (a shower is a texture moment
+of its own). Every sensor is measured against its own previous 7 days, so a quiet room still has highs and lows,
+sensors that are dead or stuck are left out, and every style keeps a full base arrangement on a calm day: the house
+shapes the density, the colour and the peaks.
+
 How the house steers each style, and how an entity gets its sound, is in
 [docs/how-it-works.md](docs/how-it-works.md); the voices, the samples and the loudness are in
 [docs/sound-design.md](docs/sound-design.md).
@@ -158,12 +165,12 @@ CPU milliseconds per second of audio, kitchen, cold, one core:
 
 | style | Light | Standard | Rich |
 |---|---|---|---|
-| ambient | 15.1 | 25.6 | 27.6 |
-| berlin_school | 23.7 | 41.1 | 43.1 |
-| lofi | 17.9 | 31.9 | 34.8 |
-| minimal | 13.9 | 26.8 | 30.5 |
-| ritual | 17.4 | 41.0 | 37.8 |
-| glitch (Cinematic Glitch) | 18.2 | 50.6 | 50.5 |
+| ambient | 13.9 | 23.1 | 26.6 |
+| berlin_school | 21.4 | 42.3 | 43.7 |
+| lofi | 18.3 | 30.0 | 33.7 |
+| minimal | 11.8 | 20.8 | 23.9 |
+| ritual | 14.3 | 35.5 | 29.4 |
+| glitch (Cinematic Glitch) | 16.1 | 41.0 | 42.1 |
 | budget | 20 | 60 | 120 |
 
 The budget is what a tier aims at. Light meets its 20 ms except in Berlin School, and every style

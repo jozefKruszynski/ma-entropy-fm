@@ -170,6 +170,13 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         plan.daylight * (0.4 + 0.6 * activity) + 0.3 * plan.evening * activity, 0.0, 1.0
     )
     busy = plan.gate(awake, 0.34, 0.6)
+    # the plucks and the chant are the base of the day: a room that is calm is awake enough for all three loops by
+    # day and in the evening, and the house moves how loud they are and how often they are moved
+    awake_base = np.clip(
+        plan.daylight * (0.62 + 0.38 * activity) + 0.6 * plan.evening * (0.6 + 0.4 * activity),
+        0.0,
+        1.0,
+    )
     swell = swells(plan)
     breath = _lfo(count, float(rng.uniform(11.5, 13.5)), float(rng.uniform()))
     surge = 0.55 + 0.45 * _lfo(count, float(rng.uniform(10.0, 12.0)), float(rng.uniform()))
@@ -226,8 +233,6 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
 
     # -- the plucks: three loops that enter one after another as the day wakes and leave as the evening settles
     loops = 2 if light else 3
-    if plan.analysis.busyness < 0.25 and not light:
-        loops = 3 if plan.rng("loops").random() < 0.6 else 2
     slots = (
         ("mid", mid_cell, lengths[0], trio[0], 0.62, 0.26),
         ("high", high_cell, lengths[1], trio[1], 0.55, 0.42),
@@ -244,7 +249,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         second = float(loop_rng.uniform(0.0, loop_len))
         slot = loop_len / 8.0
         while second < length - 2.0:
-            presence = float(np.clip((plan.at(awake, second) - threshold) / 0.26, 0.0, 1.0))
+            presence = float(np.clip((plan.at(awake_base, second) - threshold) / 0.26, 0.0, 1.0))
             presence = float(smoothstep(np.array(presence)))
             if presence > 0.04 and loop_rng.random() < presence**0.5:
                 if loop_rng.random() < 0.33:
@@ -285,7 +290,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         for end, pitch, _ in sorted(last_cells):
             if end - last_phrase < lead_gap[0] or end > length - 14.0:
                 continue
-            here = plan.at(awake, end)
+            here = plan.at(awake_base, end)
             wanted = 0.45 + 0.55 * min(
                 1.0, here + 0.5 * plan.at(plan.lights, end) + 0.5 * plan.at(plan.evening, end)
             )

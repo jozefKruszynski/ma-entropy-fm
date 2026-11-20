@@ -44,6 +44,8 @@ ROLES: dict[str, VoiceKind | None] = {
     "oven": VoiceKind.DRONE,
     "temperature": VoiceKind.TEMPERATURE,
     "humidity": VoiceKind.HUMIDITY,
+    "co2": VoiceKind.AIR,
+    "air": VoiceKind.AIR,
     "pluck": VoiceKind.PLUCK,
     "chord": VoiceKind.CHORD,
     "blip": VoiceKind.BLIP,
@@ -323,6 +325,8 @@ def classify(  # noqa: PLR0911, PLR0912, PLR0913, C901 - a flat decision table
             return Role(VoiceKind.TEMPERATURE, "temperature", "device class")
         if dclass == "humidity":
             return Role(VoiceKind.HUMIDITY, "humidity", "device class")
+        if dclass == "carbon_dioxide" or (unit_l == "ppm" and "co2" in text_key.replace("_", "")):
+            return Role(VoiceKind.AIR, "co2", "device class")
         if is_number(state):
             return Role(VoiceKind.PAD_PARTIAL, "pad", "domain")
         return None

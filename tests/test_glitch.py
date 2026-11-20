@@ -262,7 +262,7 @@ def test_light_is_thinner_and_cheaper_in_notes() -> None:
     """The cheapest tier has fewer layers of sound: no ghost snares, ticks or rim, no busy bass, fewer strings."""
     light, _ = demo("glitch", tier=LIGHT)
     standard, _ = demo("glitch", tier=STANDARD)
-    assert len(light.notes) < 0.7 * len(standard.notes)
+    assert len(light.notes) < 0.8 * len(standard.notes)
     voices = {n.voice for n in light.notes}
     assert not voices & {"glitch:ghost", "glitch:tick", "glitch:rim", "glitch:open", "wash:cello"}
     assert max((n.patch // 8 for n in light.notes if n.voice == "glitch:growl"), default=0) <= 3
