@@ -1,14 +1,14 @@
 """
 Cinematic Glitch: swells, brass-like stabs, a growling bass and hard half-time drums, glitched by what happens in the house.
 
-The generative system is a film score cut up. A slow chord loop in a dark minor (aeolian or phrygian, on a root the
-day deals) moves every two bars, four when the house sleeps, over a tempo of about 70 beats per minute whose drums
-count 140: the kick on the first beat, a big snare on the third. The chords are saw swells that open as they rise,
+The generative system is a film score cut up. A slow chord loop in a dark mode (aeolian, dorian or phrygian, in the key
+of the day, with chords that stay inside the mode) moves every two bars, four when the day is quiet or the house sleeps,
+over a tempo of 54 to 72 beats per minute whose drums count twice that. The chords are saw swells that open as they rise,
 a cello and violin section under them, stretched washes of strings, and brass-like stabs on the changes. The bass is a
 growl that wobbles through vowels in time with the tempo; its character (drive, fold, FM, how fast it wobbles) is one
 of six rows that the heat of the house picks, from a held note under the swells to the full drop. The drums are a
 composed kit (a punchy kick, a layered snare with a dark plate, hats, rim, ticks, ghost snares, fills) with five
-patterns, from a kick and a snare to the full groove, two variants each, and a drum bus that is glued and saturated;
+levels, from a kick and a snare to the full groove, and a drum bus that is glued and saturated;
 the bass, pads, strings and stabs duck from every kick.
 
 The edits are what the house plays: a stutter, a tape stop, a hard brake of 60 to 150 ms (a fast fall to nothing, a cut,
@@ -18,6 +18,19 @@ brings one of them, on the grid and at most one in a couple of bars; which are f
 are drop sequences: a reversed swell, a snare roll that stutters, a reversed snare, a tape stop on the whole mix, a silence,
 then the drop (stab, sub boom, taiko, the full growl and the big pattern). They come at the peaks of the day and at an anomaly;
 an anomaly in the night is a reversed swell into a distant boom, nothing else.
+
+How the house steers it: the energy of the day leans the mode of the piece (quiet days slow, busy days fast, but similar days
+rotate between them): heavy at 54 to 60 beats per minute (sparse, huge hits, a held sub growl, long freezes and tape stops,
+reversed swells), half-time at 64 to 68 and driving at 70 to 72. The mode picks the tempo inside its band and the family of
+drums (half-time, trap, broken, ghosted break, cinematic low hits, industrial, one-drop dub or IDM stutter, each with three or
+four variants that change with the role of the section, and a fill into every new section). The energy also picks how long a
+chord lasts, the favoured edits, the bass phrases, and scales the heat of the house so that a quiet day strips the kit back (a kick and
+a snare, a held growl, one or two drops) and a busy day brings the full kit, the whole growl and up to six drops; the
+warmth picks the character of the growl and the washes. The form of the day (intro, build, peak, release, plateau, outro) is
+on phrases of eight bars: the intro and the outro are swells and washes alone, the bass and the kit enter and leave on the
+phrase lines, and every peak begins with a drop that the build before it leads into. The strongest event of the day gets its
+drop on the next phrase line, and the motif of the room is played by the strings after the drop of the first and the last peak (or at
+the start of a plateau), the later one developed.
 
 The day: the night is swells, washes and distant booms alone; as the house wakes the bass enters, then sparse drums, which grow
 with the activity and the power of the appliances to the full pattern in the busy stretches; towards the evening the drums
@@ -29,15 +42,32 @@ The module imports nothing from Music Assistant.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
 from . import glitch, taiko
+from .character import chord_bars, tempo_target
 from .gen import weighted
+from .glitch_kits import DRUM_ENERGY, FAMILIES, KINDS, STEPS, Pattern
+from .harmony import MOTIF_CHOICE, develop_motif, motif_seed, motif_sites
+from .plan import (
+    BUILD,
+    CLIMAX,
+    FORM_BARS,
+    INTRO,
+    MIN_FORM_CELLS,
+    OUTRO,
+    PLATEAU,
+    RELEASE,
+    SHORT_FORM_BARS,
+    TEMPO_TOLERANCE,
+)
 from .score import CR, Edit, Glitch, Layer, Note, Score
+from .styles import GLITCH
 from .synth import smoothstep
 
 if TYPE_CHECKING:
@@ -45,20 +75,74 @@ if TYPE_CHECKING:
 
     from .plan import Plan
 
-# the tempo of the bar of four beats; the drums count twice that (kick on one, snare on three of every two beats)
-TEMPOS = (68.0, 70.0, 72.0)
-# the root of the day: the name and the pitch class
-TONICS: tuple[tuple[str, int], ...] = (("F", 5), ("E", 4), ("G", 7), ("F#", 6), ("A", 9))
-MODES: tuple[tuple[str, bool], ...] = (("aeolian", False), ("phrygian", True))
-# the loops of chords: (semitones above the root, quality) for four chords of two bars; the drop chord of the aeolian days
-LOOPS: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
-    ("i bVI iv v", ((0, 0), (8, 1), (5, 0), (7, 0))),
-    ("i bVII bVI v", ((0, 0), (10, 1), (8, 1), (7, 0))),
-    ("i iv bVI bVII", ((0, 0), (5, 0), (8, 1), (10, 1))),
-    ("i bIII iv v", ((0, 0), (3, 1), (5, 0), (7, 0))),
+
+class Mode(NamedTuple):
+    """How a piece moves: its band of tempo and how sparse, how heavy and how stretched it is."""
+
+    name: str
+    tempo: tuple[int, int]
+    # the energy of the day that it suits, and the energy of the edits that it favours
+    centre: float
+    edit_energy: float
+    # the highest level of the kit (1 to 5) outside a drop, and the highest row of the growl outside a drop
+    level_cap: int
+    growl_cap: int
+    # how much longer the freezes and tape stops run, and the share of freezes that are grains
+    stretch: float
+    grain_share: float
+    # reversed swells into every section after the first
+    swells: bool
+
+
+MODES = (
+    Mode("heavy", (54, 60), 0.15, 0.2, 3, 1, 2.0, 0.2, swells=True),
+    Mode("half-time", (64, 68), 0.5, 0.5, 4, 4, 1.0, 0.5, swells=False),
+    Mode("driving", (70, 72), 0.85, 0.9, 5, 5, 1.0, 0.5, swells=False),
 )
-# the drop: a major chord a semitone above the root on phrygian days, a tone below it on aeolian ones
-DROP_CHORD = {True: (1, 1), False: (10, 1)}
+# quiet days lean slow and busy days fast, but days this close to the best fit rotate between the modes
+MODE_TOLERANCE = 0.4
+# the families of a mode are picked on the energy of the day, within this of the best fit
+FAMILY_TOLERANCE = 0.3
+# the kit gets this many half bars to a group of two bars, and the last of them can be a fill
+SLOTS = 4
+# the variant of each role of the form (a build, a peak and a plateau do not share a bar)
+ROLE_VARIANT = {INTRO: 0, BUILD: 0, CLIMAX: 1, RELEASE: 3, PLATEAU: 2, OUTRO: 0}
+# the bars after which the variant of a pattern turns over
+VARIANT_BARS = 4
+# the share of the tape stops that are long (a wind down of a beat and a half), times the stretch of the mode
+TAPE_LONG_SHARE = 0.5
+
+
+class Loop(NamedTuple):
+    """Four chords (semitones above the root, 0 minor or 1 major) and how much their roots move (0 a vamp, 1 a chase)."""
+
+    name: str
+    chords: tuple[tuple[int, int], ...]
+    motion: float
+
+
+# the loops of chords of each mode, whose triads stay inside it (the fifth of the phrygian is diminished, so it has none)
+LOOPS: dict[str, tuple[Loop, ...]] = {
+    "aeolian": (
+        Loop("i bIII iv v", ((0, 0), (3, 1), (5, 0), (7, 0)), 0.3),
+        Loop("i iv bVI bVII", ((0, 0), (5, 0), (8, 1), (10, 1)), 0.5),
+        Loop("i bVI iv v", ((0, 0), (8, 1), (5, 0), (7, 0)), 0.65),
+        Loop("i bVII bVI v", ((0, 0), (10, 1), (8, 1), (7, 0)), 0.85),
+    ),
+    "dorian": (
+        Loop("i bIII IV bVII", ((0, 0), (3, 1), (5, 1), (10, 1)), 0.3),
+        Loop("i IV bIII bVII", ((0, 0), (5, 1), (3, 1), (10, 1)), 0.5),
+        Loop("i bVII IV v", ((0, 0), (10, 1), (5, 1), (7, 0)), 0.65),
+        Loop("i ii bIII bVII", ((0, 0), (2, 0), (3, 1), (10, 1)), 0.85),
+    ),
+    "phrygian": (
+        Loop("i bvii bVI iv", ((0, 0), (10, 0), (8, 1), (5, 0)), 0.3),
+        Loop("i bII bVI iv", ((0, 0), (1, 1), (8, 1), (5, 0)), 0.55),
+        Loop("i bII bIII bvii", ((0, 0), (1, 1), (3, 1), (10, 0)), 0.85),
+    ),
+}
+# the drop: a major chord a semitone above the root on phrygian days, a tone below it on the others
+DROP_CHORDS = {"phrygian": (1, 1), "aeolian": (10, 1), "dorian": (10, 1)}
 # the bass phrases of two bars (eight beats): (beat, length in beats, semitones above the chord root)
 Phrase = tuple[tuple[float, float, int], ...]
 HOLD_A: Phrase = ((0.0, 7.4, 0),)
@@ -96,81 +180,51 @@ GROWLS: tuple[tuple[str, int], ...] = (
     ("wide, bright formants", 1),
     ("dark, narrow formants", 2),
 )
-# the least of the heat that the base of the day (the bass, the first drums) is made from
-BODY_FLOOR = 0.3
+# the least of the heat that the base of the day (the bass, the first drums) is made from, on the quietest and the busiest day
+BODY_FLOOR = (0.1, 0.4)
+# the heat of the house is scaled by this, on the quietest and the busiest day: a quiet day strips the kit back
+HEAT_GAIN = (0.55, 1.6)
+# how much of the heat each role of the form lets through: the intro and the outro are swells and washes alone
+ROLE_HEAT = {INTRO: 0.0, BUILD: 0.75, CLIMAX: 1.0, RELEASE: 0.7, PLATEAU: 0.9, OUTRO: 0.0}
+# the most drops of a piece, on the quietest and the busiest day (a third as many in the cheapest tier or a short piece)
+MOST_DROPS = (1, 6)
+# the share of the events of the house that bring an edit: the least, and what the energy of the day and the heat add
+EDIT_CHANCE = 0.35
+EDIT_ENERGY = 0.35
+EDIT_HEAT = 0.3
+# the drop chord comes this many bars after the start of a peak; the motif of the room follows it
+# the cheapest tier plays the accented hats alone (every other step)
+LIGHT_HAT_FLOOR = 0.35
+# how long a swell rings on past its chord: the cheapest tier lets it go sooner
+SWELL_TAIL = 4.5
+LIGHT_TAIL = 3.0
+TOM_PITCH = 36.0
+MOTIF_AFTER_DROP = 2
+MOTIF_VELOCITY = 0.75
+# the strings of a chord: the lower voices are the root and the fifth, the upper ones are led from chord to chord
+STRINGS_LOW = (0, 7)
+STRINGS_UP = 3
+# the highest the upper strings go above the pad root (the root of the next octave but one is the limit)
+STRINGS_TOP = 26
+MOTIF_LOWEST = 60
 # what the house heat has to be for each part to enter (the day moves them by a few hundredths)
 THRESHOLDS = {"bass": 0.26, "kick": 0.40, "hat": 0.50, "ghost": 0.58, "full": 0.70, "big": 0.84}
-# the patterns of one half bar of the drums: sixteen steps of the 140 grid (an eighth of a beat of the tempo)
-Pattern = dict[str, Any]
-H8 = (0.5, 0, 0.3, 0, 0.5, 0, 0.3, 0, 0.5, 0, 0.3, 0, 0.5, 0, 0.3, 0)
-H16 = (0.55, 0.22, 0.4, 0.22) * 3 + (0.55, 0.22, 0.4, 0.3)
-H16B = (0.6, 0.25, 0.45, 0.25) * 3 + (0.6, 0.3, 0.5, 0.35)
-H16C = (0.4, 0.2, 0.55, 0.22) * 3 + (0.4, 0.22, 0.55, 0.3)
-
-
-def _p(  # noqa: PLR0913, PLR0917
-    kick: list[tuple[int, float]],
-    snare: list[tuple[int, float]],
-    ghost: list[tuple[int, float]] | None = None,
-    hats: tuple[float, ...] | None = None,
-    rim: list[tuple[int, float]] | None = None,
-    ticks: list[tuple[int, float]] | None = None,
-    open_: list[tuple[int, float]] | None = None,
-) -> Pattern:
-    return {
-        "kick": kick,
-        "snare": snare,
-        "ghost": ghost or [],
-        "hats": hats or (),
-        "rim": rim or [],
-        "ticks": ticks or [],
-        "open": open_ or [],
-    }
-
-
-KINDS = ("sparse", "light", "mid", "full", "big")
-# fmt: off
-DRUM_SETS: tuple[tuple[str, dict[str, list[Pattern]]], ...] = (
-    ("straight", {
-        "sparse": [_p([(0, 1.0)], [(8, 0.95)]), _p([(0, 1.0)], [(8, 0.95)], [(15, 0.18)])],
-        "light": [_p([(0, 1.0), (10, 0.8)], [(8, 1.0)], None, H8),
-                  _p([(0, 1.0), (10, 0.75), (13, 0.5)], [(8, 1.0)], [(15, 0.2)], H8)],
-        "mid": [_p([(0, 1.0), (7, 0.7), (10, 0.85)], [(8, 1.0)], [(3, 0.22), (11, 0.2), (15, 0.25)], H16, [(5, 0.5)], [(2, 0.4), (6, 0.35), (14, 0.4)]),
-                _p([(0, 1.0), (10, 0.85), (14, 0.6)], [(8, 1.0)], [(3, 0.22), (13, 0.2)], H16, [(11, 0.5)], [(2, 0.4), (6, 0.35), (12, 0.4)], [(6, 0.4)])],
-        "full": [_p([(0, 1.0), (3, 0.6), (7, 0.8), (10, 0.95)], [(8, 1.0)], [(5, 0.22), (11, 0.22), (13, 0.2), (15, 0.28)], H16B, [(1, 0.4), (11, 0.55)], [(2, 0.45), (6, 0.4), (14, 0.45)], [(6, 0.45), (14, 0.5)]),
-                 _p([(0, 1.0), (6, 0.7), (10, 0.95), (12, 0.7), (14, 0.8)], [(8, 1.0)], [(3, 0.22), (11, 0.2), (15, 0.3)], H16B, [(5, 0.5)], [(2, 0.45), (10, 0.4), (13, 0.4)], [(6, 0.45), (14, 0.5)])],
-        "big": [_p([(0, 1.0), (3, 0.7), (7, 0.9), (10, 1.0), (14, 0.9)], [(8, 1.0)], [(5, 0.25), (11, 0.25), (13, 0.22), (15, 0.3)], H16B, [(1, 0.45), (11, 0.6)], [(2, 0.5), (6, 0.45), (10, 0.45)], [(6, 0.5), (14, 0.55)]),
-                _p([(0, 1.0), (6, 0.8), (10, 1.0), (12, 0.8), (14, 0.9), (15, 0.6)], [(8, 1.0)], [(3, 0.25), (11, 0.25), (13, 0.2)], H16B, [(5, 0.55)], [(2, 0.5), (12, 0.45)], [(6, 0.5), (14, 0.55)])],
-    }),
-    ("off the beat", {
-        "sparse": [_p([(0, 1.0)], [(8, 0.95)], [(14, 0.16)]), _p([(0, 1.0), (11, 0.5)], [(8, 0.95)])],
-        "light": [_p([(0, 1.0), (11, 0.8)], [(8, 1.0)], None, H8),
-                  _p([(0, 1.0), (6, 0.6), (11, 0.75)], [(8, 1.0)], [(15, 0.2)], H8)],
-        "mid": [_p([(0, 1.0), (6, 0.7), (11, 0.85)], [(8, 1.0)], [(2, 0.2), (10, 0.2), (14, 0.25)], H16C, [(4, 0.5)], [(2, 0.4), (7, 0.35), (13, 0.4)]),
-                _p([(0, 1.0), (3, 0.6), (11, 0.85)], [(8, 1.0)], [(5, 0.22), (13, 0.2)], H16C, [(12, 0.5)], [(1, 0.4), (6, 0.35), (14, 0.4)], [(7, 0.4)])],
-        "full": [_p([(0, 1.0), (3, 0.6), (6, 0.8), (11, 0.95)], [(8, 1.0)], [(4, 0.22), (10, 0.22), (13, 0.2), (15, 0.28)], H16B, [(2, 0.4), (12, 0.55)], [(2, 0.45), (7, 0.4), (14, 0.45)], [(7, 0.45), (15, 0.5)]),
-                 _p([(0, 1.0), (7, 0.7), (11, 0.95), (13, 0.7), (15, 0.7)], [(8, 1.0)], [(3, 0.22), (10, 0.2), (14, 0.3)], H16B, [(5, 0.5)], [(2, 0.45), (9, 0.4), (12, 0.4)], [(7, 0.45), (15, 0.5)])],
-        "big": [_p([(0, 1.0), (3, 0.7), (6, 0.9), (11, 1.0), (13, 0.8), (15, 0.7)], [(8, 1.0)], [(4, 0.25), (10, 0.25), (14, 0.22)], H16B, [(1, 0.45), (12, 0.6)], [(2, 0.5), (7, 0.45), (13, 0.45)], [(7, 0.5), (15, 0.55)]),
-                _p([(0, 1.0), (5, 0.7), (7, 0.8), (11, 1.0), (14, 0.9)], [(8, 1.0)], [(3, 0.25), (10, 0.25), (13, 0.2), (15, 0.3)], H16B, [(2, 0.55)], [(2, 0.5), (12, 0.45)], [(7, 0.5), (15, 0.55)])],
-    }),
-    ("stuttering", {
-        "sparse": [_p([(0, 1.0)], [(8, 0.95)]), _p([(0, 1.0), (14, 0.5)], [(8, 0.95)], [(5, 0.16)])],
-        "light": [_p([(0, 1.0), (10, 0.8), (14, 0.5)], [(8, 1.0)], None, H8),
-                  _p([(0, 1.0), (7, 0.7)], [(8, 1.0)], [(13, 0.2)], H8)],
-        "mid": [_p([(0, 1.0), (3, 0.6), (10, 0.85), (14, 0.7)], [(8, 1.0)], [(5, 0.22), (11, 0.2), (15, 0.25)], H16, [(7, 0.5)], [(2, 0.4), (6, 0.35), (12, 0.4)]),
-                _p([(0, 1.0), (2, 0.5), (10, 0.85)], [(8, 1.0)], [(4, 0.22), (13, 0.2)], H16, [(11, 0.5)], [(3, 0.4), (6, 0.35), (14, 0.4)], [(6, 0.4)])],
-        "full": [_p([(0, 1.0), (2, 0.55), (7, 0.8), (10, 0.95), (13, 0.6)], [(8, 1.0)], [(5, 0.22), (11, 0.22), (15, 0.28)], H16B, [(1, 0.4), (11, 0.55)], [(3, 0.45), (6, 0.4), (14, 0.45)], [(6, 0.45), (14, 0.5)]),
-                 _p([(0, 1.0), (6, 0.7), (7, 0.6), (10, 0.95), (14, 0.8)], [(8, 1.0)], [(3, 0.22), (11, 0.2), (13, 0.25), (15, 0.3)], H16B, [(5, 0.5)], [(2, 0.45), (10, 0.4), (13, 0.4)], [(6, 0.45), (14, 0.5)])],
-        "big": [_p([(0, 1.0), (2, 0.6), (3, 0.7), (7, 0.9), (10, 1.0), (14, 0.9)], [(8, 1.0)], [(5, 0.25), (11, 0.25), (13, 0.22), (15, 0.3)], H16B, [(1, 0.45), (11, 0.6)], [(2, 0.5), (6, 0.45), (10, 0.45)], [(6, 0.5), (14, 0.55)]),
-                _p([(0, 1.0), (6, 0.8), (7, 0.6), (10, 1.0), (12, 0.8), (14, 0.9), (15, 0.6)], [(8, 1.0)], [(3, 0.25), (11, 0.25), (13, 0.2)], H16B, [(5, 0.55)], [(2, 0.5), (12, 0.45)], [(6, 0.5), (14, 0.55)])],
-    }),
-)
-# fmt: on
+# what the families suit: the energy of the day (0 to 1) for the patterns, the brightness (-1 to 1) of the day for the
+# character of the growl and the washes (the average of its warmth and its energy)
+BASS_ENERGY = {
+    "held, syncopated, busy": 0.25,
+    "two held, driving, eighths": 0.55,
+    "held and a fifth, broken, rolling": 0.85,
+}
+FAVOUR_ENERGY = {"freezes": 0.1, "stretches": 0.25, "brakes": 0.4, "gates": 0.55, "stutters": 0.9}
+GROWL_BRIGHTNESS = {"dark, narrow formants": -0.8, "U O A E": 0.0, "wide, bright formants": 0.8}
+WASH_BRIGHTNESS = {"cellos": -0.6, "cellos and violins": 0.1, "cellos and felt piano": 0.7}
 # the favoured edits of the day: the weight of each family of edit
 FAVOURS: tuple[tuple[str, dict[str, float]], ...] = (
     ("stutters", {"stutter": 3.0, "brake": 1.0, "freeze": 1.0, "gate": 1.0, "tape": 0.5}),
     ("brakes", {"stutter": 1.0, "brake": 3.0, "freeze": 1.0, "gate": 1.0, "tape": 0.7}),
-    ("freezes", {"stutter": 1.0, "brake": 1.0, "freeze": 3.0, "gate": 1.0, "tape": 0.5}),
+    ("freezes", {"stutter": 0.5, "brake": 1.5, "freeze": 3.0, "gate": 0.7, "tape": 1.5}),
+    ("stretches", {"stutter": 0.5, "brake": 2.0, "freeze": 2.0, "gate": 0.7, "tape": 3.0}),
     ("gates", {"stutter": 1.0, "brake": 1.0, "freeze": 1.0, "gate": 3.0, "tape": 0.5}),
 )
 # the stretched washes: which strings sound under the swells
@@ -262,20 +316,79 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     drum_rng = plan.rng("glitch drums")
     edit_rng = plan.rng("glitch edits")
 
-    bpm = plan.deal("tempo", TEMPOS)
-    _, tonic = plan.deal("tonic", TONICS)
-    mode_name, phrygian = plan.deal("mode", MODES)
-    loop_name, loop = plan.deal("chord loop", LOOPS)
-    drums_name, pats = plan.deal("drum patterns", DRUM_SETS)
-    bass_name, (hold, sync, busy) = plan.deal("bass phrases", BASS_SETS)
-    growl_name, vowels = plan.deal("growl character", GROWLS)
-    favour_name, favour = plan.deal("favoured edits", FAVOURS)
-    wash_name, wash_voices = plan.deal("washes", WASH_SETS)
+    character = plan.character
+    energy = character.energy
+    brightness = 0.5 * character.warmth + 0.5 * (2.0 * energy - 1.0)
+    tonic = plan.scale.root
+    mode_name = plan.scale.mode if plan.scale.mode in LOOPS else "aeolian"
+    phrygian = mode_name == "phrygian"
+    mode = plan.pick(
+        "mode",
+        MODES,
+        [1.0 - abs(entry.centre - energy) for entry in MODES],
+        tolerance=MODE_TOLERANCE,
+    )
+    low_bpm, high_bpm = mode.tempo
+    target = tempo_target(GLITCH, character)
+    tempos = tuple(float(bpm) for bpm in range(low_bpm, high_bpm + 1))
+    bpm = plan.pick(
+        "tempo",
+        tempos,
+        [1.0 - abs((t - low_bpm) / (high_bpm - low_bpm) - target) for t in tempos],
+        tolerance=TEMPO_TOLERANCE,
+    )
+    loop_name, loop = plan.pick(
+        "chord loop",
+        LOOPS[mode_name],
+        [1.0 - abs(entry.motion - energy) for entry in LOOPS[mode_name]],
+    )[:2]
+    suited = tuple(f for f in FAMILIES if mode.name in f.modes)
+    family = plan.pick(
+        "drum patterns",
+        suited,
+        [1.0 - abs(DRUM_ENERGY[f.name] - energy) for f in suited],
+        tolerance=FAMILY_TOLERANCE,
+    )
+    drums_name, pats = family.name, family.patterns
+    bass_name, (hold, sync, busy) = plan.pick(
+        "bass phrases",
+        BASS_SETS,
+        [1.0 - abs(BASS_ENERGY[name] - energy) for name, _ in BASS_SETS],
+    )
+    growl_name, vowels = plan.pick(
+        "growl character",
+        GROWLS,
+        [1.0 - abs(GROWL_BRIGHTNESS[name] - brightness) / 2.0 for name, _ in GROWLS],
+    )
+    favour_name, favour = plan.pick(
+        "favoured edits",
+        FAVOURS,
+        [1.0 - abs(FAVOUR_ENERGY[name] - mode.edit_energy) for name, _ in FAVOURS],
+    )
+    wash_name, wash_voices = plan.pick(
+        "washes",
+        WASH_SETS,
+        [1.0 - abs(WASH_BRIGHTNESS[name] - brightness) / 2.0 for name, _ in WASH_SETS],
+    )
     patch = int(plan.rng("patch").integers(0, 2))
     plan.choices["patch"] = str(patch)
 
     beat = 60.0 / bpm
     bar = 4.0 * beat
+    phrase_bars = FORM_BARS if length / (FORM_BARS * bar) >= MIN_FORM_CELLS else SHORT_FORM_BARS
+    span_options = tuple(
+        sorted({min(max(o, 2), 4) for o in chord_bars(character) if o <= phrase_bars})
+    )
+    third = 1.0 / 3.0
+    within = float(np.clip(energy / third - min(int(energy / third), 2), 0.0, 1.0))
+    base_span = plan.pick(
+        "chord bars",
+        span_options,
+        [
+            1.0 - abs(index / max(len(span_options) - 1, 1) - (1.0 - within))
+            for index in range(len(span_options))
+        ],
+    )
     step = beat / 8.0
     u8, u16, u32 = beat / 2.0, beat / 4.0, beat / 8.0
     bars = int((length - 5.0) / bar)
@@ -292,10 +405,17 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         * (1.0 - smoothstep((hour - 22.5) / 1.5))
     )
     lively = np.clip(plan.activity + 0.5 * plan.power, 0.0, 1.0)
-    heat = np.clip(lively * day * 1.1, 0.0, 1.0)
+    # the form: what each role lets through of the heat, from one phrase line to the next
+    sections = plan.sections(bar)
+    form = np.zeros(count)
+    for first, last, role, _ in sections:
+        form[int(first * CR) : int(last * CR) + 1] = ROLE_HEAT[role]
+    gain = HEAT_GAIN[0] + (HEAT_GAIN[1] - HEAT_GAIN[0]) * energy
+    heat = np.clip(lively * day * 1.1 * gain * form, 0.0, 1.0)
     # the body of the day: the bass and the first drums are the base by day, and the house adds the rest; the drops,
     # the stabs and the edits follow the heat itself, which is how lively it is
-    body = np.clip(plan.lift(lively, BODY_FLOOR) * day * 1.1, 0.0, 1.0)
+    floor = BODY_FLOOR[0] + (BODY_FLOOR[1] - BODY_FLOOR[0]) * energy
+    body = np.clip(plan.lift(lively, floor) * day * 1.1 * gain * form, 0.0, 1.0)
     limits = {k: v + float(rng.uniform(-0.04, 0.04)) for k, v in THRESHOLDS.items()}
     first_drum = plan.piece_second_of_hour(6.5)
     last_drum = plan.piece_second_of_hour(21.5)
@@ -324,8 +444,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     per_bar = [heat_in(b * bar, (b + 1) * bar) for b in range(bars + 1)]
     smooth_bars = np.convolve(np.pad(per_bar, 1, mode="edge"), np.ones(3) / 3.0, mode="valid")
     drops: dict[int, str] = {}
+    strongest = max(plan.events, key=lambda e: e[1])[0] if plan.events else -1.0
     for second, _strength in plan.events:
         d = max(2 * round(second / bar / 2.0), 2)
+        if second == strongest:
+            d = max(phrase_bars * math.ceil(second / (phrase_bars * bar)), phrase_bars)
         if d + 4 < bars:
             here = float(day[min(int(d * bar * CR), count - 1)])
             drops[d] = (
@@ -333,6 +456,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 if here < 0.2
                 else ("drums" if drums_ok(d * bar) and per_bar[d] > limits["kick"] else "hit")
             )
+    for first, _, role, _ in sections:
+        d = round(first / bar)
+        if role == CLIMAX and d >= 4 and d + 4 < bars and d not in drops:
+            drops[d] = "drums" if drums_ok(d * bar) and per_bar[d] > limits["kick"] else "hit"
+    cap = MOST_DROPS[0] + round((MOST_DROPS[1] - MOST_DROPS[0]) * energy)
     ranked = sorted(range(4, max(bars - 6, 5)), key=lambda b: -smooth_bars[b])
     for b in ranked:
         d = 2 * (b // 2)
@@ -341,14 +469,14 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             and drums_ok(d * bar)
             and all(abs(d - other) >= 20 for other in drops)
             and d + 4 < bars
-            and len(drops) < (3 if light or plan.condensed else 6)
+            and len(drops) < (cap // 2 if light or plan.condensed else cap)
         ):
             drops[d] = "drums"
 
     # -- the chords: two bars each, four while the house sleeps, a drop where one is
     chords: list[_Chord] = []
     place, b = 0, 0
-    drop_chord = DROP_CHORD[phrygian]
+    drop_chord = DROP_CHORDS[mode_name]
     while b < bars:
         if b in drops:
             offset, qual = drop_chord
@@ -356,7 +484,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         else:
             offset, qual = loop[place % len(loop)]
             place += 1
-            calm = b % 4 == 0 and heat_in(b * bar, (b + 4) * bar) < 0.2
+            calm = b % 4 == 0 and (base_span == 4 or heat_in(b * bar, (b + 4) * bar) < 0.2)
             span, is_drop = (4 if calm else 2), False
             for d in drops:
                 if b < d < b + span:
@@ -370,33 +498,30 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
 
     # -- swells, strings and stabs
     stab_count = 0
+    strings_led: list[float] = []
     for chord in chords:
         t = chord.bar * bar
         h = heat_in(t, t + chord.bars * bar)
         calm = chord.bars == 4 or h < 0.12
         kind = "swell_big" if chord.drop else ("swell_slow" if calm else "swell")
         lead = 0.6 if chord.drop else 1.5
-        total = round((chord.bars * bar + 4.5) * 2.0) / 2.0
+        total = round((chord.bars * bar + (LIGHT_TAIL if light else SWELL_TAIL)) * 2.0) / 2.0
         put(
             max(t - lead, 0.0),
             total,
             chord.pad,
-            0.9 if calm and h < 0.05 else 1.0,
+            0.9 if calm else 1.0,
             f"glitch:{kind}",
             "pad",
             chord.quality,
         )
-        string_notes = (
-            (0, 7, 15 if chord.quality == 0 else 16)
-            if light
-            else (0, 7, 15 if chord.quality == 0 else 16, 19, 24)
-        )
+        strings_led = _lead_strings(chord, strings_led, 1 if light else STRINGS_UP)
         svel = 0.8 if chord.drop else float(np.clip(0.4 + 0.3 * h, 0.4, 0.7))
-        for o in string_notes:
+        for note in [chord.pad + o for o in STRINGS_LOW] + strings_led:
             put(
                 max(t - 0.2, 0.0),
                 chord.bars * bar + 0.8,
-                chord.pad + o,
+                note,
                 svel,
                 "tape_strings",
                 "str",
@@ -409,6 +534,22 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             voice = "glitch:stab_long" if h > 0.75 else "glitch:stab"
             put(t, dur + (0.6 if h > 0.75 else 0.0), chord.pad, vel, voice, "stab", chord.quality)
             stab_count += 1
+
+    # -- the motif of the room: the strings play it after the drop of the first and the last peak or plateau
+    motif_candidates = {
+        round(first / bar) + (MOTIF_AFTER_DROP if role == CLIMAX else 0)
+        for first, _, role, _ in sections
+        if role in {CLIMAX, PLATEAU}
+    }
+    motif_bars = sorted(m for m in motif_candidates if 0 < m < bars - 2) or [bars // 2]
+    plan.choices[MOTIF_CHOICE] = str(len(motif_sites(motif_bars)))
+    for number, bar_at in enumerate(motif_sites(motif_bars)):
+        clock = bar_at * bar
+        for midi, beats in _motif_notes(
+            plan, develop_motif(plan.motif(), number, motif_seed(plan))
+        ):
+            put(clock, beats * beat, float(midi), MOTIF_VELOCITY, "tape_strings", "str")
+            clock += beats * beat
 
     # -- the washes: stretched strings under everything, softer when the day is loud
     if not light:
@@ -440,6 +581,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             state = max(sum(1 for edge in GROWL_STATE_AT if h >= edge) - 1, 0)
             if previous_state >= 0:
                 state = min(state, previous_state + 1)
+            state = min(state, mode.growl_cap)
             if loud_drop:
                 state = 5
             if light:
@@ -476,7 +618,12 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     levels: dict[int, int] = {}
     last_level = 0
     drop_bars = {d for d, kind in drops.items() if kind == "drums"}
-    variant = int(drum_rng.integers(0, 2))
+    section_starts = sorted({round(first / bar) for first, *_ in sections if first > 0})
+    role_of_bar = {
+        b: role
+        for first, last, role, _ in sections
+        for b in range(round(first / bar), round(last / bar) + 1)
+    }
     for b0 in range(0, bars, 2):
         t0 = b0 * bar
         h = heat_in(t0, t0 + 2 * bar, body)
@@ -484,6 +631,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         if not drums_ok(t0) or not drums_ok(t0 + 2 * bar - 0.1):
             raw = 0
         level = max(min(raw, last_level + 1), last_level - 2) if raw else 0
+        level = min(level, mode.level_cap)
         if b0 in drop_bars:
             level = 5
         elif b0 - 2 in drop_bars and level < 3:
@@ -492,14 +640,29 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             level = min(level, 3)
         levels[b0] = last_level = level
     drum_events = 0
+    fills = 0
     for b0, level in levels.items():
         if level == 0:
             continue
         kind = KINDS[level - 1]
-        for half in range(4):
-            t0 = b0 * bar + half * 2 * beat
-            pattern = pats[kind][(half + variant + (b0 // 2)) % 2]
-            drum_events += _place_half_bar(put, kicks, kit_hits, pattern, t0, step, light)
+        variants = pats[kind]
+        role = role_of_bar.get(b0, PLATEAU)
+        into = b0 + 2 in section_starts and b0 + 2 not in drop_bars
+        span = variants[0]["span"]
+        slot = 0
+        while slot < SLOTS:
+            t0 = b0 * bar + slot * 2 * beat
+            last = slot + span >= SLOTS
+            pattern = variants[(ROLE_VARIANT[role] + b0 // VARIANT_BARS + last) % len(variants)]
+            window = (SLOTS - 1 - slot) * STEPS if into and last else None
+            drum_events += _place_half_bar(put, kicks, kit_hits, pattern, t0, step, light, window)
+            slot += span
+        if into:
+            fill = family.fills[section_starts.index(b0 + 2) % len(family.fills)]
+            drum_events += _place_half_bar(
+                put, kicks, kit_hits, fill, b0 * bar + 3 * 2 * beat, step, light
+            )
+            fills += 1
 
     # -- the book of edits
     book = _Book()
@@ -548,12 +711,29 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
 
     # the structure of the phrases: beat repeats, kick retriggers, snare rolls, a reversed snare into the accent
     phrase_edits = 0
+    if mode.swells and not light:
+        for start in section_starts:
+            if start not in drops and start < bars:
+                entering = chord_at(start * bar)
+                put(
+                    start * bar - bar,
+                    bar,
+                    float(entering.pad),
+                    0.7,
+                    "glitch:revstab",
+                    "fx",
+                    entering.quality,
+                )
     for p in range(1, bars // 8 + 1):
         b_end = 8 * p - 1
         if b_end >= bars:
             break
         level = levels.get(2 * (b_end // 2), 0)
-        if level >= 3 and drum_rng.random() < 0.55 + 0.4 * float(per_bar[b_end] - 0.5):
+        if (
+            level >= 3
+            and b_end + 1 not in section_starts
+            and drum_rng.random() < 0.55 + 0.4 * float(per_bar[b_end] - 0.5)
+        ):
             t = b_end * bar + 3 * beat
             if stutter_edit(t, KIT, [u16] * 2 + [u32] * 4, [1, 1, 0.9, 0.9, 0.8, 0.8], "phrase"):
                 phrase_edits += 1
@@ -668,7 +848,10 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         kit_on = levels.get(2 * (int(second / bar) // 2), 0) > 0
         asleep = plan.at(day, second) < 0.2
         gap = bar * (2.5 if kit_on else (4.0 if h > 0.12 else 7.0))
-        if second - last_end < gap or edit_rng.random() > 0.55 + 0.3 * h:
+        if (
+            second - last_end < gap
+            or edit_rng.random() > EDIT_CHANCE + EDIT_ENERGY * energy + EDIT_HEAT * h
+        ):
             continue
         options = dict(EVENT_EDITS.get(what, DEFAULT_EDITS))
         weights = {k: w * favour.get(_family(k), 1.0) for k, w in options.items()}
@@ -709,7 +892,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             end = t_bar
         elif choice == "tape":
             buses = WHOLE if kit_on else SOFT
-            if edit_rng.random() < 0.5:
+            if edit_rng.random() < TAPE_LONG_SHARE * mode.stretch:
                 done = tape_edit(t_bar - 1.5 * beat, buses, 0.45, 1.5 * beat, 0.18, "event")
             else:
                 done = tape_edit(t_bar - 0.5 * beat, buses, 0.38, 0.5 * beat, 0.0, "event")
@@ -743,12 +926,17 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             stats["gate"] += int(done)
             end = t_beat + len(gate_pattern) * u16
         elif choice == "freeze":
-            if light or edit_rng.random() < 0.5:
+            if light or edit_rng.random() < mode.grain_share:
                 done = edit(
                     t_beat,
                     "grain",
                     ("stab", "pad", "str"),
-                    {"length": beat * 1.5, "grain": 0.11, "seed": int(second), "jitter": 0.02},
+                    {
+                        "length": beat * 1.5 * mode.stretch,
+                        "grain": 0.11,
+                        "seed": int(second),
+                        "jitter": 0.02,
+                    },
                     "event",
                 )
             else:
@@ -756,11 +944,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     t_beat,
                     "spectral",
                     ("pad", "str", "wash"),
-                    {"length": beat * 2.0, "back": 0.9, "seed": int(second)},
+                    {"length": beat * 2.0 * mode.stretch, "back": 0.9, "seed": int(second)},
                     "event",
                 )
             stats["freeze"] += int(done)
-            end = t_beat + 2.5 * beat
+            end = t_beat + 2.5 * beat * mode.stretch
         else:  # crush: one snare hit
             hits = [t for t in kit_hits["snare"] if second <= t < second + bar]
             if hits:
@@ -822,11 +1010,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     kinds = ", ".join(f"{v} {k}" for k, v in stats.items() if v)
     score.notes_about = [
         (
-            f"{bpm:.0f} beats per minute, the kit counting {2 * bpm:.0f} (kick on one, snare on three); root {tonic_name_of(tonic)}, {mode_name}; "
-            f"chords '{loop_name}' every two bars, four when the house sleeps; the drop chord is a {'semitone above' if phrygian else 'tone below'} the root."
+            f"{mode.name} mode, {bpm:.0f} beats per minute, the kit counting {2 * bpm:.0f}; root {tonic_name_of(tonic)}, {mode_name}; "
+            f"chords '{loop_name}' every two bars (four when the day is quiet or the house sleeps); the drop chord is a {'semitone above' if phrygian else 'tone below'} the root."
         ),
         (
-            f"Growl '{growl_name}' ({bass_notes} notes, bass phrases '{bass_name}'), drum patterns '{drums_name}' ({drum_events} hits), "
+            f"Growl '{growl_name}' ({bass_notes} notes, bass phrases '{bass_name}'), drum patterns '{drums_name}' ({drum_events} hits, {fills} fills), "
             f"{stab_count} stabs, washes '{wash_name}'; the heat of the house picks the row of the growl, the pattern of the kit and how often it is glitched."
         ),
         (
@@ -866,39 +1054,86 @@ def _place_half_bar(  # noqa: C901, PLR0913, PLR0917
     t0: float,
     step: float,
     light: bool,  # noqa: FBT001
+    until: int | None = None,
 ) -> int:
-    """Place one half bar of the kit (sixteen steps) from second t0; return how many hits."""
+    """
+    Place a pattern of the kit from second t0; return how many hits.
+
+    :param until: Place only the steps before this one (the rest of the pattern gives way to a fill).
+    """
     count = 0
     place = put
+    limit = until if until is not None else len(pattern["hats"])
 
     def at(s: int) -> float:
         return t0 + s * step
 
     for s, v in pattern["kick"]:
-        place(at(s), 0.5, 0.0, v, "glitch:kick", "kick")
-        kicks.append((at(s), min(1.0, 0.5 + 0.5 * v)))
-        kit_hits["kick"].append(at(s))
-        count += 1
+        if s < limit:
+            place(at(s), 0.5, 0.0, v, "glitch:kick", "kick")
+            kicks.append((at(s), min(1.0, 0.5 + 0.5 * v)))
+            kit_hits["kick"].append(at(s))
+            count += 1
     for s, v in pattern["snare"]:
-        place(at(s), 0.5, 0.0, v, "glitch:snare", "snare")
-        kit_hits["snare"].append(at(s))
-        count += 1
+        if s < limit:
+            place(at(s), 0.5, 0.0, v, "glitch:snare", "snare")
+            kit_hits["snare"].append(at(s))
+            count += 1
     for s, v in enumerate(pattern["hats"]):
-        if v:
+        if v >= (LIGHT_HAT_FLOOR if light else 0.0) and v and s < limit:
             place(at(s), 0.2, 0.0, v, "glitch:hat", "hats")
             count += 1
     if light:
         return count
-    for s, v in pattern["ghost"]:
-        place(at(s), 0.3, 0.0, v, "glitch:ghost", "snare")
-        count += 1
-    for s, v in pattern["open"]:
-        place(at(s), 0.5, 0.0, v, "glitch:open", "hats")
-        count += 1
-    for s, v in pattern["ticks"]:
-        place(at(s), 0.2, 0.0, v, "glitch:tick", "hats")
-        count += 1
-    for s, v in pattern["rim"]:
-        place(at(s), 0.2, 0.0, v, "glitch:rim", "hats")
-        count += 1
+    lanes = (
+        ("ghost", "glitch:ghost", "snare", 0.3, 0.0),
+        ("open", "glitch:open", "hats", 0.5, 0.0),
+        ("ticks", "glitch:tick", "hats", 0.2, 0.0),
+        ("rim", "glitch:rim", "hats", 0.2, 0.0),
+        ("toms", "drum:odaiko", "fx", 0.2, TOM_PITCH),
+    )
+    for name, voice, layer, dur, midi in lanes:
+        for s, v in pattern[name]:
+            if s < limit:
+                place(at(s), dur, midi, v, voice, layer)
+                count += 1
     return count
+
+
+def _motif_notes(plan: Plan, motif: tuple[tuple[int, float], ...]) -> list[tuple[int, float]]:
+    """Return a motif as (MIDI note, beats) in the key and mode of the day, from C4 up."""
+    octave = 4
+    while min(plan.scale.midi(degree, octave) for degree, _ in motif) < MOTIF_LOWEST:
+        octave += 1
+    return [(plan.scale.midi(degree, octave), beats) for degree, beats in motif]
+
+
+def _lead_strings(chord: _Chord, previous: list[float], count: int) -> list[float]:
+    """
+    Return the upper voices of the strings of a chord, placed to move the least from the voices before.
+
+    :param chord: The chord.
+    :param previous: The upper voices of the chord before (empty for the first).
+    :param count: How many upper voices: the third, then the fifth and the root.
+    """
+    third = 3 if chord.quality == 0 else 4
+    tones = (third, 7, 0)[:count]
+    first = [float(chord.pad + o) for o in (third + 12, 19, 24)[:count]]
+    if not previous:
+        return first
+    choices = [
+        [
+            chord.pad + tone + 12 * k
+            for k in range(3)
+            if STRINGS_LOW[-1] < tone + 12 * k <= STRINGS_TOP + 5
+        ]
+        for tone in tones
+    ]
+    best = min(
+        itertools.product(*choices),
+        key=lambda voices: (
+            sum(abs(a - b) for a, b in zip(sorted(voices), sorted(previous), strict=False)),
+            sum(voices),
+        ),
+    )
+    return [float(v) for v in sorted(best)]

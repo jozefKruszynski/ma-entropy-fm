@@ -10,10 +10,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import scape_ambient, scape_berlin, scape_glitch, scape_lofi, scape_minimal, scape_ritual
+from .character import DayCharacter, scale_of_day
 from .day_analysis import DAY_SECONDS, DayAnalysis, analyze_day
 from .levels import feed_forward, trim_db
 from .plan import FULL, Plan, build_plan, length_of
 from .quality import STANDARD
+from .styles import get_style
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -76,6 +78,7 @@ def scape_score(  # noqa: PLR0913
     energy_offset: float = 0.0,
     area_key: str = "",
     length_mode: str = FULL,
+    character: DayCharacter | None = None,
 ) -> tuple[Score, Plan]:
     """
     Return the score of the soundscape of a day in a style, and the plan it was made from.
@@ -91,7 +94,10 @@ def scape_score(  # noqa: PLR0913
     :param energy_offset: The setting that moves the activity.
     :param area_key: The room (or the whole house), which seeds the deals.
     :param length_mode: `full` or `condensed`.
+    :param character: What kind of day it was; it picks the key and mode of the day and the identity of the piece.
     """
+    if character is not None and day is not None:
+        scale = scale_of_day(get_style(style_key), scale, day, character)
     plan = build_plan(
         series,
         analysis,
@@ -104,6 +110,7 @@ def scape_score(  # noqa: PLR0913
         energy_offset=energy_offset,
         area_key=area_key,
         length_mode=length_mode,
+        character=character,
     )
     score = COMPOSERS[style_key](plan)
     for key, layer in score.layers.items():

@@ -1,32 +1,59 @@
 """
 Lo-fi: a dusty swung boom-bap loop, electric piano on jazzy progressions, a round bass, vinyl and tape.
 
-The generative system is a band that plays a composed loop and never plays it the same way twice. The day deals
-a progression of four chords with sevenths, ninths and elevenths, a comping rhythm, a bass pattern and a drum pattern;
-every chord is voiced a little differently each time (which notes, which order, how late), and the band varies
-the loop by rule: a chord is sometimes swapped for a related one (a tritone substitution, a relative), the comping
-rhythm drifts to a neighbour, ghost notes and fills come and go with probabilities that follow the house, and a
-chord chop or a plucked line is played now and then. At night the drums rest and the loop becomes an ambient
+The generative system is a band that plays a composed loop and never plays it the same way twice. The day picks
+a progression of four chords with sevenths, ninths and elevenths that agrees with the mode of the day (ii V I and
+backdoor moves on the major, lydian and mixolydian days, i IV bVII and i VI iv V on the dorian and aeolian ones), a
+comping rhythm, a bass pattern and a drum pattern; every chord is voiced a little differently each time and led from
+the one before (common tones held, the other voices by step), and the band varies the loop by rule: a chord is
+sometimes swapped for a related one, the comping rhythm drifts to a neighbour, ghost notes and fills come and go,
+and a chord chop or a plucked line is played now and then. At night the drums rest and the loop becomes an ambient
 piece of electric piano and vinyl.
 
-How the house steers it: activity sets the density of the drums and the comping and how often the loop is varied,
-the power of appliances sets the weight of the bass, the temperature and the sun set the tape low-pass, humidity the
-room, the lights and the evening the extensions of the chords and a swell of strings, a running dishwasher brings in
-the drum loop, and an anomaly closes the tape low-pass and opens it again (a filter dip, never a pitch glide).
+How the house steers it: the energy of the day picks the tempo inside 70 to 88, how long a chord lasts (four to eight
+bars on a quiet day, one or two on a busy one), the swing (a quiet day lies back, a busy one plays straighter), the
+comping, the bass pattern and the drum pattern (half time or no kit when quiet, a rolling syncopated kit when busy);
+the warmth picks the rounder or the glassier keys, bass, pluck and strings. The shape of the day is the form: intro,
+build, peak, release and outro enter and leave on phrases of eight bars, a build ends in a fill, and the motif of the
+room is played on the plucked line in the first and the last peak or plateau. The strongest event of the day turns the next phrase into
+a breakdown (the kit and the bass leave and come back with a fill) or brings the strings in. On top of that the
+activity sets the density of the drums and the comping, the power of appliances the weight of the bass, the
+temperature and the sun the tape low-pass, humidity the room, the lights and the evening the extensions of the
+chords, a running dishwasher brings in the drum loop, and an anomaly closes the tape low-pass and opens it again (a
+filter dip, never a pitch glide).
 
 The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import itertools
+from bisect import bisect_right
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
-from .gen import block_walk, dips, swells, swung, weighted
+from .character import chord_bars, tempo_target
+from .gen import block_walk, dips, swells, swung
+from .harmony import MOTIF_CHOICE, develop_motif, motif_seed, motif_sites
+from .plan import (
+    BUILD,
+    CLIMAX,
+    FORM_BARS,
+    INTRO,
+    MIN_FORM_CELLS,
+    OUTRO,
+    PLATEAU,
+    RELEASE,
+    SHORT_FORM_BARS,
+    TEMPO_TOLERANCE,
+)
 from .score import Layer, Note, Score, Texture
+from .styles import LOFI
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .plan import Plan
 
 # the sound of a chord above its root, in semitones, as an electric piano plays it
@@ -48,17 +75,47 @@ EXTENDED = {
     "dom13": "dom13",
 }
 Chord = tuple[int, str]
-PROGRESSIONS: tuple[tuple[str, tuple[Chord, ...]], ...] = (
-    ("ii V I vi", ((2, "m9"), (7, "dom9"), (0, "maj9"), (9, "m9"))),
-    ("i iv VII III", ((0, "m9"), (5, "m11"), (10, "dom9"), (3, "maj9"))),
-    ("I IV iii vi", ((0, "maj9"), (5, "maj9"), (4, "m9"), (9, "m9"))),
-    ("i VI ii V", ((0, "m9"), (8, "maj9"), (2, "m11"), (7, "dom13"))),
-    ("IV iii ii I", ((5, "maj9"), (4, "m7"), (2, "m9"), (0, "maj9"))),
-    ("i VII VI V", ((0, "m11"), (10, "dom9"), (8, "maj9"), (7, "dom13"))),
-    ("I vi ii V", ((0, "maj9"), (9, "m9"), (2, "m9"), (7, "dom9"))),
-    ("vi IV I V", ((9, "m9"), (5, "maj9"), (0, "maj9"), (7, "dom13"))),
+DOMINANT = 7
+
+
+class Progression(NamedTuple):
+    """Four chords, the modes whose notes they stay in, and how much they move (0 a vamp, 1 a chain of cadences)."""
+
+    name: str
+    chords: tuple[Chord, ...]
+    modes: frozenset[str]
+    motion: float
+
+
+MAJOR = frozenset({"major"})
+MIXOLYDIAN = frozenset({"mixolydian"})
+LYDIAN = frozenset({"lydian"})
+DORIAN = frozenset({"dorian"})
+AEOLIAN = frozenset({"aeolian"})
+# fmt: off
+PROGRESSIONS: tuple[Progression, ...] = (
+    Progression("ii V I vi", ((2, "m9"), (7, "dom9"), (0, "maj9"), (9, "m9")), MAJOR, 0.9),
+    Progression("I vi ii V", ((0, "maj9"), (9, "m9"), (2, "m9"), (7, "dom9")), MAJOR, 0.8),
+    Progression("backdoor iv bVII I vi", ((5, "m9"), (10, "dom9"), (0, "maj9"), (9, "m9")), MAJOR, 0.7),
+    Progression("IV vi ii I", ((5, "maj9"), (9, "m9"), (2, "m9"), (0, "maj9")), MAJOR, 0.55),
+    Progression("vi IV I V", ((9, "m9"), (5, "maj9"), (0, "maj9"), (7, "dom13")), MAJOR, 0.4),
+    Progression("ii bVII I IV", ((2, "m9"), (10, "maj9"), (0, "dom9"), (5, "maj9")), MIXOLYDIAN, 0.8),
+    Progression("I v IV bVII", ((0, "dom9"), (7, "m9"), (5, "maj9"), (10, "maj9")), MIXOLYDIAN, 0.5),
+    Progression("I bVII IV I", ((0, "dom9"), (10, "maj9"), (5, "maj9"), (0, "dom13")), MIXOLYDIAN, 0.25),
+    Progression("vi II V I", ((9, "m9"), (2, "dom9"), (7, "maj9"), (0, "maj9")), LYDIAN, 0.8),
+    Progression("I V II vi", ((0, "maj9"), (7, "maj9"), (2, "dom9"), (9, "m9")), LYDIAN, 0.55),
+    Progression("I II iii vi", ((0, "maj9"), (2, "dom9"), (4, "m9"), (9, "m9")), LYDIAN, 0.3),
+    Progression("i IV v bVII", ((0, "m9"), (5, "dom9"), (7, "m9"), (10, "maj9")), DORIAN, 0.7),
+    Progression("i bIII IV bVII", ((0, "m11"), (3, "maj9"), (5, "dom9"), (10, "maj9")), DORIAN, 0.5),
+    Progression("i IV bVII i", ((0, "m9"), (5, "dom9"), (10, "maj9"), (0, "m11")), DORIAN, 0.25),
+    Progression("i VI iv V", ((0, "m9"), (8, "maj9"), (5, "m11"), (7, "dom13")), AEOLIAN, 0.8),
+    Progression("i VII VI V", ((0, "m11"), (10, "dom9"), (8, "maj9"), (7, "dom13")), AEOLIAN, 0.6),
+    Progression("i iv VII III", ((0, "m9"), (5, "m11"), (10, "dom9"), (3, "maj9")), AEOLIAN, 0.35),
 )
-# substitutes for a chord: (semitones from its root, quality)
+# fmt: on
+# a progression of the mode of the day counts this much, how well its motion fits the energy the rest
+MODE_WEIGHT = 0.7
+# substitutes for a chord: (semitones from its root, quality); a dominant is swapped only when it is the V
 SUBSTITUTES = {
     "dom9": (6, "dom9"),
     "dom13": (6, "dom9"),
@@ -67,57 +124,146 @@ SUBSTITUTES = {
     "m7": (3, "maj9"),
     "m11": (3, "maj9"),
 }
+
+
+class Pattern(NamedTuple):
+    """A rhythm of the band and the energy (0 to 1) of the day that it suits."""
+
+    name: str
+    steps: tuple[Any, ...]
+    energy: float
+
+
 # comping: (start step of 16, length in steps, relative velocity)
-Comp = tuple[tuple[int, int, float], ...]
-COMPS: tuple[tuple[str, Comp], ...] = (
-    ("held", ((0, 12, 1.0),)),
-    ("push", ((0, 6, 1.0), (6, 3, 0.7), (10, 6, 0.85))),
-    ("two and four", ((2, 4, 0.9), (8, 4, 1.0), (12, 3, 0.7))),
-    ("stabs", ((0, 2, 1.0), (6, 2, 0.7), (8, 2, 0.9), (14, 2, 0.6))),
-    ("syncopated", ((0, 3, 1.0), (3, 3, 0.75), (8, 6, 0.9))),
-    ("late", ((3, 5, 0.95), (10, 5, 0.8))),
+COMPS: tuple[Pattern, ...] = (
+    Pattern("held", ((0, 12, 1.0),), 0.0),
+    Pattern("late", ((3, 5, 0.95), (10, 5, 0.8)), 0.25),
+    Pattern("push", ((0, 6, 1.0), (6, 3, 0.7), (10, 6, 0.85)), 0.45),
+    Pattern("two and four", ((2, 4, 0.9), (8, 4, 1.0), (12, 3, 0.7)), 0.6),
+    Pattern("syncopated", ((0, 3, 1.0), (3, 3, 0.75), (8, 6, 0.9)), 0.8),
+    Pattern("stabs", ((0, 2, 1.0), (6, 2, 0.7), (8, 2, 0.9), (14, 2, 0.6)), 0.95),
 )
 # bass: (start step, length in steps, 'r' root, 'f' fifth, 'o' octave)
-Bass = tuple[tuple[int, int, str], ...]
-BASSES: tuple[tuple[str, Bass], ...] = (
-    ("walking root", ((0, 6, "r"), (10, 2, "f"), (14, 2, "r"))),
-    ("round", ((0, 3, "r"), (3, 1, "r"), (6, 2, "f"), (10, 2, "r"), (13, 2, "o"))),
-    ("long and short", ((0, 4, "r"), (8, 2, "r"), (11, 2, "f"), (14, 2, "r"))),
-    ("step", ((0, 2, "r"), (4, 2, "r"), (8, 2, "f"), (10, 2, "r"), (14, 1, "o"))),
+BASSES: tuple[Pattern, ...] = (
+    Pattern("long and short", ((0, 4, "r"), (8, 2, "r"), (11, 2, "f"), (14, 2, "r")), 0.15),
+    Pattern("walking root", ((0, 6, "r"), (10, 2, "f"), (14, 2, "r")), 0.4),
+    Pattern("round", ((0, 3, "r"), (3, 1, "r"), (6, 2, "f"), (10, 2, "r"), (13, 2, "o")), 0.6),
+    Pattern("step", ((0, 2, "r"), (4, 2, "r"), (8, 2, "f"), (10, 2, "r"), (14, 1, "o")), 0.85),
 )
-# drums on a 16-step bar: kick steps, snare steps, ghost steps (a soft snare or a rim), hat accents
-Drum = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]
-DRUMS: tuple[tuple[str, Drum], ...] = (
-    ("classic", ((0, 7, 10), (4, 12), (15,))),
-    ("lazy", ((0, 3, 10), (4, 12), (9, 14))),
-    ("late kick", ((0, 5, 8, 11), (4, 12), ())),
-    ("rolling", ((0, 6, 10, 13), (4, 12), (9,))),
-    ("shuffle", ((0, 8, 11), (4, 12), (14,))),
-    ("half time", ((0, 10), (8,), (6, 15))),
+BASS_TONES = {"r": 0, "f": 7, "o": 12}
+# drums on a 16-step bar: kick steps, snare steps, ghost steps (a soft snare or a rim)
+DRUMS: tuple[Pattern, ...] = (
+    Pattern("half time", ((0, 10), (8,), (6, 15)), 0.0),
+    Pattern("lazy", ((0, 3, 10), (4, 12), (9, 14)), 0.2),
+    Pattern("classic", ((0, 7, 10), (4, 12), (15,)), 0.45),
+    Pattern("late kick", ((0, 5, 8, 11), (4, 12), ()), 0.55),
+    Pattern("shuffle", ((0, 8, 11), (4, 12), (14,)), 0.7),
+    Pattern("rolling", ((0, 6, 10, 13), (4, 12), (9,)), 0.9),
 )
-KEYS = ("tx_ep", "fm_ep")
-BASS_VOICES = ("sub_round", "moog_bass")
-PLUCKS = ("strum_pluck", "nylon_ks")
-TEMPOS = (72.0, 75.0, 78.0, 80.0, 82.0, 85.0, 88.0)
 
 
-def _voicing(scale_root: int, chord: Chord, extended: bool) -> list[int]:  # noqa: FBT001
-    """Return the notes of a chord above its root, closed, centred on the middle of the electric piano."""
-    offset, quality = chord
-    name = EXTENDED[quality] if extended else quality
-    root = scale_root + offset
-    base = 48 + (root % 12)
-    if base + 3 < 53:
-        base += 12
-    return [base + i for i in QUALITIES[name]]
-    # drop the highest tone an octave for a wider voicing now and then; the caller decides by chance
+class Voice(NamedTuple):
+    """A voice and how warm it sounds, -1 (glassy, dark) to 1 (round, warm)."""
+
+    key: str
+    warmth: float
 
 
-# the least strength of the drums by day, and of the strings
-DRUMS_FLOOR = 0.6
-LIGHT_DRUMS_FLOOR = 0.45
+KEYS = (Voice("tx_ep", 0.5), Voice("fm_ep", -0.5))
+BASS_VOICES = (Voice("sub_round", 0.7), Voice("moog_bass", -0.3))
+PLUCKS = (Voice("strum_pluck", 0.4), Voice("nylon_ks", -0.2))
+STRING_VOICES = (Voice("juno_pad", 0.5), Voice("string_machine", -0.4))
+TEMPOS = tuple(float(bpm) for bpm in range(int(LOFI.tempo[0]), int(LOFI.tempo[1]) + 1, 2))
+# the swing of a sixteenth (how late the odd ones are): a quiet day lies back, a busy one plays straighter
+SWING_QUIET = 0.30
+SWING_BUSY = 0.10
+SWING_DETAIL = 0.02
+# the electric piano plays its chords between these notes
+KEYS_LOW = 53
+KEYS_HIGH = 76
+KEYS_CENTRE = 62
+# the widest a voicing is: an octave and a fourth
+KEYS_SPAN = 17
+# the bass root lies from E1 up, and no note of the bass reaches C3 (MIDI 48)
+BASS_LOWEST = 28
+BASS_CEILING = 48
+# the plucked line states the motif of the room from C4 up
+MOTIF_LOWEST = 60
+MOTIF_VELOCITY = 0.6
+# the least strength of the drums by day for the quietest and the busiest day, and the same in the cheapest tier
+DRUMS_FLOOR = (0.2, 0.85)
+LIGHT_DRUMS_FLOOR = (0.15, 0.55)
 LIGHT_LAYERS = 4
 STRINGS_FLOOR = 0.35
+# the kit comes in over this stretch of energy: a day under the first has no kit
+KIT_FROM = 0.1
+KIT_FULL = 0.4
+# how much of the kit, the comping and the bass each role of the form plays
+KIT_BY_ROLE = {INTRO: 0.0, BUILD: 0.6, CLIMAX: 1.0, RELEASE: 0.5, PLATEAU: 0.85, OUTRO: 0.0}
+COMP_BY_ROLE = {INTRO: 0.4, BUILD: 0.7, CLIMAX: 1.0, RELEASE: 0.7, PLATEAU: 0.85, OUTRO: 0.4}
+SILENT_BASS = frozenset({INTRO, OUTRO})
+# the share of the comping that is kept, from the quietest to the fullest moment
+COMP_KEEP = (0.25, 1.0)
+COMP_ENERGY_SHARE = 0.55
+# the hits of the fill that leads out of a build or a breakdown: (step of 16, velocity)
+FILL = ((10, 0.4), (12, 0.5), (13, 0.6), (14, 0.75), (15, 0.9))
+KIT_LEAST = 0.12
+KIT_PLAYING = 0.15
+HAT_EIGHTH_LEAST = 0.45
+HAT_SIXTEENTH_FROM = 0.55
+HAT_SIXTEENTH_MOST = 0.8
+THIRD = 1.0 / 3.0
+
+
+def _fit_to(value: float, target: float) -> float:
+    """Return how close a tag is to what the day asks, 1 when equal."""
+    return 1.0 - abs(value - target)
+
+
+def _warm_fit(voices: Sequence[Voice], warmth: float) -> list[float]:
+    """Return how well each voice suits the warmth of the day."""
+    return [1.0 - abs(voice.warmth - warmth) / 2.0 for voice in voices]
+
+
+def _bars_fit(options: Sequence[int], energy: float) -> list[float]:
+    """Return how well each count of bars suits: the busier within its third of energy, the shorter."""
+    within = float(np.clip(energy / THIRD - min(int(energy / THIRD), 2), 0.0, 1.0))
+    last = max(len(options) - 1, 1)
+    return [_fit_to(index / last, 1.0 - within) for index in range(len(options))]
+
+
+def _voicing(
+    scale_root: int, chord: Chord, previous: Sequence[int] | None, *, extended: bool
+) -> list[int]:
+    """Return the notes of a chord above its root (the root is the bass's), led from the previous voicing."""
+    offset, quality = chord
+    name = EXTENDED[quality] if extended else quality
+    tones = [(scale_root + offset + interval) % 12 for interval in QUALITIES[name]]
+    places = [[n for n in range(KEYS_LOW, KEYS_HIGH + 1) if n % 12 == tone] for tone in tones]
+    best: list[int] = []
+    best_cost = float("inf")
+    for combo in itertools.product(*places):
+        notes = sorted(combo)
+        span = notes[-1] - notes[0]
+        if span > KEYS_SPAN:
+            continue
+        if previous:
+            moved = sum(abs(a - b) for a, b in zip(sorted(previous), notes, strict=False))
+            cost = float(moved + 2 * abs(len(previous) - len(notes)))
+        else:
+            cost = abs(sum(notes) / len(notes) - KEYS_CENTRE) * len(notes)
+        cost += span / KEYS_SPAN
+        if cost < best_cost:
+            best, best_cost = notes, cost
+    return best
+
+
+def _motif_notes(plan: Plan, motif: tuple[tuple[int, float], ...]) -> list[tuple[int, float]]:
+    """Return a motif as (MIDI note, beats) in the key and mode of the day, from C4 up."""
+    octave = 4
+    while min(plan.scale.midi(degree, octave) for degree, _ in motif) < MOTIF_LOWEST:
+        octave += 1
+    return [(plan.scale.midi(degree, octave), beats) for degree, beats in motif]
 
 
 def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
@@ -126,108 +272,218 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
 
     :param plan: The curves and the deals of the day.
     """
-    quality = plan.quality
     length = plan.length
     rng = plan.rng("lofi")
-    bpm = plan.deal("tempo", TEMPOS)
+    character = plan.character
+    energy = character.energy
+    warmth = character.warmth
+    root = plan.scale.root
+    activity, power = plan.activity, plan.power
+    light = plan.quality.max_layers <= LIGHT_LAYERS
+    low, high = LOFI.tempo
+    target = tempo_target(LOFI, character)
+    bpm = plan.pick(
+        "tempo",
+        TEMPOS,
+        [_fit_to((t - low) / (high - low), target) for t in TEMPOS],
+        tolerance=TEMPO_TOLERANCE,
+    )
     beat = 60.0 / bpm
     step = beat / 4.0
     bar = beat * 4.0
-    prog_name, progression = plan.deal("progression", PROGRESSIONS)
-    comp_name, comp = plan.deal("comping", COMPS)
-    bass_name, bass_pattern = plan.deal("bass pattern", BASSES)
-    drum_name, drum = plan.deal("drum pattern", DRUMS)
-    keys_voice = plan.deal("keys", KEYS)
-    bass_voice = plan.deal("bass voice", BASS_VOICES)
-    pluck_voice = plan.deal("pluck", PLUCKS)
+    phrase_bars = FORM_BARS if length / (FORM_BARS * bar) >= MIN_FORM_CELLS else SHORT_FORM_BARS
+    phrase = phrase_bars * bar
+    prog = plan.pick(
+        "progression",
+        PROGRESSIONS,
+        [
+            MODE_WEIGHT * float(plan.scale.mode in p.modes)
+            + (1.0 - MODE_WEIGHT) * _fit_to(p.motion, energy)
+            for p in PROGRESSIONS
+        ],
+    )
+    comp_pattern = plan.pick("comping", COMPS, [_fit_to(c.energy, energy) for c in COMPS])
+    bass_pattern = plan.pick("bass pattern", BASSES, [_fit_to(b.energy, energy) for b in BASSES])
+    drum_pattern = plan.pick("drum pattern", DRUMS, [_fit_to(d.energy, energy) for d in DRUMS])
+    keys_voice = plan.pick("keys", KEYS, _warm_fit(KEYS, warmth)).key
+    bass_voice = plan.pick("bass voice", BASS_VOICES, _warm_fit(BASS_VOICES, warmth)).key
+    pluck_voice = plan.pick("pluck", PLUCKS, _warm_fit(PLUCKS, warmth)).key
+    strings_voice = plan.pick("strings", STRING_VOICES, _warm_fit(STRING_VOICES, warmth)).key
+    options = tuple(o for o in chord_bars(character) if o <= phrase_bars) or (phrase_bars,)
+    chord_span = plan.pick("chord bars", options, _bars_fit(options, energy))
     patch = int(plan.rng("patch").integers(0, 3))
     plan.choices["patch"] = str(patch)
-    swing = 0.18 + 0.1 * float(plan.rng("swing").random())
-    root = plan.scale.root
-    activity, power = plan.activity, plan.power
-    chord_bars = 1 if plan.rng("chord bars").random() < 0.55 else 2
+    swing = (
+        SWING_QUIET
+        + (SWING_BUSY - SWING_QUIET) * energy
+        + SWING_DETAIL * float(plan.rng("swing").uniform(-1.0, 1.0))
+    )
 
-    # the kit is part of the base of the day: the house moves how hard it plays, and the night lets it rest
-    # (in the cheapest tier at a floor under the one where the off-beat hats come in)
-    drums_floor = DRUMS_FLOOR if plan.quality.max_layers > LIGHT_LAYERS else LIGHT_DRUMS_FLOOR
-    drums_on = plan.lift(
-        np.maximum(plan.gate(activity, 0.22, 0.5), plan.runs["dish"]), drums_floor
-    ) * (1.0 - 0.85 * plan.night)
+    # the kit is part of the base of the day: the house moves how hard it plays, the energy of the day whether it
+    # plays at all, and the night lets it rest
+    floor_quiet, floor_busy = LIGHT_DRUMS_FLOOR if light else DRUMS_FLOOR
+    kit_scale = float(np.clip((energy - KIT_FROM) / (KIT_FULL - KIT_FROM), 0.0, 1.0))
+    kit_scale = kit_scale * kit_scale * (3.0 - 2.0 * kit_scale)
+    drums_on = (
+        plan.lift(
+            np.maximum(plan.gate(activity, 0.22, 0.5), plan.runs["dish"]),
+            floor_quiet + (floor_busy - floor_quiet) * energy,
+        )
+        * kit_scale
+        * (1.0 - 0.85 * plan.night)
+    )
+
+    # the form on phrases, and the strongest event that turns the next phrase
+    sections = plan.sections(bar)
+    starts = [s[0] for s in sections]
+
+    def role_at(second: float) -> tuple[str, float]:
+        found = sections[max(bisect_right(starts, second) - 1, 0)]
+        return found[2], found[3]
+
+    breakdown = (0.0, 0.0)
+    strings_from = float(length)
+    if plan.events:
+        when, _ = max(plan.events, key=lambda e: e[1])
+        edge = (int(when / phrase) + 1) * phrase
+        if edge + 2 * phrase < length:
+            if role_at(edge)[0] in {CLIMAX, PLATEAU}:
+                breakdown = (edge, edge + phrase)
+            else:
+                strings_from = edge
+    fill_bars = {
+        round(end / bar) - 1 for _, end, role, _ in sections if role == BUILD and end < length
+    }
+    if breakdown[1]:
+        fill_bars.add(round(breakdown[1] / bar) - 1)
+    sites = [i for i, (_, _, role, _) in enumerate(sections) if role in {CLIMAX, PLATEAU}]
+    motif_bars = {
+        round(sections[i][0] / bar): _motif_notes(
+            plan, develop_motif(plan.motif(), number, motif_seed(plan))
+        )
+        for number, i in enumerate(motif_sites(sites or [len(sections) - 1]))
+    }
+
     notes: list[Note] = []
-    variations = {"swap": 0, "comp": 0, "chop": 0, "pluck": 0}
-    current = list(progression)
-    comp_now = comp
+    variations = {"swap": 0, "comp": 0, "chop": 0, "pluck": 0, "motif": 0}
+    current = list(prog.chords)
+    comp_now = comp_pattern
     bars = int(length / bar)
     chord_index = 0
+    previous: list[int] | None = None
+    kicks, snares, ghosts = drum_pattern.steps
+    eighths = HAT_EIGHTH_LEAST + (1.0 - HAT_EIGHTH_LEAST) * energy
+    sixteenths = (
+        HAT_SIXTEENTH_MOST * max(energy - HAT_SIXTEENTH_FROM, 0.0) / (1.0 - HAT_SIXTEENTH_FROM)
+    )
     for bar_index in range(bars):
         second = bar_index * bar
-        if bar_index % (4 * chord_bars) == 0 and bar_index > 0:
+        if bar_index % (4 * chord_span) == 0 and bar_index > 0:
             # the loop is varied by rule: a chord may be swapped for a related one, the comping may drift
-            lit = plan.at(plan.lights, second)
             if rng.random() < 0.12 + 0.3 * plan.at(activity, second):
                 k = int(rng.integers(0, len(current)))
                 off, qual = current[k]
                 sub = SUBSTITUTES.get(qual)
-                if sub is not None and current[k] == progression[k]:
+                if qual.startswith("dom") and off != DOMINANT:
+                    sub = None
+                if sub is not None and current[k] == prog.chords[k]:
                     current[k] = (off + sub[0], sub[1])
                     variations["swap"] += 1
                 else:
-                    current[k] = progression[k]
+                    current[k] = prog.chords[k]
             if rng.random() < 0.25:
-                comp_now = weighted(rng, [c for _, c in COMPS], (1.0,) * len(COMPS))
+                at_index = COMPS.index(comp_now)
+                neighbours = [i for i in (at_index - 1, at_index + 1) if 0 <= i < len(COMPS)]
+                comp_now = COMPS[neighbours[int(rng.integers(0, len(neighbours)))]]
                 variations["comp"] += 1
-            del lit
-        if bar_index % chord_bars != 0:
-            continue
-        chord = current[chord_index % len(current)]
-        chord_index += 1
-        here_drums = plan.at(drums_on, second)
-        extended = plan.at(plan.lights, second) > 0.5 or plan.at(plan.evening, second) > 0.55
-        voicing = _voicing(root, chord, extended)
-        # with the drums at rest the electric piano holds the chord, a quiet piece
-        pattern = comp_now if here_drums > 0.15 else COMPS[0][1]
-        span = chord_bars * bar
-        for start, long, rel in pattern:
-            if rng.random() > 0.55 + 0.45 * (0.4 + plan.at(activity, second)) and long < 6:
-                continue
-            at = second + swung(start, step, swing) + float(rng.normal(0.0, 0.012))
-            hold = min(long * step * 1.1, span - start * step) if here_drums > 0.15 else span * 0.95
-            order = list(voicing)
-            if rng.random() < 0.3:
-                order.reverse()
-            for k, midi in enumerate(order):
-                vel = float(
-                    np.clip(
-                        (0.5 + 0.12 * rel) * (0.85 + 0.15 * plan.at(plan.bright, second))
-                        + rng.normal(0.0, 0.05),
-                        0.2,
-                        0.95,
-                    )
-                )
+        if bar_index in motif_bars and not breakdown[0] <= second < breakdown[1]:
+            variations["motif"] += 1
+            clock = second
+            for midi, beats in motif_bars[bar_index]:
                 notes.append(
                     Note(
-                        at + k * float(rng.uniform(0.008, 0.028)),
-                        hold,
+                        clock,
+                        beats * beat * 0.95,
                         float(midi),
-                        vel,
-                        keys_voice,
-                        "keys",
-                        patch,
+                        MOTIF_VELOCITY,
+                        pluck_voice,
+                        "pluck",
+                        patch % 2,
                     )
                 )
+                clock += beats * beat
+        if bar_index % chord_span != 0:
+            continue
+        role, intensity = role_at(second)
+        in_break = breakdown[0] <= second < breakdown[1]
+        chord = current[chord_index % len(current)]
+        chord_index += 1
+        here_drums = plan.at(drums_on, second) * (0.0 if in_break else KIT_BY_ROLE[role])
+        extended = plan.at(plan.lights, second) > 0.5 or plan.at(plan.evening, second) > 0.55
+        voicing = _voicing(root, chord, previous, extended=extended)
+        previous = voicing
+        # with the drums at rest the electric piano holds the chord, a quiet piece
+        playing = here_drums > KIT_PLAYING
+        pattern = comp_now.steps if playing else COMPS[0].steps
+        density = float(
+            np.clip(
+                COMP_ENERGY_SHARE * energy + (1.0 - COMP_ENERGY_SHARE) * plan.at(activity, second),
+                0.0,
+                1.0,
+            )
+            * COMP_BY_ROLE[role]
+            * (0.5 + 0.5 * intensity)
+        )
+        keep = COMP_KEEP[0] + (COMP_KEEP[1] - COMP_KEEP[0]) * density
+        rounds = 1 if light or not playing else chord_span
+        for b in range(rounds):
+            for start, long, rel in pattern:
+                if rng.random() > keep and long < 6:
+                    continue
+                at = second + b * bar + swung(start, step, swing) + float(rng.normal(0.0, 0.012))
+                hold = (
+                    min(long * step * 1.1, bar - start * step)
+                    if playing
+                    else chord_span * bar * 0.95
+                )
+                order = list(voicing)
+                if rng.random() < 0.3:
+                    order.reverse()
+                for k, midi in enumerate(order):
+                    vel = float(
+                        np.clip(
+                            (0.5 + 0.12 * rel) * (0.85 + 0.15 * plan.at(plan.bright, second))
+                            + rng.normal(0.0, 0.05),
+                            0.2,
+                            0.95,
+                        )
+                    )
+                    notes.append(
+                        Note(
+                            at + k * float(rng.uniform(0.008, 0.028)),
+                            hold,
+                            float(midi),
+                            vel,
+                            keys_voice,
+                            "keys",
+                            patch,
+                        )
+                    )
         # the bass follows the root of the chord
-        root_midi = 28 + ((root + chord[0]) % 12)
-        if root_midi < 31:
-            root_midi += 12
-        for b in range(chord_bars):
-            for start, long, tone in bass_pattern:
-                offset = {"r": 0, "f": 7, "o": 12}[tone]
-                at = second + b * bar + swung(start, step, swing)
+        root_midi = BASS_LOWEST + (root + chord[0] - BASS_LOWEST) % 12
+        for b in range(chord_span):
+            base = second + b * bar
+            role_b, intensity_b = role_at(base)
+            silent = in_break or role_b in SILENT_BASS
+            for start, long, tone in () if silent else bass_pattern.steps:
+                offset = BASS_TONES[tone]
+                if root_midi + offset >= BASS_CEILING:
+                    offset = 0
                 if rng.random() < 0.08:
                     continue
                 notes.append(
                     Note(
-                        at + float(rng.normal(0.0, 0.006)),
+                        base + swung(start, step, swing) + float(rng.normal(0.0, 0.006)),
                         max(long * step * 0.9, 0.12),
                         float(root_midi + offset),
                         float(
@@ -242,13 +498,27 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                         1 if bass_voice == "sub_round" else patch % 2,
                     )
                 )
-        # drums
-        for b in range(chord_bars):
-            base = second + b * bar
-            level = plan.at(drums_on, base)
-            if level < 0.12:
+            # drums
+            this_bar = bar_index + b
+            kit_role = 0.0 if breakdown[0] <= base < breakdown[1] else KIT_BY_ROLE[role_b]
+            level = plan.at(drums_on, base) * kit_role
+            if this_bar in fill_bars:
+                ahead = KIT_BY_ROLE[role_at(base + bar)[0]]
+                if plan.at(drums_on, base) * ahead >= KIT_LEAST:
+                    for fill_step, fill_vel in FILL:
+                        notes.append(
+                            Note(
+                                base + fill_step * step + 0.012,
+                                0.3,
+                                0.0,
+                                fill_vel * (0.7 + 0.3 * intensity_b),
+                                "drum:snare_lofi",
+                                "drums",
+                                patch % 3,
+                            )
+                        )
+            if level < KIT_LEAST:
                 continue
-            kicks, snares, ghosts = drum
             for k in kicks:
                 if k == 0 or rng.random() < 0.9:
                     notes.append(  # noqa: PERF401
@@ -275,7 +545,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     )
                 )
             for k in ghosts:
-                if rng.random() < 0.3 + 0.5 * plan.at(activity, base):
+                if rng.random() < 0.15 + 0.7 * energy * (0.5 + 0.5 * plan.at(activity, base)):
                     notes.append(  # noqa: PERF401
                         Note(
                             base + swung(k, step, swing),
@@ -287,19 +557,16 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                             patch % 2,
                         )
                     )
-            skip = 0.3 * (1.0 - plan.at(activity, base))
             for k in range(16):
-                if k % 2 == 1 and rng.random() < 0.5 + skip * 0.5 and k % 4 != 3:
-                    continue
-                if k % 2 == 1 and k % 4 == 1 and level < 0.5:
-                    continue
-                if k % 2 == 1 and plan.quality.max_layers <= LIGHT_LAYERS:
-                    continue
+                if k % 4 != 0:
+                    if k % 2 == 0 and rng.random() > eighths:
+                        continue
+                    if k % 2 == 1 and (light or level < 0.5 or rng.random() > sixteenths):
+                        continue
                 accent = 1.0 if k % 4 == 0 else 0.75 if k % 2 == 0 else 0.45
-                hit_at = swung(k, step, swing)
                 notes.append(
                     Note(
-                        base + hit_at + float(rng.normal(0.0, 0.006)),
+                        base + swung(k, step, swing) + float(rng.normal(0.0, 0.006)),
                         0.1,
                         0.0,
                         accent * (0.35 + 0.25 * level) + float(rng.normal(0, 0.03)),
@@ -309,45 +576,53 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     )
                 )
         # ear candy: a chord chop now and then, and once in a while a plucked line
-        if here_drums > 0.3 and rng.random() < 0.05 + 0.1 * plan.at(activity, second):
+        if here_drums > 0.3 and rng.random() < 0.02 + 0.14 * energy * plan.at(activity, second):
             variations["chop"] += 1
             at = second + float(rng.choice([6, 10, 14])) * step
             for k, midi in enumerate(voicing):
                 notes.append(
                     Note(at + k * 0.006, 0.12, float(midi + 12), 0.5, keys_voice, "chop", patch)
                 )
-        if bar_index % 12 == 6 and plan.at(activity, second) > 0.12 and rng.random() < 0.7:
+        if (
+            bar_index % 12 == 6
+            and bar_index not in motif_bars
+            and plan.at(activity, second) > 0.12
+            and rng.random() < 0.15 + 0.55 * energy
+        ):
             variations["pluck"] += 1
-            scale_tones = (
-                [voicing[0] + 12 + o for o in (0, 2, 3, 7, 10)]
-                if chord[1].startswith("m")
-                else [voicing[0] + 12 + o for o in (0, 2, 4, 7, 9)]
-            )
-            at = second
+            lead = voicing[0] + 12
+            shape = (0, 2, 3, 7, 10) if chord[1].startswith("m") else (0, 2, 4, 7, 9)
             for k in range(int(rng.integers(3, 6))):
                 notes.append(  # noqa: PERF401
                     Note(
-                        at + k * beat * 0.5,
+                        second + k * beat * 0.5,
                         0.5,
-                        float(scale_tones[int(rng.integers(0, len(scale_tones)))]),
+                        float(lead + shape[int(rng.integers(0, len(shape)))]),
                         0.5,
                         pluck_voice,
                         "pluck",
                         patch % 2,
                     )
                 )
-        # the strings: a soft triad all day, swelling in when the lights are on in the evening
+        # the strings: a soft triad on the chord (a tonic pedal where the chord changes every bar), swelling in
+        # when the lights are on in the evening, and in from the phrase after the strongest event
         warm = max(plan.at(plan.lights, second) * plan.at(plan.evening, second), STRINGS_FLOOR)
-        if bar_index % 8 == 0 and warm > 0.3:
-            strings = "juno_pad" if patch % 2 else "string_machine"
-            for k, midi in enumerate(voicing[:3]):
+        hold_bars = chord_span if chord_span >= 2 else FORM_BARS
+        enters = role != INTRO or second >= strings_from
+        if bar_index % hold_bars == 0 and warm > 0.3 and enters and not in_break:
+            held = (
+                voicing[:3]
+                if chord_span >= 2
+                else [KEYS_LOW + (root - KEYS_LOW) % 12 + o for o in (0, 7, 12)]
+            )
+            for k, midi in enumerate(held):
                 notes.append(
                     Note(
                         second + 0.1 * k,
-                        bar * 8,
+                        bar * hold_bars,
                         float(midi),
-                        0.3 + 0.2 * warm,
-                        strings,
+                        (0.3 + 0.2 * warm) * (0.6 + 0.4 * intensity),
+                        strings_voice,
                         "strings",
                         patch % 2,
                     )
@@ -402,13 +677,16 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         wobble=0.9,
         level_db=-10.2,
     )
+    plan.choices[MOTIF_CHOICE] = str(variations["motif"])
     score.choices = dict(plan.choices)
+    form = ", ".join(f"{role} {round((b - a) / bar)}" for a, b, role, _ in sections)
+    broke = f", a breakdown at {breakdown[0]:.0f} s" if breakdown[1] else ""
     score.notes_about = [
         (
-            f"{bpm:.0f} BPM, swing {swing:.2f}, progression {prog_name} ({chord_bars} bar{'s' if chord_bars > 1 else ''} a chord) on {keys_voice}; "
-            f"comping '{comp_name}', bass '{bass_name}' on {bass_voice}, drums '{drum_name}'."
+            f"{bpm:.0f} BPM, swing {swing:.2f}, progression {prog.name} ({chord_span} bar{'s' if chord_span > 1 else ''} a chord) on {keys_voice}; "
+            f"comping '{comp_pattern.name}', bass '{bass_pattern.name}' on {bass_voice}, drums '{drum_pattern.name}'."
         ),
+        f"Form in bars: {form}; the motif of the room {variations['motif']} times{broke}.",
         f"Variations by rule: {variations['swap']} chord swaps, {variations['comp']} comping changes, {variations['chop']} chops, {variations['pluck']} plucked lines.",
     ]
-    del quality
     return score

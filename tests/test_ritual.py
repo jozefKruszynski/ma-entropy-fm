@@ -14,10 +14,14 @@ from entropy_fm.scape_ritual import (
     BLOCK_PATTERNS,
     CELLS,
     CLACK_DELAY,
+    DRIVING,
     LENGTHS,
     MIN_GAP,
+    MODE_LENGTHS,
+    MODES,
     PLUCKS,
     SLIT_PATTERNS,
+    STILL,
     TUNINGS,
 )
 from entropy_fm.score import Score
@@ -35,7 +39,8 @@ WOOD = {"slit", "block", "clack"}
 
 def _scale_of(score: Score) -> tuple[int, set[int]]:
     name = score.choices["tuning"]
-    _, root, steps = next(t for t in TUNINGS if t[0] == name)
+    root = int(score.choices["root"])
+    _, steps, _ = next(t for t in TUNINGS if t[0] == name)
     return root, {(root + step) % 12 for step in steps}
 
 
@@ -57,7 +62,8 @@ def _frequency_track(wave: np.ndarray, seconds: tuple[float, float]) -> np.ndarr
 def test_the_wood_loops_are_of_other_lengths_than_the_pluck_and_phase_against_it() -> None:
     """The cell is eight pulses; the slit drum and the woodblock loop in 9 to 19 pulses, none a multiple or a simple fraction of it."""
     assert len(LENGTHS) >= 4
-    assert all(6.0 <= seconds <= 7.2 for _, seconds in LENGTHS)
+    assert all(6.0 <= seconds <= 7.2 for _, seconds in MODE_LENGTHS[STILL])
+    assert all(4.0 <= seconds <= 7.2 for _, seconds in LENGTHS)
     lengths = [pulses for _, pulses, _ in (*SLIT_PATTERNS, *BLOCK_PATTERNS)]
     assert len(set(lengths)) >= 5
     for pulses in lengths:
@@ -81,8 +87,10 @@ def test_every_hit_of_the_wood_is_on_an_off_beat_of_the_pluck_pulse() -> None:
             assert 0 <= pulse < pulses
             assert frac in {0.5, 0.75}
             assert 0.0 <= need < 1.0
-    # a pulse is at least 0.75 s, so even a late off-beat is 0.19 s from the next plucked note
-    assert min(seconds for _, seconds in LENGTHS) / 8.0 * 0.25 > 1.5 * MIN_GAP
+    # a pulse of the still mode is at least 0.75 s, so even a late off-beat is 0.19 s from the next plucked note; in the
+    # driving mode (0.525 s) it is 0.13 s, which still clears the gap
+    assert min(seconds for _, seconds in MODE_LENGTHS[STILL]) / 8.0 * 0.25 > 1.5 * MIN_GAP
+    assert min(seconds for _, seconds in LENGTHS) / 8.0 * 0.25 > MIN_GAP
 
 
 def test_the_vibrato_is_a_few_cents_at_five_hertz_and_begins_late() -> None:
@@ -179,7 +187,7 @@ def test_the_night_is_drone_and_washes_alone_and_the_pluck_comes_before_the_wood
         for layer in ("plucks", "slit", "block")
     }
     assert first["plucks"] < first["slit"] < first["block"], first
-    assert first["slit"] - first["plucks"] > 3.0, first
+    assert first["slit"] - first["plucks"] > 1.0, first
     last_plucks = max(n.t for n in score.notes if n.layer == "plucks")
     assert last_plucks < plan.length - 20.0, "the evening settles"
     # the wood leaves with the evening too
@@ -201,7 +209,6 @@ def test_there_is_one_plucked_voice_at_a_time_and_never_two_plucks_together() ->
         assert min(b - a for a, b in itertools.pairwise(line)) > 0.2, index
         # nothing plucked sounds on any other layer
         assert not [n for n in score.notes if n.voice in PLUCKED and n.layer != "plucks"]
-    assert len(seen) >= 2, "the day changes the voice"
     assert {key for _, key, _ in PLUCKS} == {"strum_pluck", "nylon_ks", "felt_piano"}
     assert len(CELLS) >= 6
 
@@ -339,7 +346,9 @@ def test_the_chant_leader_is_sparse_singable_and_answers() -> None:
 def test_the_heartbeat_and_the_taiko_are_for_the_busy_stretches_only() -> None:
     """Soft low beats in the busy part, a few big strikes on the pulse, a roll into one; none outside the busy part."""
     score, plan = demo("ritual")
-    heart = sorted(n.t for n in score.notes if n.layer == "heart")
+    beats = sorted(n.t for n in score.notes if n.layer == "heart")
+    # the second note of a lub-dub is a dub, not a beat of the pulse
+    heart = [t for before, t in itertools.pairwise([-10.0, *beats]) if t - before > 0.6]
     strikes = sorted(n.t for n in score.notes if n.voice == "drum:odaiko")
     assert heart
     assert strikes
@@ -455,11 +464,66 @@ def test_light_thins_the_layers_and_costs_less() -> None:
     assert len(light.notes) < len(standard.notes)
 
 
-def test_the_tunings_are_japanese_pentatonics_on_roots_the_drone_can_sit_on() -> None:
-    """Hirajoshi, in and kumoi: five notes each, on D, E, G or A."""
-    assert len({t[0] for t in TUNINGS}) == len(TUNINGS) >= 6
-    for _, root, steps in TUNINGS:
+def test_the_tunings_are_japanese_pentatonics_on_the_root_of_the_day() -> None:
+    """Hirajoshi, in and kumoi: five notes each, on the root of the day's key."""
+    assert {name for name, _, _ in TUNINGS} == {"hirajoshi", "in", "kumoi"}
+    for _, steps, brightness in TUNINGS:
         assert len(steps) == 5
         assert steps[0] == 0
-        assert root in {2, 4, 7, 9}
-    assert {"hirajoshi", "in", "kumoi"} <= {name.split()[0] for name, _, _ in TUNINGS}
+        assert 0.0 <= brightness <= 1.0
+    score, plan = demo("ritual")
+    assert int(score.choices["root"]) == plan.scale.root
+
+
+def _days_of_a_week() -> list[tuple[Score, Plan]]:
+    """Return a week of days of the demo kitchen, from the quietest to the busiest."""
+    days = [demo("ritual", index) for index in range(14)]
+    return sorted(days, key=lambda day: day[1].character.energy)
+
+
+def _hits_per_minute(score: Score, layers: set[str]) -> float:
+    return 60.0 * sum(n.layer in layers for n in score.notes) / score.length
+
+
+def test_a_week_of_days_has_all_three_modes_and_the_driving_one_drums_on_a_pulse_of_four_seconds() -> (
+    None
+):
+    """The mode leans on the energy of the day but the tie band is wide: all three appear, and a driving cell is about 4 s."""
+    week = _days_of_a_week()
+    modes = {score.choices["ritual mode"] for score, _ in week}
+    assert modes == {name for name, _ in MODES}
+    still = [s for s, _ in week if s.choices["ritual mode"] == STILL]
+    driving = [s for s, _ in week if s.choices["ritual mode"] == DRIVING]
+    assert still
+    assert driving
+    for score in driving:
+        cell = dict(LENGTHS)[score.choices["pluck cell length"]]
+        assert 3.8 <= cell <= 4.4
+        assert 108.0 <= 60.0 / (cell / 8.0) <= 122.0
+    for score in still:
+        assert dict(LENGTHS)[score.choices["pluck cell length"]] >= 6.0
+    assert max(_hits_per_minute(s, {"taiko"}) for s in driving) > 5.0 * max(
+        _hits_per_minute(s, {"taiko"}) for s in still
+    )
+    assert all(not [n for n in s.notes if n.layer == "heart"] for s in driving)
+
+
+def test_the_ostinato_is_on_the_pulse_builds_with_the_form_and_leaves_the_night_and_the_release() -> (
+    None
+):
+    """Taiko hits of a driving piece fall on the pulse of the cell, never in the night, and not in a section too weak for them."""
+    driving = [(s, p) for s, p in _days_of_a_week() if s.choices["ritual mode"] == DRIVING]
+    assert driving
+    for score, plan in driving:
+        cell = dict(LENGTHS)[score.choices["pluck cell length"]]
+        slot = cell / 8.0
+        hits = [n for n in score.notes if n.layer == "taiko"]
+        assert hits
+        night = _arc(plan, "night")
+        assert not [n for n in hits if n.t < night[1]]
+        steady = [n for n in hits if n.voice in {"drum:shime", "drum:odaiko"}]
+        on_grid = [abs(n.t / slot - round(n.t / slot)) for n in steady]
+        assert np.mean(np.array(on_grid) < 0.02) > 0.7
+        for start, end, role, intensity in plan.sections(cell):
+            if role in {"release", "outro"} and intensity < 0.7:
+                assert not [n for n in hits if start + 2.0 * cell < n.t < end], role

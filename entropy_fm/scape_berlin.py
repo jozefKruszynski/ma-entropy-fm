@@ -6,28 +6,57 @@ have different lengths (16, 12 and 8 or 7 steps), so they phase against each oth
 repeats after a long time. The cells are composed (the vocabulary of Phaedra and Rubycon: octave jumps, a held
 root, arpeggios); the rules change them over minutes: every four bars each line may drop a step, add one from the
 chord, move one by a degree or an octave, rotate, or be pulled back towards its first form, and the whole
-sequence is transposed when the chord root moves (a progression of the day, every eight bars). Strings and
-choir hold the chord, a drawbar organ is the bed, and a slow lead plays composed phrases of long notes into a
-tape echo. There is no drum kit; when the house is busy in the morning and the day (never at night, gone before the
-evening) a soft kick, warm toms and a light shaker follow the grid of the sequencer, far below it.
+sequence is transposed when the chord root moves (a progression of the day, over a tonic pedal in the organ). Strings
+and choir hold the chord, led from chord to chord, and a slow lead plays composed phrases of long notes into a tape
+echo, and states the motif of the room in the first and the last peak or plateau. There is no drum kit on a quiet day; on a busy one
+in the morning and the day (never at night, gone before the evening) a soft kick, warm toms and a light shaker follow
+the grid of the sequencer, far below it.
 
-How the house steers it: activity brings the lines in and sets how fast they mutate, the power of appliances
-opens the filter and sets the accents, brings the pulse and, when high, the growling bass; the temperature and
-the sun move the cutoff; humidity sets the room and the echo; the lights and the evening bring in the
-choir and the string swell; a running dishwasher fades in the second line and a washer the third; an anomaly is a
-dip of the filter with an echo throw, a swell of the strings and a step of the progression.
+How the house steers it: the character of the day picks the identity: the tempo inside 102 to 116, the cells, the
+voices (warm days the rounder ones), the progression (fourth and fifth moves in the mode of the day, still on a quiet
+day, restless on a busy one), the bars a chord lasts (8 on a quiet day, 2 on a busy one), the kit and the growling bass
+(busy days only). Its energy also sets how fast the lines mutate and how many of them play, and its shape sets the
+form: the lines, the choir and the drums join on 8-bar lines by the intensity of the section. The curves of the moment
+work on top: activity brings the lines in, the power of appliances opens the filter, sets the accents and brings the
+growl; the temperature and the sun move the cutoff; humidity sets the room and the echo; the lights and the evening
+bring in the choir; a running dishwasher fades in the second line and a washer the third; an anomaly is a dip of the
+filter with an echo throw and a swell of the strings, and the strongest one moves the next phrase to the relative key.
 
 The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
+import bisect
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .character import tempo_target
 from .gen import block_walk, dips, swells, weighted
+from .harmony import (
+    BARS_PER_PHRASE,
+    GROWLS,
+    LEAD_OCTAVE,
+    MOTIF_CHOICE,
+    NO_GROWL,
+    Progression,
+    VoiceTag,
+    develop_motif,
+    harmonic_rhythm,
+    held_runs,
+    lead_octave,
+    motif_seed,
+    motif_sites,
+    pick_voice,
+    progressions_for,
+    section_curve,
+    voice_lead,
+)
+from .plan import CLIMAX, PLATEAU, TEMPO_TOLERANCE
 from .score import CR, Layer, Note, Score
+from .styles import BERLIN_SCHOOL
 
 if TYPE_CHECKING:
     from .plan import Plan
@@ -54,15 +83,37 @@ CELLS_C: tuple[tuple[str, Cell], ...] = (
     ("nine", (0, None, 0, None, 4, None, None, None, 7)),
     ("five", (4, None, 7, None, 9)),
 )
-# chord roots of the day, as scale degrees, one for every eight bars
-PROGRESSIONS: tuple[tuple[str, tuple[int, ...]], ...] = (
-    ("i VII VI VII", (0, 6, 5, 6)),
-    ("i VI VII i", (0, 5, 6, 0)),
-    ("i iv v iv", (0, 3, 4, 3)),
-    ("i III VII iv", (0, 2, 6, 3)),
-    ("i VII iv VI", (0, 6, 3, 5)),
-    ("i v VI iv", (0, 4, 5, 3)),
+# what each cell suits, as the energy of the day (0 quiet, 1 busy): the fewer notes and the more of one pedal tone, the quieter
+CELL_ENERGY = {
+    "octave jumps": 0.55,
+    "held root": 0.45,
+    "arpeggio": 0.8,
+    "pedal and fifth": 0.15,
+    "sparse pulse": 0.05,
+    "climb": 0.95,
+    "rising third": 0.3,
+    "answer": 0.15,
+    "triad": 0.55,
+    "stutter": 0.9,
+    "eight": 0.2,
+    "seven": 0.45,
+    "nine": 0.7,
+    "five": 0.9,
+}
+# chord roots of the day, as scale degrees, one chord after another; every move is by a fourth or a fifth (3 or 4
+# scale degrees), the last chord moves to the first the same way, and the organ holds the tonic as a pedal under them.
+# The third item is how much the harmony moves (0 still, 1 restless), which is what the energy of the day asks for
+PROGRESSIONS: tuple[Progression, ...] = (
+    ("i iv", (0, 3), 0.1),
+    ("i v", (0, 4), 0.15),
+    ("i iv i v", (0, 3, 0, 4), 0.4),
+    ("i v i iv", (0, 4, 0, 3), 0.45),
+    ("i iv VII iv", (0, 3, 6, 3), 0.6),
+    ("i v ii v", (0, 4, 1, 4), 0.75),
+    ("i iv VII III VII iv", (0, 3, 6, 2, 6, 3), 0.9),
 )
+# the relative key of a mode, as the move in scale degrees that makes the same notes sound from a new tonic
+RELATIVE_SHIFT = {"aeolian": 2, "dorian": -1, "phrygian": -2, "mixolydian": 3}
 # composed lead phrases: (degree from the chord root, length in beats)
 LEAD_PHRASES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
     ("rising", ((4, 8), (5, 4), (7, 12))),
@@ -72,18 +123,68 @@ LEAD_PHRASES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
     ("sigh", ((7, 12), (4, 4), (5, 12))),
     ("open", ((0, 16), (4, 16))),
 )
-SEQ_VOICES = ("moog_seq", "moog_bass")
-SECOND_VOICES = ("juno_pluck", "blip_synth", "moog_seq")
-LEADS = ("analog_lead", "flute_lead")
-STRINGS = ("tape_strings", "string_machine")
-GROWLS = ("reese", "fm_growl")
-# warm electronic toms on the 16th grid: (step of the bar, which tom: 0 is the lowest of three)
-TOM_FIGURES: tuple[tuple[tuple[int, int], ...], ...] = (
-    ((10, 1), (14, 0)),
-    ((6, 2), (10, 1), (14, 0)),
-    ((3, 2), (7, 1), (11, 0), (14, 1)),
+SEQ_VOICES: dict[str, VoiceTag] = {"moog_seq": (0.7, 0.2), "moog_bass": (0.3, -0.3)}
+SECOND_VOICES: dict[str, VoiceTag] = {
+    "juno_pluck": (0.35, 0.6),
+    "moog_seq": (0.6, 0.1),
+    "blip_synth": (0.85, -0.5),
+}
+LEADS: dict[str, VoiceTag] = {"analog_lead": (0.65, 0.4), "flute_lead": (0.3, -0.4)}
+STRINGS: dict[str, VoiceTag] = {"tape_strings": (0.3, 0.5), "string_machine": (0.7, -0.3)}
+# warm electronic toms on the 16th grid: (step of the bar, which tom: 0 is the lowest of three), and the energy each suits
+TomFigure = tuple[str, float, tuple[tuple[int, int], ...]]
+TOM_FIGURES: tuple[TomFigure, ...] = (
+    ("sparse", 0.3, ((10, 1), (14, 0))),
+    ("walking", 0.6, ((6, 2), (10, 1), (14, 0))),
+    ("busy", 0.9, ((3, 2), (7, 1), (11, 0), (14, 1))),
 )
-TEMPOS = (104.0, 106.0, 108.0, 110.0, 112.0, 114.0)
+# the kit of the later Berlin School, as (name, energy it suits, toms, shaker)
+Kit = tuple[str, float, bool, bool]
+KITS: tuple[Kit, ...] = (
+    ("no kit", 0.1, False, False),
+    ("kick", 0.4, False, False),
+    ("kick and toms", 0.65, True, False),
+    ("kick, toms and shaker", 0.9, True, True),
+)
+TEMPO_LOW, TEMPO_HIGH = BERLIN_SCHOOL.tempo
+TEMPO_STEP = 2.0
+TEMPOS = tuple(
+    float(TEMPO_LOW + TEMPO_STEP * index)
+    for index in range(int((TEMPO_HIGH - TEMPO_LOW) / TEMPO_STEP) + 1)
+)
+# the strings and the choir: voices as the degree of the chord each plays, and the octave each starts in over the lowest
+# (an open voicing), inside a window of two octaves
+STRINGS_OFFSETS = (0, 2, 4, 6)
+STRINGS_LIFTS = (0, 0, 7, 7)
+STRINGS_LOW = 0
+CHOIR_OFFSETS = (0, 4, 0)
+CHOIR_LIFTS = (0, 0, 7)
+CHOIR_LOW = 7
+VOICING_OCTAVE = 3
+HOLD_TAIL = 3.0
+# the growl holds the tonic in this octave, which keeps it under C3
+GROWL_OCTAVE = 2
+MOTIF_VELOCITY = 0.62
+LEAD_MIN_INTENSITY = 0.3
+# bars between two lead phrases on a quiet and on a busy day
+LEAD_GAP_BARS = (12.0, 3.0)
+# the drums come in at an activity that the energy of the day moves by up to this much
+DRUM_THRESHOLD_SHIFT = 0.3
+# the drums come in and the layers join by the intensity of the section of the form
+PULSE_MIN_INTENSITY = 0.45
+TOMS_MIN_INTENSITY = 0.6
+SHAKER_MIN_INTENSITY = 0.75
+GROWL_MIN_INTENSITY = 0.55
+CHOIR_MIN_INTENSITY = 0.3
+SECOND_LINE_MIN_INTENSITY = 0.45
+THIRD_LINE_MIN_INTENSITY = 0.7
+# the share of the strings, the organ and the first line that stays under the intensity of the form
+FORM_FLOOR = 0.55
+# how far the second and third lines sound at their least, on a quiet and on a busy day
+SECOND_LINE_FLOOR = (0.0, 0.9)
+THIRD_LINE_FLOOR = (0.0, 0.5)
+# the chance in a step of four bars that a line mutates, on a quiet and on a busy day
+MUTATE_RATE = (0.04, 0.9)
 
 
 def _mutate(
@@ -132,9 +233,7 @@ def _mutate(
     return rule
 
 
-# the least presence of the second and the third sequencer line, and of the choir: the base of the piece (the third
-# line, the dearest voice, comes with the busy stretches of the day)
-LINE_FLOORS = (0.7, 0.0)
+# the least presence of the choir, the base of the piece
 CHOIR_FLOOR = 0.5
 # below this strength of its gate a line plays on every second step only
 THIN_BELOW = 0.85
@@ -149,72 +248,111 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     scale = plan.scale
     quality = plan.quality
     length = plan.length
+    character = plan.character
+    energy = character.energy
     rng = plan.rng("berlin")
-    bpm = plan.deal("tempo", TEMPOS)
+    bpm = plan.pick(
+        "tempo",
+        TEMPOS,
+        [
+            1.0
+            - abs(
+                (t - TEMPO_LOW) / (TEMPO_HIGH - TEMPO_LOW) - tempo_target(BERLIN_SCHOOL, character)
+            )
+            for t in TEMPOS
+        ],
+        tolerance=TEMPO_TOLERANCE,
+    )
     step = 60.0 / bpm / 4.0
     bar = step * 16.0
-    name_a, cell_a = plan.deal("sequence A", CELLS_A)
-    name_b, cell_b = plan.deal("sequence B", CELLS_B)
-    name_c, cell_c = plan.deal("sequence C", CELLS_C)
-    prog_name, progression = plan.deal("progression", PROGRESSIONS)
-    voice_a = plan.deal("sequence voice", SEQ_VOICES)
-    voice_b = plan.deal("second voice", SECOND_VOICES)
-    lead_voice = plan.deal("lead voice", LEADS)
-    strings = plan.deal("strings", STRINGS)
-    growl = plan.deal("growl bass", GROWLS)
+    phrase = BARS_PER_PHRASE * bar
+    beat = 60.0 / bpm
+    name_a, cell_a = plan.pick(
+        "sequence A", CELLS_A, [1.0 - abs(CELL_ENERGY[n] - energy) for n, _ in CELLS_A]
+    )
+    name_b, cell_b = plan.pick(
+        "sequence B", CELLS_B, [1.0 - abs(CELL_ENERGY[n] - energy) for n, _ in CELLS_B]
+    )
+    name_c, cell_c = plan.pick(
+        "sequence C", CELLS_C, [1.0 - abs(CELL_ENERGY[n] - energy) for n, _ in CELLS_C]
+    )
+    voice_a = pick_voice(plan, "sequence voice", SEQ_VOICES)
+    voice_b = pick_voice(plan, "second voice", SECOND_VOICES)
+    lead_voice = pick_voice(plan, "lead voice", LEADS)
+    strings = pick_voice(plan, "strings", STRINGS)
+    growl = pick_voice(plan, "growl bass", GROWLS)
+    chord_len_bars = harmonic_rhythm(plan)
+    candidates = progressions_for(scale.mode, PROGRESSIONS)
+    prog_name, progression, _ = plan.pick(
+        "progression",
+        candidates,
+        [1.0 - abs(drive - energy) for _, _, drive in candidates],
+    )
+    kit_name, _, toms_on, shaker_on = plan.pick(
+        "kit", KITS, [1.0 - abs(tag - energy) for _, tag, _, _ in KITS]
+    )
+    tom_name, _, tom_figure = plan.pick(
+        "tom figure", TOM_FIGURES, [1.0 - abs(tag - energy) for _, tag, _ in TOM_FIGURES]
+    )
     patch = int(plan.rng("patch").integers(0, 2))
     plan.choices["patch"] = str(patch)
     activity, power = plan.activity, plan.power
     lines = 3 if quality.max_layers >= 6 else 2
     light_tier = quality.max_layers <= 4
+    spans = plan.sections(bar)
+    intensity = section_curve(plan, spans, lambda _role, level: level, bar)
 
-    # -- the progression: a chord root every eight bars, a step on at an anomaly
-    changes = []
-    clock, index = 0.0, 0
-    jumps = sorted(second for second, _ in plan.events)
-    offset = 0
-    while clock < length:
-        changes.append((clock, progression[index % len(progression)] + offset))
-        for jump in jumps:
-            if clock <= jump < clock + bar * 8:
-                offset += 2
+    def role_gate(minimum: float) -> np.ndarray:
+        return section_curve(plan, spans, lambda _role, level: float(level >= minimum), bar)
+
+    # -- the progression: a chord root every few bars; the strongest anomaly moves the next phrase to the relative key
+    chord_len = chord_len_bars * bar
+    relative_phrase = -1
+    if plan.events:
+        strongest = max(plan.events, key=lambda event: event[1])[0]
+        relative_phrase = math.ceil(strongest / phrase)
+    shift = RELATIVE_SHIFT.get(scale.mode, 0)
+    changes: list[tuple[float, int]] = []
+    index = 0
+    while index * chord_len < length:
+        in_relative = index * chord_len_bars // BARS_PER_PHRASE == relative_phrase
+        root = progression[index % len(progression)] + (shift if in_relative else 0)
+        changes.append((index * chord_len, root))
         index += 1
-        clock += bar * 8
-    changes.append((float(length) + bar * 8, 0))
+    starts = [start for start, _ in changes]
 
     def root_at(second: float) -> int:
-        value = changes[0][1]
-        for start, degree in changes:
-            if start <= second:
-                value = degree
-        return value
+        return changes[max(bisect.bisect_right(starts, second) - 1, 0)][1]
 
     chord = (0, 2, 4, 6)
-
     notes: list[Note] = []
     layers: dict[str, Layer] = {}
     mutations: dict[str, int] = {}
     lines_spec = [
-        ("seqA", cell_a, voice_a, 3, 0.0),
-        ("seqB", cell_b, voice_b, 4, 0.12),
-        ("seqC", cell_c, "moog_seq", 4, 0.5),
+        ("seqA", cell_a, voice_a, 3),
+        ("seqB", cell_b, voice_b, 4),
+        ("seqC", cell_c, "moog_seq", 4),
     ][:lines]
-    for line_key, base, voice, octave, _thr in lines_spec:
+    second_gate = np.maximum(role_gate(SECOND_LINE_MIN_INTENSITY), plan.runs["dish"])
+    third_gate = np.maximum(role_gate(THIRD_LINE_MIN_INTENSITY), plan.runs["wash"])
+    for line_key, base, voice, octave in lines_spec:
         cell: list[int | None] = list(base)
         presence = np.ones(plan.count) if line_key == "seqA" else None
         if line_key == "seqB":
-            # the second line is part of the base: the day moves how far it sounds, never whether; the third comes with the busy day.
-            # The cheapest tier has no floor under it: the line is the dearest thing that tier plays, so it comes with the day
-            presence = plan.lift(
-                np.maximum(
-                    plan.gate(plan.activity, 0.3, 0.55),
-                    plan.runs["dish"],
-                ),
-                0.0 if light_tier else LINE_FLOORS[0],
+            # the second line is part of the base on a busy day, and comes with the busy stretches on a quiet one; the
+            # cheapest tier has no floor under it, since the line is the dearest thing that tier plays
+            floor = (
+                0.0
+                if light_tier
+                else SECOND_LINE_FLOOR[0] + (SECOND_LINE_FLOOR[1] - SECOND_LINE_FLOOR[0]) * energy
+            )
+            presence = second_gate * plan.lift(
+                np.maximum(plan.gate(plan.activity, 0.3, 0.55), plan.runs["dish"]), floor
             )
         if line_key == "seqC":
-            presence = plan.lift(
-                np.maximum(plan.gate(plan.activity, 0.55, 0.8), plan.runs["wash"]), LINE_FLOORS[1]
+            floor = THIRD_LINE_FLOOR[0] + (THIRD_LINE_FLOOR[1] - THIRD_LINE_FLOOR[0]) * energy
+            presence = third_gate * plan.lift(
+                np.maximum(plan.gate(plan.activity, 0.55, 0.8), plan.runs["wash"]), floor
             )
         assert presence is not None
         # a line that is only at its floor plays on every second step: the base is a lighter line, not a missing one
@@ -222,14 +360,18 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         presence = (
             presence * (0.4 + 0.6 * (1.0 - plan.night))
             if line_key != "seqA"
-            else 0.5 + 0.5 * (1.0 - 0.4 * plan.night)
+            else (0.5 + 0.5 * (1.0 - 0.4 * plan.night))
+            * (FORM_FLOOR + (1.0 - FORM_FLOOR) * intensity)
         )
         total_steps = int(length / step)
         done = 0
         for global_step in range(total_steps):
             second = global_step * step
             if global_step % (16 * 4) == 0 and global_step > 0:
-                rate = 0.12 + 0.45 * plan.at(activity, second) + 0.15 * plan.at(power, second)
+                local = min(plan.at(activity, second) + 0.3 * plan.at(power, second), 1.0)
+                rate = MUTATE_RATE[0] + (MUTATE_RATE[1] - MUTATE_RATE[0]) * (
+                    0.5 * energy + 0.5 * local
+                )
                 if _mutate(rng, cell, base, rate, chord):
                     done += 1
             value = cell[global_step % len(cell)]
@@ -271,77 +413,107 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             title=f"sequence {line_key[-1]}",
         )
 
-    # -- strings and choir hold the chord for eight bars; the choir joins when the lights are on
-    second = 0.0
-    while second < length:
-        root = root_at(second)
-        for k, offset_ in enumerate((0, 2, 4, 6)):
+    # -- strings and choir hold the chord and are led from chord to chord: a shared tone stays, the others move by step
+    roots = [root for _, root in changes]
+    ends = [*starts[1:], float(length)]
+    choir_gate = role_gate(CHOIR_MIN_INTENSITY)
+    holds = [
+        ("strings", strings, STRINGS_OFFSETS, STRINGS_LIFTS, STRINGS_LOW, 0.12, True),
+        ("choir", "tape_choir", CHOIR_OFFSETS, CHOIR_LIFTS, CHOIR_LOW, 0.2, quality.max_layers > 4),
+    ]
+    for layer_key, voice, offsets, lifts, low, stagger, on in holds:
+        if not on:
+            continue
+        voicing = voice_lead(roots, offsets, lifts, low)
+        for k, start, end, degree in held_runs(
+            voicing, starts, ends, lambda at: round(at / bar) % BARS_PER_PHRASE == 0
+        ):
+            swell = (
+                plan.at(activity, start)
+                if layer_key == "strings"
+                else max(plan.at(plan.lights, start), plan.at(plan.evening, start))
+            )
             notes.append(
                 Note(
-                    second + 0.12 * k,
-                    bar * 8 + 3.0,
-                    float(scale.midi(root + offset_, 3 + (k >= 2))),
-                    0.42 + 0.1 * plan.at(activity, second),
-                    strings,
-                    "strings",
+                    start + stagger * k,
+                    end - start + HOLD_TAIL,
+                    float(scale.midi(degree, VOICING_OCTAVE)),
+                    (0.42 if layer_key == "strings" else 0.3) + 0.1 * swell,
+                    voice,
+                    layer_key,
                     patch,
                 )
             )
-        if quality.max_layers > 4:
-            for k, offset_ in enumerate((0, 4, 7)):
-                notes.append(
-                    Note(
-                        second + 0.2 * k,
-                        bar * 8 + 3.0,
-                        float(scale.midi(root + offset_, 4)),
-                        0.3
-                        + 0.1 * max(plan.at(plan.lights, second), plan.at(plan.evening, second)),
-                        "tape_choir",
-                        "choir",
-                        patch,
-                    )
-                )
-        second += bar * 8
-    # -- the organ bed: the root and the fifth, long
+    # -- the organ bed: the tonic and the fifth as a pedal under the moving chords, long
     second = 0.0
     while second < length:
-        root = root_at(second)
         notes.append(
-            Note(
-                second,
-                bar * 8 + 2.0,
-                float(scale.midi(root, 2)),
-                0.5,
-                "drawbar_organ",
-                "bed",
-                patch,
-            )
+            Note(second, phrase + 2.0, float(scale.midi(0, 2)), 0.5, "drawbar_organ", "bed", patch)
         )
         notes.append(
             Note(
                 second + 0.3,
-                bar * 8 + 2.0,
-                float(scale.midi(root + 4, 2)),
+                phrase + 2.0,
+                float(scale.midi(4, 2)),
                 0.36,
                 "drawbar_organ",
                 "bed",
                 patch,
             )
         )
-        second += bar * 8
+        second += phrase
 
-    # -- the slow lead: composed phrases of long notes, one every 25 to 50 seconds when the house is up
-    second = float(rng.uniform(12.0, 30.0))
+    # -- the room's motif in the lead voice, in the first and the last peak or plateau of the form, the later one
+    # developed; the slow phrases leave room for it
+    sites = [i for i, (_, _, role, _) in enumerate(spans) if role in {CLIMAX, PLATEAU}]
+    sites = motif_sites(sites or [max(range(len(spans)), key=lambda i: spans[i][3])])
+    statements: list[float] = []
+    taken: list[tuple[float, float]] = []
+    for number, i in enumerate(sites):
+        start, end, _, _ = spans[i]
+        motif = develop_motif(plan.motif(), number, motif_seed(plan))
+        motif_octave = lead_octave(scale, motif)
+        motif_seconds = sum(beats for _, beats in motif) * beat
+        at = min(start + bar, max(end - motif_seconds - bar, 0.0))
+        statements.append(at)
+        taken.append((at - bar, at + motif_seconds + bar))
+        clock = at
+        for degree, beats in motif:
+            span = beats * beat
+            notes.append(
+                Note(
+                    clock,
+                    span * 0.95,
+                    float(scale.midi(degree, motif_octave)),
+                    MOTIF_VELOCITY,
+                    lead_voice,
+                    "lead",
+                    patch,
+                )
+            )
+            clock += span
+
+    plan.choices[MOTIF_CHOICE] = str(len(statements))
+
+    # -- the slow lead: composed phrases of long notes, on the bar, further apart the quieter the day
+    lead_gate = role_gate(LEAD_MIN_INTENSITY)
+    gap_bars = LEAD_GAP_BARS[0] + (LEAD_GAP_BARS[1] - LEAD_GAP_BARS[0]) * energy
+    second = round(float(rng.uniform(12.0, 30.0)) / bar) * bar
     phrases_played: list[str] = []
     while second < length - 20.0:
         here = (0.3 + 0.7 * plan.at(activity, second)) * (1.0 - 0.6 * plan.at(plan.night, second))
-        if here > 0.22 and rng.random() < 0.4 + 0.6 * here:
-            name, phrase = weighted(rng, LEAD_PHRASES, (1.0,) * len(LEAD_PHRASES))
+        if plan.at(lead_gate, second) > 0.5 and here > 0.22 and rng.random() < 0.4 + 0.6 * here:
+            name, lead_phrase = weighted(rng, LEAD_PHRASES, (1.0,) * len(LEAD_PHRASES))
+            span_total = sum(beats for _, beats in lead_phrase) * beat
+            clash = [end for begin, end in taken if begin < second + span_total and second < end]
+            if clash:
+                second = max(clash)
+                continue
             phrases_played.append(name)
             clock = second
-            octave = 4 + int(rng.random() < 0.3)
-            for degree, beats in phrase:
-                span = beats * 60.0 / bpm
+            octave = LEAD_OCTAVE + int(rng.random() < 0.3)
+            for degree, beats in lead_phrase:
+                span = beats * beat
                 notes.append(
                     Note(
                         clock,
@@ -354,28 +526,40 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     )
                 )
                 clock += span
-            second = clock + float(rng.uniform(14.0, 30.0)) * (1.2 - here)
+            second = (
+                round((clock + gap_bars * bar * float(rng.uniform(0.8, 1.2)) * (1.2 - here)) / bar)
+                * bar
+            )
         else:
-            second += 14.0
+            second += bar * 2
 
     # -- the drums of the later Berlin School (Moondawn, Force Majeure): sparse and under the sequencer, locked to its
-    # 16th grid. They come in the busy stretches of the morning and the day only, never in the night, and are gone
-    # before the evening. A soft kick comes first, then warm toms, then a light shaker as the house gets busier.
+    # 16th grid. The kit is the day's: none on a quiet one, a kick, then toms and a shaker as the day gets busier. They
+    # play in the busy stretches of the morning and the day only, never in the night, and are gone before the evening.
     drum_rng = plan.rng("drums")
-    # a quiet day may get no drums at all; the toms and the shaker are chosen by the day as well
-    day_mood = 0.0 if drum_rng.random() < 0.12 else 0.75 + 0.25 * float(drum_rng.random())
-    toms_on = float(drum_rng.random() < 0.8)
-    shaker_on = float(drum_rng.random() < 0.7)
-    tom_figure = int(drum_rng.integers(0, len(TOM_FIGURES)))
     window = (1.0 - plan.gate(plan.night, 0.1, 0.5)) * (1.0 - plan.gate(plan.evening, 0.15, 0.5))
-    window = window * day_mood
-    pulse_gate = np.maximum(plan.gate(activity, 0.5, 0.75), 0.8 * plan.gate(power, 0.5, 0.8))
-    pulse_gate = pulse_gate * window if quality.max_layers > 4 else pulse_gate * 0.0
-    tom_gate = plan.gate(activity, 0.62, 0.85) * window * toms_on
-    shaker_gate = plan.gate(activity, 0.72, 0.9) * window * shaker_on
+    # a busy day opens the drums at a lower activity, a quiet one only at a higher
+    lower = DRUM_THRESHOLD_SHIFT * (0.5 - energy)
+    has_kick = kit_name != KITS[0][0]
+    pulse_gate = np.maximum(
+        plan.gate(activity, 0.5 + lower, 0.75 + lower), 0.8 * plan.gate(power, 0.5, 0.8)
+    )
+    pulse_gate = pulse_gate * window * role_gate(PULSE_MIN_INTENSITY)
+    pulse_gate = pulse_gate if has_kick and quality.max_layers > 4 else pulse_gate * 0.0
+    tom_gate = (
+        plan.gate(activity, 0.62 + lower, 0.85 + lower)
+        * window
+        * role_gate(TOMS_MIN_INTENSITY)
+        * float(toms_on)
+    )
+    shaker_gate = (
+        plan.gate(activity, 0.72 + lower, 0.9 + lower)
+        * window
+        * role_gate(SHAKER_MIN_INTENSITY)
+        * float(shaker_on)
+    )
     if quality.max_layers < 6:
         tom_gate, shaker_gate = tom_gate * 0.0, shaker_gate * 0.0
-    beat = 60.0 / bpm
     second = 0.0
     beat_index = 0
     while second < length:
@@ -393,8 +577,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             for step_index in range(16):
                 at = bar_index * bar + step_index * step
                 level = plan.at(tom_gate, at)
-                if level > 0.1 and drum_rng.random() < 0.3 + 0.55 * level:
-                    for hit_step, pitch in TOM_FIGURES[tom_figure]:
+                if level > 0.1 and drum_rng.random() < 0.45 + 0.5 * level:
+                    for hit_step, pitch in tom_figure:
                         if hit_step == step_index:
                             vel = 0.36 + 0.2 * level + float(drum_rng.normal(0.0, 0.03))
                             notes.append(Note(at, 0.3, 0.0, vel, "drum:tom_soft", "toms", pitch))
@@ -424,11 +608,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                     elif step_index % 2 == 1 and level > 0.6 and drum_rng.random() < 0.35:
                         notes.append(Note(at, 0.1, 0.0, 0.2, "drum:shaker", "shaker", 1))
 
-    # -- a growl: when the load is heavy, or the night is intense; held for a bar on the chord root
+    # -- a growl, on the busy days: when the load is heavy, or the night is intense; held for two bars on the tonic
     growl_gate = np.maximum(
         plan.gate(power, 0.45, 0.8), plan.gate(activity * plan.night, 0.25, 0.5) * 0.7
     )
-    growl_gate = growl_gate * (1.0 if plan.rng("growl").random() < 0.8 else 0.0)
+    growl_gate = growl_gate * role_gate(GROWL_MIN_INTENSITY) * float(growl != NO_GROWL)
     second = 0.0
     while second < length:
         if plan.at(growl_gate, second) > 0.2:
@@ -436,7 +620,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 Note(
                     second,
                     bar * 2 - 0.1,
-                    float(scale.midi(root_at(second), 1 + int(patch))),
+                    float(scale.midi(0, GROWL_OCTAVE)),
                     0.6,
                     growl,
                     "growl",
@@ -445,7 +629,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             )
         second += bar * 2
 
-    # -- anomalies: a swell of the strings on a new step of the progression
+    # -- anomalies: a swell of the strings on the chord of the moment
     sweep = swells(plan, 4.0, 9.0)
     for second, strength in plan.events:
         for k, offset_ in enumerate((0, 2, 4)):
@@ -471,10 +655,11 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         triangle = 0.5 + 0.5 * np.sin(2 * np.pi * (seconds / period + phase))
         x = np.clip(0.1 + 0.25 * plan.bright + 0.25 * power + 0.3 * triangle + cut_walk, 0.0, 1.0)
         layers[key].cutoff = 380.0 * 16.0**x * dips(plan, 0.8, 0.9, 4.0)
+    form = FORM_FLOOR + (1.0 - FORM_FLOOR) * intensity
     layers["strings"] = Layer(
         "strings",
         0.9,
-        0.5 + 0.5 * np.maximum(plan.gate(activity, 0.1, 0.4), sweep),
+        (0.5 + 0.5 * np.maximum(plan.gate(activity, 0.1, 0.4), sweep)) * form,
         380.0 * 12.0 ** np.clip(0.3 + 0.7 * plan.bright, 0, 1) * dips(plan, 0.6, 0.9, 4.0),
         0.1,
         reverb=0.7,
@@ -483,7 +668,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     layers["choir"] = Layer(
         "choir",
         0.8,
-        plan.lift(plan.gate(np.maximum(plan.lights, plan.evening), 0.35, 0.7), CHOIR_FLOOR),
+        plan.lift(plan.gate(np.maximum(plan.lights, plan.evening), 0.35, 0.7), CHOIR_FLOOR)
+        * choir_gate,
         None,
         0.0,
         reverb=0.8,
@@ -492,7 +678,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     layers["bed"] = Layer(
         "bed",
         0.8,
-        0.45 + 0.4 * np.clip(power + activity * 0.5, 0.0, 1.0),
+        (0.45 + 0.4 * np.clip(power + activity * 0.5, 0.0, 1.0)) * form,
         None,
         0.0,
         reverb=0.3,
@@ -538,9 +724,9 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     score.choices = dict(plan.choices)
     score.notes_about = [
         (
-            f"{bpm:.0f} BPM; sequence A '{name_a}' (16 steps, {voice_a}), B '{name_b}' (12 steps, {voice_b}), C '{name_c}' ({len(cell_c)} steps); "
-            f"progression {prog_name}; mutations applied: {sum(mutations.values())}."
+            f"{bpm:.0f} BPM in {scale.mode}; sequence A '{name_a}' (16 steps, {voice_a}), B '{name_b}' (12 steps, {voice_b}), C '{name_c}' ({len(cell_c)} steps); "
+            f"progression {prog_name}, a chord every {chord_len_bars} bars over a tonic pedal; kit '{kit_name}', toms '{tom_name}'; mutations applied: {sum(mutations.values())}."
         ),
-        f"Lead {lead_voice} played {len(phrases_played)} composed phrases; strings {strings}; growl {growl}.",
+        f"Lead {lead_voice} played the motif {len(statements)} times and {len(phrases_played)} composed phrases; strings {strings}; growl {growl}.",
     ]
     return score

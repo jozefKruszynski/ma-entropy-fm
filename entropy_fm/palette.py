@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 # how bright a mode is: the dark ones for cold days, the bright ones for warm days
 MODE_WARMTH = {
+    "phrygian": -1.0,
     "aeolian": -0.9,
     "minor_pentatonic": -0.6,
     "dorian": -0.5,
@@ -71,6 +72,8 @@ FIFTHS_REACH = 3
 WALK_WEEKS = 2 * 2 * FIFTHS_REACH
 # how much the room of the day weighs in the mode, against the mode the user chose
 HOME_MODE_WEIGHT = 0.25
+# how much the season counts in the warmth of a day, against its temperature (1) and its weather (0.8)
+SEASON_WEIGHT = 0.5
 WEEKEND_TEMPO = -0.15
 WEEKEND_BUSY = 0.15
 SEASON_TEMPO = 0.05
@@ -154,18 +157,22 @@ def season_warmth(day: date) -> float:
     return -math.cos(2.0 * math.pi * (day.timetuple().tm_yday + 10) / 365.0)
 
 
-def day_warmth(traits: DayTraits, season: float) -> float:
+def day_warmth(traits: DayTraits, season: float, season_weight: float = SEASON_WEIGHT) -> float:
     """
     Return how warm and bright the day is, -1 to 1, from what is known of it.
 
     :param traits: What the day was like.
     :param season: The warmth of the season.
+    :param season_weight: How much the season counts against what the day measured; 0 measures the day against
+        its season only, and a day with nothing measured is then mild.
     """
-    parts: list[tuple[float, float]] = [(0.5, season)]
+    parts: list[tuple[float, float]] = [(season_weight, season)] if season_weight > 0 else []
     if traits.temp_z is not None:
         parts.append((1.0, float(np.clip(traits.temp_z / 2.0, -1.0, 1.0))))
     if traits.weather is not None and traits.weather in WEATHER_WARMTH:
         parts.append((0.8, WEATHER_WARMTH[traits.weather]))
+    if not parts:
+        return 0.0
     return float(sum(w * v for w, v in parts) / sum(w for w, _ in parts))
 
 

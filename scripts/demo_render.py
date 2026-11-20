@@ -459,6 +459,20 @@ class Demo:
             found.update(self.baseline.build_baselines(before))
         return found
 
+    def week(self, index: int, areas: tuple[str, ...], baselines: dict[str, object]) -> list[float]:
+        """Return how busy the week before a day was, rescaled with the baselines of the day, or nothing."""
+        try:
+            from entropy_fm.character import raw_energy  # noqa: PLC0415
+            from entropy_fm.references import rescale  # noqa: PLC0415
+        except ImportError:  # an older engine has no character of the day
+            return []
+        earlier: list[Any] = [
+            [item for area in areas for item in self.days[i][area]]
+            for i in range(max(index - 7, 0), index)
+        ]
+        found: Any = baselines
+        return [raw_energy(rescale(day, found)[0], DAY) for day in earlier]
+
     def make(  # noqa: PLR0913, PLR0917
         self,
         series: list[object],
@@ -468,6 +482,7 @@ class Demo:
         baselines: dict[str, object] | None = None,
         tier: object = None,
         length_mode: str = "full",
+        week: list[float] | None = None,
     ) -> tuple[object, object]:
         """Return the score and the plan of the soundscape of some series on a day, as the provider makes them."""
         chosen = self.styles.get_style(style)
@@ -489,6 +504,13 @@ class Demo:
             if a.score >= 0.5
         ]
         analysis = self.scape.analysis_of(series, DAY, anomalies)
+        extra: dict[str, Any] = {}
+        try:
+            from entropy_fm.character import measure_character  # noqa: PLC0415
+        except ImportError:  # an older engine has no character of the day
+            pass
+        else:
+            extra["character"] = measure_character(analysis, traits, day, series, week=week or ())  # type: ignore[arg-type]
         return self.scape.scape_score(
             series,
             analysis,
@@ -500,6 +522,7 @@ class Demo:
             quality=tier or self.quality.STANDARD,
             area_key=area_key,
             length_mode=length_mode,
+            **extra,
         )
 
     def score(
@@ -514,12 +537,14 @@ class Demo:
         series = [item for area in areas for item in self.days[index][area]] + self.days[index][
             "sun"
         ]
+        found = self.baselines(index, areas)
         return self.make(
             series,
             self.day_of(index),
             style,
             "+".join(areas),
-            self.baselines(index, areas),
+            found,
             tier,
             length_mode,
+            self.week(index, areas, found),
         )

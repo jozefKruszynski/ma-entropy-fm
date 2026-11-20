@@ -12,7 +12,8 @@ import hashlib
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .baseline import EntityBaseline, build_baselines
+from .baseline import DAY_SECONDS, EntityBaseline, build_baselines, has_data
+from .character import raw_energy
 from .const import (
     BASELINE_DAYS,
     BASELINE_EXPIRATION,
@@ -22,12 +23,14 @@ from .const import (
     CACHE_SCHEMA,
     PAST_DAY_EXPIRATION,
     TODAY_EXPIRATION,
+    WEEK_ENERGY_SCHEMA,
 )
 from .library import day_bounds
+from .references import rescale
 from .timeline import Series, build_series, raw_to_json, series_from_json
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from datetime import date, datetime, tzinfo
     from logging import Logger
 
@@ -240,6 +243,64 @@ class HistoryStore:
             checksum=checksum,
         )
         return built
+
+    async def week_energies(  # noqa: PLR0913, PLR0917
+        self,
+        groups: Sequence[tuple[str, Sequence[EntityInfo]]],
+        day: date,
+        tz: tzinfo,
+        now: datetime,
+        baselines: Mapping[str, EntityBaseline],
+        days: int = BASELINE_DAYS,
+    ) -> list[float]:
+        """
+        Return how busy the days before a day were, on the scale the day itself is measured on.
+
+        Each earlier day is read from the cached history, rescaled with the baselines of the day and measured with
+        `character.raw_energy`; a day without any history is left out. The result is cached, because the days
+        before a day do not change.
+
+        :param groups: The rooms as (scope, entities); a house is all its rooms, measured together.
+        :param day: The day the energies are for; only days before it are used.
+        :param tz: The time zone of the house.
+        :param now: The current time.
+        :param baselines: What the entities usually do on the day, by entity id.
+        :param days: How many days back to look.
+        """
+        infos = [info for _, group in groups for info in group]
+        if not infos:
+            return []
+        key = f"week|{','.join(scope for scope, _ in groups)}|{day.isoformat()}"
+        checksum = hashlib.sha256(
+            f"{WEEK_ENERGY_SCHEMA}|{days}|{','.join(sorted(info.entity_id for info in infos))}".encode()
+        ).hexdigest()[:16]
+        cached = await self.cache.get(
+            key, provider=self.provider_id, category=CACHE_CATEGORY_BASELINE, checksum=checksum
+        )
+        if cached is not None:
+            return [float(item) for item in cached]
+        before: list[list[Series]] = []
+        for offset in range(1, days + 1):
+            earlier = day - timedelta(days=offset)
+            found: list[Series] = []
+            for scope, group in groups:
+                found.extend(await self.day_series(scope, group, earlier, tz, now))
+            if has_data(found):
+                before.append(found)
+
+        def measure() -> list[float]:
+            return [raw_energy(rescale(found, baselines)[0], DAY_SECONDS) for found in before]
+
+        energies = await asyncio.to_thread(measure)
+        await self.cache.set(
+            key,
+            energies,
+            expiration=BASELINE_EXPIRATION,
+            provider=self.provider_id,
+            category=CACHE_CATEGORY_BASELINE,
+            checksum=checksum,
+        )
+        return energies
 
     async def _fetch(
         self,

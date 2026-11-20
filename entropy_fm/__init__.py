@@ -21,7 +21,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -71,6 +71,7 @@ from . import imageapi, prerender
 from .audiocache import AudioCache, cache_key
 from .autotune import benchmark, heaviest_style
 from .baseline import EntityBaseline
+from .character import DayCharacter, measure_character
 from .const import (
     AI_COVERS_ENABLED,
     ARTIST_PATH_PREFIX,
@@ -259,6 +260,8 @@ class _Gathered:
     whole_day: list[Series]
     baselines: dict[str, EntityBaseline]
     covered: float
+    # how busy the earlier days of the same rooms were, as `character.raw_energy` reads them
+    week: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -270,6 +273,8 @@ class _Scape:
     palette: DayPalette | None
     seed: str
     duration: int
+    # None when the day-character setting is off: the user's key stays and nothing is picked by the day
+    character: DayCharacter | None = None
 
 
 async def setup(
@@ -541,7 +546,7 @@ class EntropyFMProvider(MusicProvider):
                 type=ConfigEntryType.STRING,
                 default_value=DEFAULT_SCALE,
                 required=False,
-                options=[ConfigValueOption(name, SCALE_TITLES[name]) for name in SCALES],
+                options=[ConfigValueOption(name, title) for name, title in SCALE_TITLES.items()],
             ),
             ConfigEntry(
                 key=CONF_STYLES,
@@ -2256,6 +2261,7 @@ class EntropyFMProvider(MusicProvider):
         # everything the areas of the track did on the day, for the character of the day
         whole_day: list[Series] = []
         baselines: dict[str, EntityBaseline] = {}
+        groups: list[tuple[str, list[EntityInfo]]] = []
         area_ids = self._house_rooms(catalog) if ref.area_id == WHOLE_HOUSE_ID else [ref.area_id]
         for area_id in area_ids:
             infos = self._infos_for(area_id, catalog, ref.day)
@@ -2268,6 +2274,7 @@ class EntropyFMProvider(MusicProvider):
             whole_day.extend(fetched)
             if self._day_character:
                 baselines.update(await self._baselines(area_id, infos, ref, tz, now))
+                groups.append((area_id, infos))
         if catalog.sun is not None:
             series.extend(await self._series_of("_sun", [catalog.sun], ref.day, tz, now))
         # every sensor is measured against its own previous days, and the dead ones play nothing
@@ -2275,7 +2282,8 @@ class EntropyFMProvider(MusicProvider):
         whole_day, _ = rescale(whole_day, baselines)
         if dropped:
             self.logger.debug("Left out %d sensors that say nothing: %s", len(dropped), dropped)
-        return _Gathered(series, whole_day, baselines, covered_seconds(ref.day, tz, now))
+        week = await self._week(groups, baselines, ref, tz, now) if self._day_character else []
+        return _Gathered(series, whole_day, baselines, covered_seconds(ref.day, tz, now), week)
 
     async def _scape_of(self, ref: TrackRef) -> _Scape:
         """
@@ -2309,6 +2317,7 @@ class EntropyFMProvider(MusicProvider):
         style = get_style(ref.style)
         seed = f"{ref.area_id}|{ref.day.isoformat()}|{ref.target}|{ref.style}"
         palette = None
+        traits: DayTraits | None = None
         anomalies: list[tuple[float, float, str]] = []
         if self._day_character:
             traits = measure_traits(gathered.whole_day, gathered.baselines, gathered.covered)
@@ -2320,7 +2329,15 @@ class EntropyFMProvider(MusicProvider):
 
         def make() -> _Scape:
             analysis = analysis_of(gathered.series, gathered.covered, anomalies)
-            return _Scape(gathered, analysis, palette, seed, duration_of(analysis, ref.style, mode))
+            character = None
+            if traits is not None:
+                character = measure_character(
+                    analysis, traits, ref.day, gathered.series, week=gathered.week
+                )
+                self.logger.debug("Character of %s: %s", seed, character.label())
+            return _Scape(
+                gathered, analysis, palette, seed, duration_of(analysis, ref.style, mode), character
+            )
 
         found = await asyncio.to_thread(make)
         self._scapes[key] = found
@@ -2344,6 +2361,7 @@ class EntropyFMProvider(MusicProvider):
             energy_offset=self._energy_offset,
             area_key=ref.area_id,
             length_mode=self._length_mode,
+            character=found.character,
         )
         return score
 
@@ -2353,6 +2371,21 @@ class EntropyFMProvider(MusicProvider):
         if pin is not None and pin.complete:
             return [entity_from_dict(item) for item in pin.entities]
         return catalog.entities.get(area_id)
+
+    async def _week(
+        self,
+        groups: list[tuple[str, list[EntityInfo]]],
+        baselines: dict[str, EntityBaseline],
+        ref: TrackRef,
+        tz: tzinfo,
+        now: datetime,
+    ) -> list[float]:
+        """Return how busy the earlier days of some rooms were; without them the day is measured on its own."""
+        try:
+            return await self.history.week_energies(groups, ref.day, tz, now, baselines)
+        except BaseHassClientError as err:
+            self.logger.debug("No earlier days for %s: %s", ref.area_id, err)
+            return []
 
     async def _baselines(
         self, area_id: str, infos: list[EntityInfo], ref: TrackRef, tz: tzinfo, now: datetime

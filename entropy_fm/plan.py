@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
+from .character import FLAT, NEUTRAL, PEAK, DayCharacter, room_motif
 from .const import NOMINAL_SCAPE_SECONDS
 from .day_analysis import DAY_SECONDS, DayAnalysis
 from .score import CR
@@ -85,6 +86,66 @@ MEASURED_CURVE = 0.5
 MAX_SHOWERS = 2
 MAX_EVENTS = 4
 SHOWER_GAP = 60.0
+# the dealer only breaks ties between options whose fit is within this of the best
+PICK_TOLERANCE = 0.15
+# the tempo of a piece is picked tighter: a few beats per minute of swing is plenty
+TEMPO_TOLERANCE = 0.1
+# the form of a piece: sections snap to this many bars, or half of it when the piece has too few of them
+FORM_BARS = 8
+SHORT_FORM_BARS = 4
+MIN_FORM_CELLS = 10
+# the climax of a day with one peak sits in this share of the piece
+PEAK_AT = (0.45, 0.72)
+PEAK_WIDTH = 0.15
+INTRO, BUILD, CLIMAX, RELEASE, PLATEAU, OUTRO = (
+    "intro",
+    "build",
+    "peak",
+    "release",
+    "plateau",
+    "outro",
+)
+# how loud a role of the form is at its design level; the energy of the day scales it
+ROLE_INTENSITY = {
+    INTRO: 0.25,
+    BUILD: 0.55,
+    CLIMAX: 1.0,
+    RELEASE: 0.5,
+    PLATEAU: 0.65,
+    OUTRO: 0.2,
+}
+# the energy of a day sets this share of the intensity of a section, and the rest is the role
+FORM_ENERGY_SHARE = 0.4
+# the form of each shape of day, as (role, share of the piece); the peak is placed from the day itself
+FORMS = {
+    "morning": (
+        (INTRO, 0.08),
+        (BUILD, 0.17),
+        (CLIMAX, 0.2),
+        (RELEASE, 0.35),
+        (OUTRO, 0.2),
+    ),
+    "evening": (
+        (INTRO, 0.28),
+        (BUILD, 0.32),
+        (CLIMAX, 0.22),
+        (RELEASE, 0.1),
+        (OUTRO, 0.08),
+    ),
+    "all_day": (
+        (INTRO, 0.08),
+        (BUILD, 0.12),
+        (CLIMAX, 0.22),
+        (PLATEAU, 0.33),
+        (RELEASE, 0.15),
+        (OUTRO, 0.1),
+    ),
+    "flat": ((INTRO, 0.1), (PLATEAU, 0.8), (OUTRO, 0.1)),
+}
+PEAK_FORM_BUILD = 0.25
+PEAK_FORM_RELEASE = 0.2
+PEAK_FORM_OUTRO = 0.1
+HOURS_PER_DAY = 24.0
 ARC_NAMES = ("night", "morning", "daytime", "evening", "late night")
 POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 RUN_KINDS = {
@@ -170,6 +231,7 @@ class Plan:
     events: list[tuple[float, float]]
     palette: DayPalette | None = None
     area_key: str = ""
+    character: DayCharacter = NEUTRAL
     choices: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     # things that happened in the house as (second of the piece, strength 0 to 1, kind), the kinds being door, motion,
@@ -197,11 +259,37 @@ class Plan:
         :param component: What is being chosen, such as the motif of the sequence.
         :param options: The family to draw from; with a single option there is no choice.
         """
+        return self._record(component, options[self._turn(component, len(options))])
+
+    def pick(
+        self,
+        component: str,
+        options: Sequence[T],
+        fit: Sequence[float],
+        tolerance: float = PICK_TOLERANCE,
+    ) -> T:
+        """
+        Pick the option that fits the day best; the dealer only breaks ties among those within tolerance of the best.
+
+        :param component: What is being chosen, such as the tempo of the piece.
+        :param options: The family to choose from.
+        :param fit: How well each option fits the character of the day, higher is better; one per option.
+        :param tolerance: How close to the best fit an option has to be to count as equally good.
+        """
+        if len(options) != len(fit) or not options:
+            raise ValueError("pick needs one fit for every option, and at least one option")
+        best = max(fit)
+        tied = [index for index, value in enumerate(fit) if value >= best - tolerance]
+        return self._record(component, options[tied[self._turn(component, len(tied))]])
+
+    def _turn(self, component: str, count: int) -> int:
+        """Return which of `count` members of a family plays: dealt in rounds over the days, seeded by the room."""
         if self.day is None:
-            index = int(self.rng("deal", component).integers(0, len(options)))
-        else:
-            index = variant_of(f"{self.style}|{self.area_key}|{component}", self.day, len(options))
-        chosen = options[index]
+            return int(self.rng("deal", component).integers(0, count))
+        return variant_of(f"{self.style}|{self.area_key}|{component}", self.day, count)
+
+    def _record(self, component: str, chosen: T) -> T:
+        """Note what was chosen for a component, so that the log and the descriptions can say it."""
         label = (
             chosen[0]
             if isinstance(chosen, tuple) and chosen and isinstance(chosen[0], str)
@@ -209,6 +297,10 @@ class Plan:
         )
         self.choices[component] = str(getattr(label, "key", label))
         return chosen
+
+    def motif(self) -> tuple[tuple[int, float], ...]:
+        """Return the motif of the room as (scale degree, beats), which makes the room recognisable across days."""
+        return room_motif(self.area_key)
 
     def at(self, curve: np.ndarray, second: float) -> float:
         """Return the value of a curve at a second of the piece."""
@@ -243,11 +335,93 @@ class Plan:
             np.clip(hour * 3600.0 / max(self.covered, 1.0) * self.length, 0.0, self.length)
         )
 
+    def sections(self, bar: float) -> list[tuple[float, float, str, float]]:
+        """
+        Return the form of the piece as (start second, end second, role, intensity 0 to 1).
+
+        The roles are intro, build, peak, release, plateau and outro. The edges lie on multiples of 8 bars (4 when the
+        piece is short), a build is always followed by a peak or a release, and the shape of the day sets the form: a
+        morning day builds early and fades, an evening day builds late, a day with one peak has its climax where the
+        day had it, and a flat day is a plateau.
+
+        :param bar: The length of a bar in seconds.
+        """
+        grid = FORM_BARS * bar
+        if self.length / grid < MIN_FORM_CELLS:
+            grid = SHORT_FORM_BARS * bar
+        cells = max(round(self.length / grid), 1)
+        items: list[tuple[str, int]] = []
+        done = 0.0
+        taken = 0
+        for role, share in self._form():
+            done += share
+            edge = round(done * cells)
+            if edge > taken:
+                items.append((role, edge - taken))
+                taken = edge
+        items = _resolve_builds(items)
+        scale = (1.0 - FORM_ENERGY_SHARE) + 2.0 * FORM_ENERGY_SHARE * self.character.energy
+        found: list[tuple[float, float, str, float]] = []
+        first = 0
+        for index, (role, count) in enumerate(items):
+            last = first + count
+            end = float(self.length) if index == len(items) - 1 else last * grid
+            found.append(
+                (first * grid, end, role, float(np.clip(ROLE_INTENSITY[role] * scale, 0.0, 1.0)))
+            )
+            first = last
+        return found
+
+    def _form(self) -> tuple[tuple[str, float], ...]:
+        """Return the roles of the piece in order with their share of it, from the shape of the day."""
+        shape = self.character.shape
+        if shape != PEAK:
+            return FORMS.get(shape, FORMS[FLAT])
+        at = float(
+            np.clip(
+                self.piece_second_of_hour(self.character.peak * HOURS_PER_DAY) / self.length,
+                *PEAK_AT,
+            )
+        )
+        start, end = at - PEAK_WIDTH / 2.0, at + PEAK_WIDTH / 2.0
+        return (
+            (INTRO, start - PEAK_FORM_BUILD),
+            (BUILD, PEAK_FORM_BUILD),
+            (CLIMAX, PEAK_WIDTH),
+            (RELEASE, 1.0 - PEAK_FORM_OUTRO - end),
+            (OUTRO, PEAK_FORM_OUTRO),
+        )
+
     def arc(self) -> list[tuple[str, float, float]]:
         """Return the five stretches of the day as (name, start second, end second) of the piece."""
         edges = [0.0, 6.0, 11.0, 17.0, 22.0, 24.0]
         marks = [self.piece_second_of_hour(h) for h in edges]
         return [(ARC_NAMES[i], marks[i], marks[i + 1]) for i in range(5) if marks[i + 1] > marks[i]]
+
+
+def _resolve_builds(items: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    """Make every build end in a peak or a release: a build that does not is taken into the section before it."""
+    found = list(items)
+    index = 0
+    while index < len(found):
+        role, count = found[index]
+        follower = found[index + 1][0] if index + 1 < len(found) else ""
+        if role == BUILD and follower not in {CLIMAX, RELEASE}:
+            target = index - 1 if index > 0 else index + 1
+            if target >= len(found):
+                break
+            found[target] = (found[target][0], found[target][1] + count)
+            del found[index]
+            index = max(index - 1, 0)
+            continue
+        index += 1
+    merged: list[tuple[str, int]] = []
+    for role, count in found:
+        if merged and merged[-1][0] == role:
+            merged[-1] = (role, merged[-1][1] + count)
+        else:
+            merged.append((role, count))
+    return merged
 
 
 def _daylight(hour: np.ndarray) -> np.ndarray:
@@ -390,6 +564,7 @@ def build_plan(  # noqa: PLR0913, PLR0917
     energy_offset: float = 0.0,
     area_key: str = "",
     length_mode: str = FULL,
+    character: DayCharacter | None = None,
 ) -> Plan:
     """
     Make the plan of a soundscape from the data of a day.
@@ -405,6 +580,7 @@ def build_plan(  # noqa: PLR0913, PLR0917
     :param energy_offset: The setting that moves the activity, -0.5 to 0.5.
     :param area_key: The room, which seeds the deals.
     :param length_mode: `full` (as long as the day was busy) or `condensed` (5 to 7 minutes, the same day faster).
+    :param character: What kind of day it was (`character.measure_character`); without it the day is neutral.
     """
     condensed = length_mode == CONDENSED
     length = length_of(analysis, style, length_mode)
@@ -493,6 +669,7 @@ def build_plan(  # noqa: PLR0913, PLR0917
         events=events,
         palette=palette,
         area_key=area_key,
+        character=character or NEUTRAL,
         triggers=triggers,
         condensed=condensed,
     )

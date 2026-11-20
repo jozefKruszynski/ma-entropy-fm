@@ -48,7 +48,7 @@ DEFAULT_DAYS = 10
 MAX_DAYS = 10
 DEFAULT_AUDIO_CACHE_MB = 500
 # changes whenever the audible result of the engine changes; pins and cached audio carry it
-ENGINE_VERSION = 6
+ENGINE_VERSION = 7
 STORAGE_FOLDER = "entropy_fm"
 # a day is playable from the moment that this many seconds of it per second of the shortest track have happened
 PLAYABLE_COMPRESSION = 60
@@ -79,6 +79,7 @@ BASELINE_DAYS = 7
 ARTIST_PROFILE_DAYS = 7
 BASELINE_EXPIRATION = 86400
 BASELINE_SCHEMA = 2
+WEEK_ENERGY_SCHEMA = 1
 HISTORY_CHUNK = 25
 
 # after a load the server is given this long to register the provider, before a library sync is asked

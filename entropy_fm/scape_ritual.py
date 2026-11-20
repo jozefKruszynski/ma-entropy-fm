@@ -1,7 +1,7 @@
 """
 Ritual: one plucked line, a slit drum and a woodblock that answer it off the beat, over a deep choir drone, stretched string washes, a slow chant leader and taiko.
 
-The generative system is a slow ceremony in a Japanese pentatonic (hirajoshi, in or kumoi, on a root the day deals).
+The generative system is a slow ceremony in a Japanese pentatonic (hirajoshi, in or kumoi, on the root of the day's key).
 One short call-and-response cell, 6 to 7.2 seconds long on a pulse of eight, is plucked on a strumstick, a nylon
 string or a felt piano (the day deals which, and there is never a second plucked voice), round and low-passed;
 about one repeat in three moves a single note by one step of the scale and never further from where the cell began,
@@ -26,46 +26,54 @@ The day is spread over the piece as in the other styles. The night is drone and 
 as the day wakes, the slit drum a little later and the woodblock last, and they leave in the same order as the
 evening settles; the lead and the drums are for the awake and busy stretches.
 
-How the house steers it: activity (with the daylight and the presence in the room) brings the pluck and the wood
-in and out and sets their loudness, how many of the hits of the slit drum and the woodblock play (a pattern has
-a core that always plays and extra hits that the activity calls in), the heartbeat and how often a taiko is struck;
-the brightness opens the filters of the pluck and the drone; the power of
-the appliances thickens the drone and hardens the strikes; humidity makes the room bigger; the lights and the evening
-make the chant leader more likely; an anomaly is a roll into one big strike, a swell, a dip of the filters, a
-move of the drone to a fourth or a fifth and, in its quiet after, a clack (so is a shower). The house never writes a note: the notes
-come from the cell, the patterns, the path of the drone, the pulse and the phrases of the leader, and the day deals which of each.
+How the house steers it: the energy of the day leans the mode of the piece, still (long cells, as below), walking
+(cells of 5 seconds) or driving (cells of 4.2 seconds, a pulse of 114 a minute, a matsuri-style taiko ostinato on the
+pulse with the odaiko on the phrase heads, the wood on the off-beats, a leader that answers the drums and a drone that
+moves more); the tie band is wide, so similar days rotate between modes, and the pulse never changes in a piece. The
+rest of the character of the day picks the identity. A quiet day gets the darker `in` tuning, long
+cells, a sparse pluck, the slit drum's core only, the slowest chant leader, a settled drone path that holds long and
+no heartbeat or taiko; a busy day gets the brighter `kumoi`, short cells, more pluck, the full patterns of slit drum
+and woodblock, an attentive leader, a faster heartbeat, more taiko and a drone that moves more. The warmth of the day
+chooses the pluck voice and the washes, its shape the drone path. The root is the root of the day's key. The form of
+the day (`Plan.sections`) brings the wood and the drums in and out on phrase boundaries (a cell is a bar), the room's
+motif replaces the cell in the first and the last peak or plateau section, the later one developed, and the strongest anomaly brings the wood and the
+drums in at the next boundary. Within a day, activity (with the daylight and the presence in the room) brings the
+pluck and the wood in and out and sets their loudness, how many of the hits of the slit drum and the woodblock play
+(a pattern has a core that always plays and extra hits that the activity calls in), the heartbeat and how often a
+taiko is struck; the brightness opens the filters of the pluck and the drone; the power of the appliances thickens
+the drone and hardens the strikes; humidity makes the room bigger; the lights and the evening make the chant leader
+more likely; an anomaly is a roll into one big strike, a swell, a dip of the filters, a move of the drone to a fourth
+or a fifth and, in its quiet after, a clack (so is a shower). The house never writes a note: the notes come from the
+cell, the patterns, the path of the drone, the pulse and the phrases of the leader.
 
 The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from . import taiko
 from .gen import dips, swells, weighted
+from .harmony import MOTIF_CHOICE, develop_motif, motif_seed, motif_sites
 from .score import CR, Layer, Note, Score
 from .synth import smoothstep
 
 if TYPE_CHECKING:
     from .plan import Plan
 
+PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 HIRAJOSHI = (0, 2, 3, 7, 8)
 IN_SEN = (0, 1, 5, 7, 8)
 KUMOI = (0, 2, 3, 7, 9)
-# the tunings: a name, the pitch class of the root and the five notes above it; each root is one that the drone can sit on
-TUNINGS: tuple[tuple[str, int, tuple[int, ...]], ...] = (
-    ("hirajoshi on D", 2, HIRAJOSHI),
-    ("kumoi on A", 9, KUMOI),
-    ("in on E", 4, IN_SEN),
-    ("hirajoshi on G", 7, HIRAJOSHI),
-    ("kumoi on D", 2, KUMOI),
-    ("in on A", 9, IN_SEN),
-    ("hirajoshi on E", 4, HIRAJOSHI),
-    ("kumoi on G", 7, KUMOI),
+# the tunings: a name, the five notes above the root (the root is the root of the day's key) and how bright it sounds, 0 to 1
+TUNINGS: tuple[tuple[str, tuple[int, ...], float], ...] = (
+    ("in", IN_SEN, 0.1),
+    ("hirajoshi", HIRAJOSHI, 0.45),
+    ("kumoi", KUMOI, 0.85),
 )
 # the length in seconds of the pluck cell (eight pulses of a slot each), and what the day calls it
 LENGTHS: tuple[tuple[str, float], ...] = (
@@ -73,7 +81,17 @@ LENGTHS: tuple[tuple[str, float], ...] = (
     ("6.4 seconds", 6.4),
     ("6.8 seconds", 6.8),
     ("7.2 seconds", 7.2),
+    ("5.0 seconds", 5.0),
+    ("4.2 seconds", 4.2),
 )
+# the mode of a piece: how it moves, and the energy of day it suits. A wide tolerance lets similar days rotate between modes
+MODES: tuple[tuple[str, float], ...] = (("still", 0.0), ("walking", 0.5), ("driving", 1.0))
+MODE_TOLERANCE = 0.5
+STILL, WALKING, DRIVING = (name for name, _ in MODES)
+# the cells each mode plucks (the pulse never changes in a piece: 4.2 seconds is a pulse of 114 a minute) and how much
+# busier than the day a mode plays its pluck, its wood and its drone
+MODE_LENGTHS = {STILL: LENGTHS[:4], WALKING: LENGTHS[4:5], DRIVING: LENGTHS[5:]}
+MODE_LIFT = {STILL: 0.0, WALKING: 0.15, DRIVING: 0.3}
 # which voice plucks the line: the only plucked voice of the day, and how loud its notes are
 PLUCKS: tuple[tuple[str, str, float], ...] = (
     ("strumstick", "strum_pluck", 0.62),
@@ -171,9 +189,116 @@ LEAD_PRESENCE: tuple[tuple[str, tuple[float, float]], ...] = (
     ("attentive", (22.0, 38.0)),
 )
 HEARTBEATS: tuple[tuple[str, int], ...] = (("single beat", 0), ("lub-dub", 1))
+# what each member of a family suits. Energy: 0 a quiet day to 1 a busy one; warmth: -1 cold to 1 warm
+LENGTH_ENERGY = {
+    "6.0 seconds": 1.0,
+    "6.4 seconds": 0.67,
+    "6.8 seconds": 0.33,
+    "7.2 seconds": 0.0,
+    "5.0 seconds": 0.5,
+    "4.2 seconds": 1.0,
+}
+PLUCK_WARMTH = {"strumstick": -0.3, "nylon": 0.3, "felt piano": 0.8}
+CELL_ENERGY = {
+    "descent": 0.05,
+    "sigh": 0.2,
+    "rocking": 0.4,
+    "call and fall": 0.5,
+    "rising answer": 0.6,
+    "upper turn": 0.7,
+    "leap": 0.8,
+    "bright call": 0.95,
+}
+SLIT_ENERGY = {"long answer": 0.1, "limp": 0.4, "log walk": 0.65, "stumble": 0.9}
+BLOCK_ENERGY = {"one and a late one": 0.0, "far apart": 0.5, "sparse taps": 1.0}
+WASH_WARMTH = {"low cellos": -0.5, "pulled": 0.0, "violin veil": 0.7}
+LEAD_ENERGY = {"rare": 0.0, "sparse": 0.33, "answering": 0.66, "attentive": 1.0}
+HEART_ENERGY = {"single beat": 0.25, "lub-dub": 0.75}
+# the drone paths: the energy each suits and the shapes of day it follows (a morning settles, an evening rises)
+PATH_ENERGY = {"deep": 0.05, "settled": 0.3, "rocking": 0.6, "rising": 0.9}
+PATH_SHAPES = {
+    "deep": ("flat",),
+    "settled": ("morning", "all_day"),
+    "rocking": ("peak",),
+    "rising": ("evening",),
+}
+SHAPE_BONUS = 0.15
+# the brightness the day asks of a tuning: warmth and energy raise it, a late night lowers it
+TUNING_WARMTH = 0.35
+TUNING_ENERGY = 0.3
+TUNING_LATE = 0.25
+LATE_DARKEN = 0.5
+# the form: a cell is a bar; the section strength each layer needs to play, and what the strongest anomaly lifts the next one to
+SLIT_FROM = 0.3
+BLOCK_FROM = 0.45
+DRUMS_FROM = 0.6
+LEAD_FROM = 0.3
+EVENT_FORM = 0.7
+# the ostinato of the driving mode, a bar of eight pulses on the grid of the pluck, in the vocabulary of matsuri
+# drumming: the don of the odaiko on the even pulses (the head of the bar the strongest), the ji of the shime on the
+# odd ones, the doko of a quick pickup and a rim click: (pulse, where in it, drum, weight, activity needed)
+OSTINATO: tuple[tuple[int, float, str, float, float], ...] = (
+    (0, 0.0, "odaiko", 0.7, 0.0),
+    (2, 0.0, "odaiko", 0.52, 0.0),
+    (4, 0.0, "odaiko", 0.62, 0.0),
+    (6, 0.0, "odaiko", 0.52, 0.0),
+    (1, 0.0, "shime", 0.4, 0.0),
+    (3, 0.0, "shime", 0.4, 0.0),
+    (5, 0.0, "shime", 0.4, 0.0),
+    (7, 0.0, "shime", 0.4, 0.0),
+    (3, 0.25, "shime", 0.3, 0.4),
+    (7, 0.25, "shime", 0.3, 0.4),
+    (2, 0.25, "taiko_rim", 0.5, 0.6),
+    (6, 0.25, "taiko_rim", 0.5, 0.6),
+)
+# a strong don falls on the head of every fourth bar, and the ostinato needs a section and a room this strong
+PHRASE_BARS = 4
+HEAD_LIFT = 0.22
+DRIVE_FROM = 0.7
+OSTINATO_GATE = 0.3
+# the roll into a peak or plateau section lasts this many pulses; the leader of a driving piece waits this share of the gap
+ROLL_PULSES = 4
+LEAD_DRIVE_SCALE = 0.7
+# the energy below which a day has no heartbeat or taiko of its own
+DRUMS_ENERGY = 0.3
+# how much of the pluck plays on the quietest and the busiest day, how often a whole loop of the wood rests
+PLUCK_DENSITY = (0.3, 1.0)
+REST_SHARE = (0.5, 0.1)
+# a pattern's extra hits follow the activity of the day against its own peak; the energy lifts or lowers what they need
+ACTIVITY_FLOOR = 0.15
+EXTRA_REACH = 0.4
+EXTRA_NEED = 0.6
+# how much more often a loop rests in a calm moment than in a middling one, and how much less in the busiest
+REST_ACTIVITY = 0.8
+# how far a busy moment lifts the section of the form towards the strength a layer needs to play
+FORM_LIFT = 0.35
+MIN_PEAK_ACTIVITY = 0.2
+# the heartbeat in beats per minute, a taiko strike's chance per beat, the drone's stretch in seconds (low, high): quiet then busy
+BEATS_PER_MINUTE = (40.0, 58.0)
+TAIKO_CHANCE = (0.03, 0.2)
+DRONE_SPAN_QUIET = (85.0, 140.0)
+DRONE_SPAN_BUSY = (45.0, 80.0)
+# the room's motif on the pluck: never below this note (C4)
+# the last stretch of a piece is drone and washes: no cell ends within this many seconds of the end
+PLUCK_TAIL = 21.0
+# the chant leader sings within this range of notes
+LEAD_RANGE = (53, 78)
+MOTIF_FLOOR = 60
+MOTIF_ROLES = ("peak", "plateau")
+MOTIF_ACCENT = 1.1
+# the pluck must be this awake for a cell to be given to the motif
+MOTIF_AWAKE = 0.35
+MOTIF_OCTAVE_STEPS = 5
+# a cell is this many slots; the motif is at most as long
+CELL_SLOTS = 8.0
 WASH_SECONDS = 24.0
 DRONE_STEP = 18.0
 DRONE_OVERLAP = 4.5
+
+
+def _closeness(tag: float, wanted: float, span: float = 1.0) -> float:
+    """Return 1 when a tag is what the day wants and 0 when it is a whole span away."""
+    return 1.0 - abs(tag - wanted) / span
 
 
 def _lfo(count: int, period: float, phase: float) -> np.ndarray:
@@ -193,17 +318,70 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     rng = plan.rng("ritual")
     light = quality.max_layers <= 4
 
-    tuning_name, root_pc, steps = plan.deal("tuning", TUNINGS)
-    _, pluck_len = plan.deal("pluck cell length", LENGTHS)
-    pluck_name, pluck_voice, pluck_loud = plan.deal("pluck voice", PLUCKS)
-    cell_name, cell = plan.deal("pluck cell", CELLS)
-    slit_name, slit_pulses, slit_hits = plan.deal("slit drum pattern", SLIT_PATTERNS)
-    block_name, block_pulses, block_hits = plan.deal("woodblock pattern", BLOCK_PATTERNS)
-    path_name, path = plan.deal("drone path", DRONE_PATHS)
-    wash_name, wash_order = plan.deal("wash set", WASH_SETS)
-    lead_name, lead_gap = plan.deal("chant leader", LEAD_PRESENCE)
-    heart_name, heart_style = plan.deal("heartbeat", HEARTBEATS)
+    character = plan.character
+    energy = character.energy
+    warmth = float(np.clip(character.warmth - LATE_DARKEN * character.late_night, -1.0, 1.0))
+    brightness = float(
+        np.clip(
+            0.5
+            + TUNING_WARMTH * character.warmth
+            + TUNING_ENERGY * (energy - 0.5)
+            - TUNING_LATE * character.late_night,
+            0.0,
+            1.0,
+        )
+    )
+    cell_wanted = 0.7 * energy + 0.3 * (0.5 + 0.5 * warmth)
+    tuning_name, steps, _ = plan.pick(
+        "tuning", TUNINGS, [_closeness(bright, brightness) for _, _, bright in TUNINGS]
+    )
+    root_pc = plan.scale.root
+    mode, _ = plan.pick(
+        "ritual mode", MODES, [_closeness(wanted, energy) for _, wanted in MODES], MODE_TOLERANCE
+    )
+    driving = mode == DRIVING
+    drive_energy = float(min(energy + MODE_LIFT[mode], 1.0))
+    lengths = MODE_LENGTHS[mode]
+    _, pluck_len = plan.pick(
+        "pluck cell length", lengths, [_closeness(LENGTH_ENERGY[n], energy) for n, _ in lengths]
+    )
+    pluck_name, pluck_voice, pluck_loud = plan.pick(
+        "pluck voice", PLUCKS, [_closeness(PLUCK_WARMTH[n], warmth, 2.0) for n, _, _ in PLUCKS]
+    )
+    cell_name, cell = plan.pick(
+        "pluck cell", CELLS, [_closeness(CELL_ENERGY[n], cell_wanted) for n, _ in CELLS]
+    )
+    slit_name, slit_pulses, slit_hits = plan.pick(
+        "slit drum pattern",
+        SLIT_PATTERNS,
+        [_closeness(SLIT_ENERGY[n], energy) for n, _, _ in SLIT_PATTERNS],
+    )
+    block_name, block_pulses, block_hits = plan.pick(
+        "woodblock pattern",
+        BLOCK_PATTERNS,
+        [_closeness(BLOCK_ENERGY[n], energy) for n, _, _ in BLOCK_PATTERNS],
+    )
+    path_name, path = plan.pick(
+        "drone path",
+        DRONE_PATHS,
+        [
+            _closeness(PATH_ENERGY[n], energy) + SHAPE_BONUS * (character.shape in PATH_SHAPES[n])
+            for n, _ in DRONE_PATHS
+        ],
+    )
+    wash_name, wash_order = plan.pick(
+        "wash set", WASH_SETS, [_closeness(WASH_WARMTH[n], warmth, 2.0) for n, _ in WASH_SETS]
+    )
+    lead_name, lead_gap = plan.pick(
+        "chant leader",
+        LEAD_PRESENCE,
+        [_closeness(LEAD_ENERGY[n], energy) for n, _ in LEAD_PRESENCE],
+    )
+    heart_name, heart_style = plan.pick(
+        "heartbeat", HEARTBEATS, [_closeness(HEART_ENERGY[n], energy) for n, _ in HEARTBEATS]
+    )
     patch = int(plan.rng("patch").integers(0, 2))
+    plan.choices["root"] = str(root_pc)
 
     def ladder(index: int, base: int) -> float:
         """Return the pitch of a step of the scale: five notes an octave, `base` is the root."""
@@ -212,6 +390,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
 
     pluck_base = 55 + (root_pc - 55) % 12
     lead_base = 53 + (root_pc - 53) % 12
+    lead_steps = [i for i in range(-2, 7) if LEAD_RANGE[0] <= ladder(i, lead_base) <= LEAD_RANGE[1]]
     drone_root = 38 + (root_pc - 38) % 12
 
     # -- the curves of the day
@@ -229,17 +408,42 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         0.0,
         1.0,
     )
+    relative_activity = np.clip(activity / max(float(activity.max()), MIN_PEAK_ACTIVITY), 0.0, 1.0)
     swell = swells(plan)
     breath = _lfo(count, float(rng.uniform(11.5, 13.5)), float(rng.uniform()))
     surge = 0.55 + 0.45 * _lfo(count, float(rng.uniform(10.0, 12.0)), float(rng.uniform()))
 
     notes: list[Note] = []
 
+    # -- the form: a cell is a bar, so the sections change every 8 cells; the strongest anomaly lifts the next section
+    sections = plan.sections(pluck_len)
+    starts = [start for start, _, _, _ in sections]
+    strength = [intensity for _, _, _, intensity in sections]
+    if plan.events:
+        strongest, _ = max(plan.events, key=lambda event: event[1])
+        after = bisect_right(starts, strongest)
+        if after < len(sections):
+            strength[after] = max(strength[after], EVENT_FORM)
+    lifted = {i for i, (_, _, _, base) in enumerate(sections) if strength[i] > base}
+    drums_on = energy >= DRUMS_ENERGY
+
+    def form_at(second: float) -> float:
+        return strength[max(bisect_right(starts, second) - 1, 0)]
+
+    def drums_at(second: float) -> bool:
+        index = max(bisect_right(starts, second) - 1, 0)
+        return (drums_on or index in lifted) and strength[index] >= DRUMS_FROM
+
     # -- the drone: a cello section and a Juno pad with a vibrato of their own, a quiet pad an octave up, and a round sub; the root moves along the path, and at an anomaly it goes to the fifth or the fourth
     segments: list[tuple[float, float, int]] = []
     clock, place = 0.0, 0
     while clock < length:
-        span = float(rng.uniform(55.0, 105.0))
+        span = float(
+            rng.uniform(
+                DRONE_SPAN_QUIET[0] + (DRONE_SPAN_BUSY[0] - DRONE_SPAN_QUIET[0]) * drive_energy,
+                DRONE_SPAN_QUIET[1] + (DRONE_SPAN_BUSY[1] - DRONE_SPAN_QUIET[1]) * drive_energy,
+            )
+        )
         end = min(clock + span, float(length))
         if length - end < 35.0:
             end = float(length)
@@ -283,22 +487,80 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             second += float(rng.uniform(15.0, 24.0))
             turn += 1
 
-    # -- the pluck: one cell that comes in as the day wakes and leaves as the evening settles; the only plucked voice
-    slot = pluck_len / 8.0
+    # -- the pluck: one cell that comes in as the day wakes and leaves as the evening settles; the only plucked voice.
+    # On a quiet day it plays sparsely; in the first and the last peak or plateau section the room's motif replaces one cell
+    slot = pluck_len / CELL_SLOTS
     pluck_rng = plan.rng("loop", "pluck")
     base_index = [step for _, step in cell]
     current = list(base_index)
-    origin = float(pluck_rng.uniform(0.0, pluck_len))
+    origin = 0.0
     occupied = {where for where, _ in cell}
     pluck_onsets: list[float] = []
     last_cells: list[
         tuple[float, float, float]
     ] = []  # (end of the response, the pitch it ended on, length of the loop)
-    second = origin
-    while second < length - 2.0:
-        presence = float(np.clip((plan.at(awake_base, second) - 0.1) / 0.26, 0.0, 1.0))
-        presence = float(smoothstep(np.array(presence)))
-        if presence > 0.04 and pluck_rng.random() < presence**0.5:
+    thin = PLUCK_DENSITY[0] + (PLUCK_DENSITY[1] - PLUCK_DENSITY[0]) * drive_energy
+    cells = int((length - PLUCK_TAIL) / pluck_len)
+
+    def pluck_presence(second: float) -> float:
+        value = float(np.clip((plan.at(awake_base, second) - 0.1) / 0.26, 0.0, 1.0))
+        return float(smoothstep(np.array(value)))
+
+    # the motif lives on the ladder of the tuning: a degree of the day's scale lands on the nearest step of the pentatonic
+    def motif_on_ladder(number: int) -> tuple[tuple[tuple[int, float], ...], list[int], int]:
+        """Return the motif of a statement, its steps on the ladder and the pitch it starts from."""
+        # a statement is at most one cell long
+        motif = develop_motif(plan.motif(), number, motif_seed(plan), max_beats=CELL_SLOTS)
+        steps = [round(degree * MOTIF_OCTAVE_STEPS / plan.scale.size) for degree, _ in motif]
+        base = pluck_base
+        while min(ladder(step, base) for step in steps) < MOTIF_FLOOR:
+            base += 12
+        return motif, steps, base
+
+    awake_firsts: list[int] = []
+    motif_sections = [i for i, (_, _, role, _) in enumerate(sections) if role in MOTIF_ROLES]
+    for i in motif_sections or range(len(sections)):
+        first = round(sections[i][0] / pluck_len)
+        last = min(round(sections[i][1] / pluck_len), cells)
+        awake_cells = [k for k in range(first, last) if pluck_presence(k * pluck_len) > MOTIF_AWAKE]
+        if awake_cells:
+            awake_firsts.append(awake_cells[0])
+        if awake_firsts and not motif_sections:
+            break
+    motif_cells = {k: motif_on_ladder(number) for number, k in enumerate(motif_sites(awake_firsts))}
+    motif_played = 0
+    for k in range(cells):
+        second = origin + k * pluck_len
+        if second + pluck_len > length - PLUCK_TAIL:
+            break
+        presence = pluck_presence(second)
+        if k in motif_cells:
+            motif_played += 1
+            motif, motif_steps, motif_base = motif_cells[k]
+            clock = 0.0
+            pitch = float(motif_base)
+            for (_, beats), step in zip(motif, motif_steps, strict=True):
+                when = second + clock * slot
+                pitch = ladder(step, motif_base)
+                vel = pluck_loud * MOTIF_ACCENT * (0.78 + 0.3 * max(presence, MOTIF_AWAKE))
+                notes.append(
+                    Note(
+                        when,
+                        max(0.7, beats * slot),
+                        pitch,
+                        float(np.clip(vel, 0.1, 1.0)),
+                        pluck_voice,
+                        "plucks",
+                        patch,
+                    )
+                )
+                pluck_onsets.append(when)
+                clock += beats
+            last_cells.append((second + clock * slot, pitch, pluck_len))
+            continue
+        if presence > 0.04 and pluck_rng.random() < presence**0.5 * thin * (
+            0.5 + 0.5 * form_at(second)
+        ):
             if pluck_rng.random() < 0.33:
                 pick = int(pluck_rng.integers(0, len(current)))
                 current[pick] = int(
@@ -333,7 +595,6 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 )
                 pluck_onsets.append(when)
             last_cells.append((second + (cell[-1][0] + 1.0) * slot, pitch, pluck_len))
-        second += pluck_len
     pluck_onsets.sort()
 
     # -- the wood: everything of the wood is placed on the pulse of the pluck's grid, on its off-beats, and checked against
@@ -419,13 +680,15 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         pattern_rng: np.random.Generator,
         clear_of_wood: float,
         rest_share: float,
+        from_strength: float,
     ) -> int:
         """Place a pattern on the pulses of the pluck, loop after loop; return how many hits were played."""
         played = 0
         loop = 0
         while origin + loop * pulses * slot < length - 2.0:
             # now and then a whole loop is left out, so that the pattern breathes
-            resting = pattern_rng.random() < rest_share
+            calm = 1.0 - 2.0 * plan.at(relative_activity, origin + loop * pulses * slot)
+            resting = pattern_rng.random() < rest_share * (1.0 + REST_ACTIVITY * calm)
             for pulse, frac, tone, need in hits:
                 if resting:
                     continue
@@ -433,12 +696,13 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
                 if when >= length - 2.0:
                     continue
                 here = plan.at(gate, when)
-                drive = 0.25 + 0.75 * plan.at(activity, when)
+                drive = ACTIVITY_FLOOR + (1.0 - ACTIVITY_FLOOR) * plan.at(relative_activity, when)
                 roll = pattern_rng.random()
                 if (
-                    here < 0.05
+                    form_at(when) + FORM_LIFT * plan.at(relative_activity, when) < from_strength
+                    or here < 0.05
                     or roll > here**0.5
-                    or need > drive
+                    or need * EXTRA_NEED > drive + EXTRA_REACH * (drive_energy - 0.5)
                     or not free(when, MIN_GAP, clear_of_wood)
                 ):
                     continue
@@ -471,7 +735,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         0.62,
         plan.rng("slit"),
         0.45,
-        0.2,
+        REST_SHARE[0] + (REST_SHARE[1] - REST_SHARE[0]) * drive_energy,
+        SLIT_FROM,
     )
     if not light:
         block_count = lay_pattern(
@@ -484,7 +749,8 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             0.5,
             plan.rng("block"),
             0.3,
-            0.1,
+            REST_SHARE[0] + (REST_SHARE[1] - REST_SHARE[0]) * drive_energy,
+            BLOCK_FROM,
         )
 
     # -- the chant leader: a cello section answers the end of a pluck cell with two or three long notes and rests
@@ -493,8 +759,13 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         lead_rng = plan.rng("lead")
         last_phrase = -1000.0
         previous = 1
+        lead_gap = (
+            (lead_gap[0] * LEAD_DRIVE_SCALE, lead_gap[1] * LEAD_DRIVE_SCALE)
+            if driving
+            else lead_gap
+        )
         for end, pitch, _ in sorted(last_cells):
-            if end - last_phrase < lead_gap[0] or end > length - 14.0:
+            if end - last_phrase < lead_gap[0] or end > length - 14.0 or form_at(end) < LEAD_FROM:
                 continue
             here = plan.at(awake_base, end)
             wanted = 0.45 + 0.55 * min(
@@ -506,18 +777,24 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             # the pitch of the answer: the step of the lead's scale nearest to where the pluck ended, then a stepwise walk home
             reach = [
                 (abs(ladder(i, lead_base) - (pitch - 12.0 * round((pitch - lead_base) / 12.0))), i)
-                for i in range(-2, 7)
+                for i in lead_steps
             ]
             current_step = min(reach)[1] if lead_rng.random() < 0.7 else previous
             count_in_phrase = int(weighted(lead_rng, (2, 3), (0.45, 0.55)))
             clock = end + 0.5 + float(lead_rng.uniform(0.0, 0.9))
+            if driving:
+                clock = (end // pluck_len + 1.0) * pluck_len + 2.0 * slot
             for number in range(count_in_phrase):
                 final = number == count_in_phrase - 1
                 if final:
                     current_step = int(weighted(lead_rng, (0, 3, 5), (0.5, 0.25, 0.25)))
                 elif number > 0:
                     current_step = int(
-                        np.clip(current_step + int(lead_rng.choice((-2, -1, -1, 1))), -2, 6)
+                        np.clip(
+                            current_step + int(lead_rng.choice((-2, -1, -1, 1))),
+                            lead_steps[0],
+                            lead_steps[-1],
+                        )
                     )
                 dur = float(lead_rng.uniform(5.0, 8.0) if final else lead_rng.uniform(3.2, 5.0))
                 vel = float(lead_rng.uniform(0.46, 0.58)) * (
@@ -541,15 +818,22 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             last_phrase = end
 
     # -- the pulse and the taiko, in the busy stretches only
-    bpm = float(rng.uniform(44.0, 54.0))
+    bpm = BEATS_PER_MINUTE[0] + (BEATS_PER_MINUTE[1] - BEATS_PER_MINUTE[0]) * energy
+    if driving:
+        bpm = 60.0 / slot
     beat = 60.0 / bpm
     taiko_hits: list[tuple[float, str, float]] = []
+
+    def drum_gate(second: float) -> float:
+        """Return how busy the room is where the form and the energy of the day let the drums play, else 0."""
+        return plan.at(busy, second) if drums_at(second) else 0.0
+
     big: list[float] = []
     quiet = 0.0
     drum_rng = plan.rng("taiko")
     strikes = 0
     rolls = 0
-    grid = float(rng.uniform(0.0, beat))
+    grid = 0.0 if driving else float(rng.uniform(0.0, beat))
 
     def on_grid(second: float) -> float:
         return grid + round((second - grid) / beat) * beat
@@ -567,18 +851,35 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             event_starts.append(end - span)
             big.append(end)
             rolls += 1
+    # a roll into the head of every peak or plateau section
+    if driving:
+        for start, _, role, _ in sections[1:]:
+            if role in MOTIF_ROLES and drum_gate(start) > OSTINATO_GATE:
+                span = ROLL_PULSES * slot
+                taiko_hits.extend(
+                    (hit.time, "odaiko", hit.velocity)
+                    for hit in taiko.roll(start - span, start, "odaiko", 0.18, 0.9)
+                )
+                event_starts.append(start - span)
+                big.append(start)
+                rolls += 1
     # chance strikes on the beat, rarer when the house is calm, never close to another one
     others: list[float] = [*big]
     beat_time = grid
     while beat_time < length - 4.0:
-        gate = plan.at(busy, beat_time)
+        gate = drum_gate(beat_time)
         near = any(abs(beat_time - other) < 5.0 for other in others)
         inside_roll = any(
             start - 0.5 <= beat_time <= end + beat
             for start, end in zip(event_starts, big, strict=True)
         )
-        if gate > 0.55 and not near and not inside_roll:
-            chance = (0.05 + 0.1 * plan.at(activity, beat_time)) * gate
+        if gate > 0.55 and not near and not inside_roll and not driving:
+            chance = (
+                TAIKO_CHANCE[0]
+                + (TAIKO_CHANCE[1] - TAIKO_CHANCE[0])
+                * energy
+                * (0.5 + 0.5 * plan.at(activity, beat_time))
+            ) * gate
             if drum_rng.random() < chance:
                 vel = (
                     0.52
@@ -601,7 +902,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         roll_clock += float(drum_rng.uniform(30.0, 60.0))
         if (
             roll_clock < length - 12.0
-            and plan.at(busy, roll_clock) > 0.7
+            and drum_gate(roll_clock) > 0.7
             and drum_rng.random() < 0.55
             and not any(abs(roll_clock - other) < 20.0 for other in others)
         ):
@@ -615,8 +916,34 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             others.append(end)
             rolls += 1
             roll_clock += 90.0
+    # the ostinato, on the pulse of the pluck: it builds with the section, calls in more hits in the busy part and stops in
+    # a release or an outro
+    ostinato_hits = 0
+    ostinato_rng = plan.rng("ostinato")
+    bar = 0
+    while driving and bar * pluck_len < length - 4.0:
+        for pulse, frac, drum, weight, need in OSTINATO:
+            when = (bar * CELL_SLOTS + pulse + frac) * slot
+            form = form_at(when)
+            drive = ACTIVITY_FLOOR + (1.0 - ACTIVITY_FLOOR) * plan.at(relative_activity, when)
+            if (
+                when >= length - 4.0
+                or form < DRIVE_FROM
+                or drum_gate(when) <= OSTINATO_GATE
+                or need * EXTRA_NEED > drive + EXTRA_REACH * (drive_energy - 0.5)
+                or any(
+                    start - 0.5 <= when <= end + beat
+                    for start, end in zip(event_starts, big, strict=True)
+                )
+            ):
+                continue
+            head = HEAD_LIFT if pulse == 0 and bar % PHRASE_BARS == 0 else 0.0
+            vel = (weight + head) * (0.7 + 0.3 * form) * float(ostinato_rng.uniform(0.94, 1.04))
+            taiko_hits.append((when, drum, vel))
+            ostinato_hits += 1
+        bar += 1
     # one last soft strike as the busy stretch ends
-    awake_beats = [t for t in np.arange(grid, length - 4.0, beat) if plan.at(busy, float(t)) > 0.55]
+    awake_beats = [t for t in np.arange(grid, length - 4.0, beat) if drum_gate(float(t)) > 0.55]
     if taiko_hits and awake_beats:
         closing = float(awake_beats[-1]) + 4.0 * beat
         if closing < length - 6.0 and not any(abs(closing - other) < 4.0 for other in others):
@@ -640,7 +967,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
     beat_time = grid
     beats = 0
     while beat_time < length - 3.0:
-        gate = plan.at(busy, beat_time)
+        gate = drum_gate(beat_time)
         taken = any(
             abs(beat_time - hit_time) < 0.9 * beat
             for hit_time, kind, _ in taiko_hits
@@ -650,7 +977,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
             start - 0.2 <= beat_time <= end + 0.6 * beat
             for start, end in zip(event_starts, big, strict=True)
         )
-        if gate > 0.3 and not taken and not rolling:
+        if gate > 0.3 and not taken and not rolling and not driving:
             vel = (0.22 + 0.12 * gate + 0.04 * plan.at(plan.power, beat_time)) * float(
                 heart_rng.uniform(0.92, 1.06)
             )
@@ -709,11 +1036,12 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         level_db=-18.8,
     )
     plan.choices["patch"] = str(patch)
+    plan.choices[MOTIF_CHOICE] = str(motif_played)
     score.choices = dict(plan.choices)
     used = score.voices_used()
     score.notes_about = [
         (
-            f"{tuning_name}; one plucked line on {pluck_name} (cell '{cell_name}' of {pluck_len:.1f} seconds, about one repeat in three moving one note by a step), "
+            f"{tuning_name} on {PITCH_NAMES[root_pc]}, {mode} ({60.0 / slot:.0f} pulses a minute); one plucked line on {pluck_name} (cell '{cell_name}' of {pluck_len:.1f} seconds, about one repeat in three moving one note by a step), "
             f"the only plucked voice. Slit drum '{slit_name}' ({slit_pulses} pulses, {slit_count} hits) and woodblock '{block_name}' "
             f"({block_pulses} pulses, {block_count} hits) on the off-beats of the pluck's pulse, never within {int(MIN_GAP * 1000)} ms of a plucked note; "
             f"{len(clack_times)} shishi-odoshi clacks."
@@ -724,7 +1052,7 @@ def compose(plan: Plan) -> Score:  # noqa: C901, PLR0912, PLR0915
         ),
         (
             f"Chant leader '{lead_name}' ({lead_notes} long notes of a cello section in the scale, with rests); heartbeat '{heart_name}' at {bpm:.0f} per minute "
-            f"({beats} beats in the busy stretches), {strikes} taiko strikes on the pulse and {rolls} accelerating rolls."
+            f"({beats} beats in the busy stretches), {strikes} taiko strikes on the pulse, {ostinato_hits} hits of the ostinato and {rolls} accelerating rolls."
         ),
     ]
     if quiet:

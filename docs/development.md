@@ -27,9 +27,11 @@ from the demo on their own.
 | `entropy_fm/timeline.py` | History to normalised control signals. |
 | `entropy_fm/day_analysis.py`, `energy.py` | The day read as a curve of activity, five to seven stretches and salient moments. |
 | `entropy_fm/baseline.py`, `surprise.py`, `palette.py`, `variation.py` | What is usual, what is unusual, the character of the day, the dealing of material. |
+| `entropy_fm/character.py` | The character of a day (how busy, what shape, how warm, how many stretches, what stood out, a day off), the key and mode, the tempo position and the chord length it asks for, and the motif of each room. |
 | `entropy_fm/plan.py` | The length of the piece (full, or condensed per style), the arc of the day over it, the curves the house gives, the thinning of events when condensed, the deals. |
 | `entropy_fm/scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_minimal.py`, `scape_ritual.py`, `scape_glitch.py` | The six generative systems and their composed vocabulary. |
-| `entropy_fm/glitch.py`, `glitch_drums.py`, `glitch_voices.py`, `glitch_render.py` | The sounds of Cinematic Glitch (swells, stabs, growl, kit), the edits, and its own renderer (a block pipeline with a latency of three seconds, so that an edit can read the material before it). |
+| `entropy_fm/harmony.py` | What the styles share: voice leading, held tones, the voice a day picks by its energy and warmth, the length of a chord, the shared growling bass family, and how the motif of a room is developed from one statement to the next. |
+| `entropy_fm/glitch.py`, `glitch_drums.py`, `glitch_kits.py`, `glitch_voices.py`, `glitch_render.py` | The sounds of Cinematic Glitch (swells, stabs, growl, kit), its drum families, the edits, and its own renderer (a block pipeline with a latency of three seconds, so that an edit can read the material before it). |
 | `entropy_fm/gen.py`, `score.py` | Weighted choices, Markov chains, euclid, random walks, event curves; notes, layers and the score. |
 | `entropy_fm/voices.py`, `drums.py`, `dsp.py`, `sampler.py`, `samples/` | The voice library, the percussion, the band-limited oscillators and filters, the vibrato, the sampler and its CC0 samples. |
 | `entropy_fm/stretch.py`, `taiko.py` | The stretched textures of Ritual (Paulstretch, cached) and its synthesised taiko and heartbeat drum. |
@@ -40,7 +42,7 @@ from the demo on their own.
 | `entropy_fm/roomart.py` | The images of the artists (rooms), drawn from the week of each room. |
 | `entropy_fm/titles.py` | Titles of the tracks, the history and drive text of each style, the line about the day, the review of an album, in English and Dutch. |
 | `entropy_fm/references.py` | Measures each sensor against its own previous days, leaves out the dead ones, finds the showers. |
-| `scripts/` | `soundscapes.py`, `bench.py`, `measure_drivers.py`, `render_drivers.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, `render_covers.py`, `real_house_demo.py`, `sparse_house.py` and the demo house (`demo_render.py`). |
+| `scripts/` | `soundscapes.py`, `bench.py`, `measure_drivers.py`, `render_drivers.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, `render_covers.py`, `real_house_demo.py`, `house_fixture.py`, `pull_house_fixture.py`, `contrast_reel.py`, `sparse_house.py` and the demo house (`demo_render.py`). |
 
 ## Run the demo
 
@@ -62,6 +64,7 @@ uv run python scripts/voice_report.py            # the fingerprint of every voic
 uv run python scripts/bench.py                   # CPU milliseconds per second of audio, per style and tier
 uv run python scripts/measure_drivers.py         # layers, density and day to day distance, on both demo houses
 uv run python scripts/render_drivers.py out/ x   # three minutes per style on the sparse house (--engine PATH plays another checkout)
+uv run python scripts/contrast_reel.py out/         # six room/day excerpts per style, with the measured difference per pair (--style, --source real|sparse, --seconds, --pairs extra, --engine PATH)
 ```
 
 The demo has a second house, `scripts/sparse_house.py`, that has no motion sensors: CO2 monitors in the living room,

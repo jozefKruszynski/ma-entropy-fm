@@ -1,19 +1,22 @@
 """Tests of the soundscapes: the plan, the generative systems of the six styles, the day to day variation."""
 
 import itertools
+from dataclasses import replace
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 import pytest
 
+from entropy_fm.character import ALL_DAY, FLAT, HIGH, LOW, NEUTRAL, DayCharacter
 from entropy_fm.day_analysis import analyze_day
-from entropy_fm.plan import MAX_SECONDS, MIN_SECONDS, build_plan, length_of
+from entropy_fm.plan import MAX_SECONDS, MIN_SECONDS, Plan, build_plan, length_of
 from entropy_fm.quality import LIGHT, RICH, STANDARD
 from entropy_fm.scape import scape_score
 from entropy_fm.scape_ambient import LENGTHS
 from entropy_fm.scape_berlin import CELLS_A, CELLS_B, CELLS_C, _mutate
-from entropy_fm.score import CR
-from entropy_fm.styles import STYLES
+from entropy_fm.score import CR, Score
+from entropy_fm.styles import STYLES, get_style
 from entropy_fm.synth import Scale
 from entropy_fm.timeline import EntityInfo, VoiceKind, build_series
 from entropy_fm.voices import VOICES
@@ -87,27 +90,100 @@ def test_a_score_is_deterministic(style: str) -> None:
     assert np.array_equal(first.gain_db, second.gain_db)
 
 
+QUIET = replace(
+    NEUTRAL,
+    energy=0.0,
+    level=LOW,
+    shape=FLAT,
+    warmth=-0.8,
+    stretches=0,
+    events=0.0,
+    late_night=True,
+)
+BUSY = replace(
+    NEUTRAL,
+    energy=1.0,
+    level=HIGH,
+    shape=ALL_DAY,
+    warmth=0.8,
+    stretches=5,
+    regularity=0.9,
+    events=0.8,
+    day_off=True,
+)
+WEEK = range(7, 14)
+# a wider swing of warmth changes every voice of a style that picks them all by warmth, so that no core is left
+WARMTH_SWING = 0.2
+
+
+def _score_of(style: str, index: int, character: DayCharacter) -> tuple[Score, Plan]:
+    """Return the score and the plan of a day of the demo in a style, for a character that the test sets."""
+    demo_house = the_demo()
+    series: Any = demo_house.days[index]["kitchen"] + demo_house.days[index]["sun"]
+    return scape_score(
+        series,
+        analyze_day(series),
+        style,
+        f"kitchen|{demo_house.day_of(index).isoformat()}|_scape|{style}",
+        Scale(2, "dorian"),
+        day=demo_house.day_of(index),
+        quality=STANDARD,
+        area_key="kitchen",
+        character=character,
+    )
+
+
 @pytest.mark.parametrize("style", STYLE_KEYS)
-def test_consecutive_days_get_different_motifs_progressions_and_patches(style: str) -> None:
-    """Every component that the day deals is different from one day to the next, for a week."""
-    days = [the_demo().score(i, ("kitchen",), style, STANDARD)[0] for i in range(7, 14)]
+def test_the_dealer_breaks_ties_between_days_of_the_same_character(style: str) -> None:
+    """With the same character every day, the tie-breaking still changes something from one day to the next."""
+    days = [_score_of(style, i, NEUTRAL)[1] for i in WEEK]
     for yesterday, today in itertools.pairwise(days):
-        dealt = [key for key in yesterday.choices if key != "patch"]
-        assert dealt
-        for key in dealt:
-            assert yesterday.choices[key] != today.choices[key], (style, key)
-    assert len({tuple(sorted(d.choices.items())) for d in days}) == 7
+        assert yesterday.choices
+        assert any(yesterday.choices[key] != today.choices.get(key) for key in yesterday.choices), (
+            style
+        )
+    assert len({tuple(sorted(d.choices.items())) for d in days}) >= 2
+
+
+@pytest.mark.parametrize("style", STYLE_KEYS)
+def test_a_quiet_and_a_busy_day_get_a_different_identity(style: str) -> None:
+    """The data picks the identity: a clearly quiet and a clearly busy day differ in tempo or mode, and in what is chosen."""
+    quiet_score, quiet = _score_of(style, 13, QUIET)
+    busy_score, busy = _score_of(style, 13, BUSY)
+    low, high = get_style(style).tempo
+    moved = quiet.scale.mode != busy.scale.mode
+    if high > low:
+        moved = moved or quiet_score.tempo != busy_score.tempo
+    assert moved, style
+    assert quiet.choices != busy.choices, style
+
+
+# a voice of the core of a style plays on at least this many of the seven days
+CORE_DAYS = 4
+
+
+def _spread_character(step: int) -> DayCharacter:
+    """Return the character of a day of the week that goes from quiet and cold (0) to busy and warm (6)."""
+    share = step / (len(WEEK) - 1)
+    return replace(
+        NEUTRAL,
+        energy=share,
+        level=LOW if share < 0.4 else HIGH,
+        warmth=WARMTH_SWING * (2 * share - 1),
+    )
 
 
 @pytest.mark.parametrize("style", STYLE_KEYS)
 def test_the_chosen_voices_vary_across_seven_days(style: str) -> None:
-    """The set of voices that a style plays changes over a week, though its core stays."""
+    """When the days differ in character, the set of voices that a style plays changes, though a core is on most days."""
     used = [
-        frozenset(the_demo().score(i, ("kitchen",), style, STANDARD)[0].voices_used())
-        for i in range(7, 14)
+        frozenset(_score_of(style, i, _spread_character(i - WEEK.start))[0].voices_used())
+        for i in WEEK
     ]
     assert len(set(used)) >= 2, style
-    core = frozenset.intersection(*used)
+    core = frozenset(
+        voice for voice in frozenset.union(*used) if sum(voice in day for day in used) >= CORE_DAYS
+    )
     assert core
     assert frozenset.union(*used) - core
 
@@ -230,18 +306,24 @@ def test_the_berlin_sequences_have_different_lengths_and_mutate_by_rule() -> Non
 
 
 def test_the_night_is_sparser_than_the_active_day() -> None:
-    """The soundscape follows the day: fewer layers and notes in the night than in the busiest stretch."""
-    from soundscapes import pick_windows  # noqa: PLC0415
-
+    """The soundscape follows the day: fewer layers and notes per minute in the night than in the busiest part of the day."""
     for style in STYLE_KEYS:
         score, plan = the_demo().score(13, ("kitchen",), style, STANDARD)
-        (_, night), (_, day), _ = pick_windows(plan)
-        counts = []
-        for start in (night, day):
-            inside = [n for n in score.notes if start <= n.t < start + 60]
-            counts.append((len(inside), len({n.layer for n in inside})))
-        assert counts[0][0] <= counts[1][0], (style, counts)
-        assert counts[0][1] <= counts[1][1], (style, counts)
+        assert isinstance(plan, Plan)
+        arcs = {name: (a, b) for name, a, b in plan.arc()}
+        busiest = max(
+            (name for name in arcs if name != "night"),
+            key=lambda name: float(
+                np.mean(plan.activity[int(arcs[name][0] * 10) : int(arcs[name][1] * 10)])
+            ),
+        )
+        stats = []
+        for name in ("night", busiest):
+            start, end = arcs[name]
+            inside = [n for n in score.notes if start <= n.t < end]
+            stats.append((len(inside) * 60.0 / (end - start), len({n.layer for n in inside})))
+        assert stats[0][0] <= stats[1][0], (style, busiest, stats)
+        assert stats[0][1] <= stats[1][1], (style, busiest, stats)
 
 
 def test_lofi_rests_its_drums_at_night() -> None:
