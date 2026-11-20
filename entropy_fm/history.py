@@ -124,10 +124,7 @@ class HistoryStore:
             return {}
         start, end = day_bounds(day, tz)
         is_today = now.astimezone(tz) < end
-        key = f"{scope}|{day.isoformat()}"
-        checksum = hashlib.sha256(
-            f"{CACHE_SCHEMA}|{','.join(sorted(info.entity_id for info in infos))}".encode()
-        ).hexdigest()[:16]
+        key, checksum = self._day_key(scope, infos, day)
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             data = await self.cache.get(
@@ -146,6 +143,35 @@ class HistoryStore:
                     checksum=checksum,
                 )
         return dict(data)
+
+    def _day_key(self, scope: str, infos: Sequence[EntityInfo], day: date) -> tuple[str, str]:
+        """Return the key and the checksum under which the history of a group and a day is cached."""
+        key = f"{scope}|{day.isoformat()}"
+        checksum = hashlib.sha256(
+            f"{CACHE_SCHEMA}|{','.join(sorted(info.entity_id for info in infos))}".encode()
+        ).hexdigest()[:16]
+        return key, checksum
+
+    async def cached_series(
+        self, scope: str, infos: Sequence[EntityInfo], day: date
+    ) -> list[Series] | None:
+        """
+        Return the series of a group on a day only when they are already kept: never asks Home Assistant.
+
+        :param scope: Names the group in the cache, such as the area id.
+        :param infos: The entities of the group.
+        :param day: The day.
+        :returns: The series, or None when the day is neither in the cache nor pinned.
+        """
+        if not infos:
+            return None
+        key, checksum = self._day_key(scope, infos, day)
+        data = await self.cache.get(
+            key, provider=self.provider_id, category=CACHE_CATEGORY_HISTORY, checksum=checksum
+        )
+        if data is None and self.pin_source is not None:
+            data = self.pin_source(scope, day)
+        return None if data is None else series_from_data(infos, dict(data))
 
     async def day_series(
         self,

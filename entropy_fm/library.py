@@ -59,8 +59,6 @@ class Catalog:
     sun: EntityInfo | None = None
     # entity id to when its state last changed (epoch seconds), for those whose state said so
     changed: dict[str, float] = field(default_factory=dict)
-    # area id to the icon of the area in Home Assistant, for the areas that have one
-    icons: dict[str, str] = field(default_factory=dict)
 
     def all_infos(self) -> list[EntityInfo]:
         """Return the entities of every area."""
@@ -128,7 +126,6 @@ def build_catalog(  # noqa: PLR0913
     include_presence: bool = False,
     meta: Mapping[str, EntityMeta] | None = None,
     overrides: Mapping[str, str] | None = None,
-    icons: Mapping[str, str] | None = None,
 ) -> Catalog:
     """
     Build the catalog from the registries and the current states, without any history.
@@ -140,7 +137,6 @@ def build_catalog(  # noqa: PLR0913
     :param include_presence: Whether persons and device trackers may play.
     :param meta: What the registries say about each entity: platform, device, labels.
     :param overrides: Entity id to a role the user chose in the settings.
-    :param icons: Area id to the icon set on the area in Home Assistant.
     """
     globs = list(exclude_globs)
     per_area: dict[str, list[EntityInfo]] = {}
@@ -197,13 +193,7 @@ def build_catalog(  # noqa: PLR0913
         area_id: sorted(infos, key=lambda info: (info.name.lower(), info.entity_id))
         for area_id, infos in sorted(per_area.items(), key=lambda item: areas[item[0]].lower())
     }
-    return Catalog(
-        {area_id: areas[area_id] for area_id in entities},
-        entities,
-        sun,
-        changed,
-        {area_id: icon for area_id, icon in (icons or {}).items() if area_id in entities},
-    )
+    return Catalog({area_id: areas[area_id] for area_id in entities}, entities, sun, changed)
 
 
 def _epoch(value: object) -> float | None:

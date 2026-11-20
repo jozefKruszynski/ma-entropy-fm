@@ -146,4 +146,4 @@ known-first-party = ["music_assistant"]
 [tool.codespell]
 skip = "uv.lock,LICENSE,*/translations/*"
 # hass is the domain of the Home Assistant plugin; discreet is a record title and the rest is Dutch (titles.py)
-ignore-words-list = "hass,buro,streamin,discreet,stil,analoge,stap,leeg,als,te"
+ignore-words-list = "hass,streamin,discreet,stil,analoge,stap,leeg,als,te"

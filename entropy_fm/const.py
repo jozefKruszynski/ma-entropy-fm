@@ -68,6 +68,8 @@ TODAY_EXPIRATION = 300
 CACHE_SCHEMA = 1
 # the baseline of a day is built from the days before it, which no longer change
 BASELINE_DAYS = 7
+# how many of the last days the image of a room is drawn from, when they are kept
+ARTIST_PROFILE_DAYS = 7
 BASELINE_EXPIRATION = 86400
 BASELINE_SCHEMA = 2
 HISTORY_CHUNK = 25

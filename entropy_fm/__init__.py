@@ -73,6 +73,7 @@ from .autotune import benchmark, heaviest_style
 from .baseline import EntityBaseline
 from .const import (
     ARTIST_PATH_PREFIX,
+    ARTIST_PROFILE_DAYS,
     CONF_AUDIO_CACHE_MB,
     CONF_COVER_ENGINE,
     CONF_COVER_LIMIT,
@@ -180,7 +181,7 @@ from .quality import (
 from .references import rescale
 from .render import render_pcm
 from .roles import parse_overrides
-from .roomart import artist_fanart, artist_thumb, room_kind
+from .roomart import RoomProfile, artist_fanart, artist_thumb, seeded_profile, week_profile
 from .scape import analysis_of, duration_of, scape_score
 from .score import Score
 from .styles import DEFAULT_STYLE, STYLES, Style, get_style
@@ -985,7 +986,6 @@ class EntropyFMProvider(MusicProvider):
                 include_presence=self._include_presence,
                 meta=snapshot.meta,
                 overrides=parse_overrides(str(self.get_config_value(CONF_ROLES, "") or "")),
-                icons=snapshot.icons,
             )
             self._catalog_time = loop_time
             return self._catalog
@@ -1122,16 +1122,42 @@ class EntropyFMProvider(MusicProvider):
             name = catalog.areas[area_id]
         else:
             return None
-        room = room_kind(name, area_id, catalog.icons.get(area_id))
-        # a new name or a new kind of room is a new image; the old file ages out of the cache
-        slot = f"artist|{area_id}|{name}|{room}|{kind}"
+        profile = await self._room_profile(area_id, catalog)
+        # a new name or a new week is a new image; the old file ages out of the cache
+        slot = f"artist|{area_id}|{name}|{profile.digest()}|{kind}"
         if kind == "fanart":
             return await self.covers.make(
-                COVER_PROCEDURAL, slot, slot, lambda: artist_fanart(area_id, room), None
+                COVER_PROCEDURAL, slot, slot, lambda: artist_fanart(area_id, profile), None
             )
         return await self.covers.make(
-            COVER_PROCEDURAL, slot, slot, lambda: artist_thumb(area_id, name, room), None
+            COVER_PROCEDURAL, slot, slot, lambda: artist_thumb(area_id, name, profile), None
         )
+
+    async def _room_profile(self, area_id: str, catalog: Catalog) -> RoomProfile:
+        """
+        Return the typical day of a room (or of the house) from the history of the last days that is kept.
+
+        Home Assistant is never asked: days that are not in the cache or pinned are left out, and a room
+        with none gets a figure made from its id.
+        """
+        try:
+            tz, now = await self._timezone(), await self._now()
+            today = now.astimezone(tz).date()
+            rooms = [area_id] if area_id != WHOLE_HOUSE_ID else list(self._house_rooms(catalog))
+            days: list[list[Series]] = []
+            for offset in range(1, ARTIST_PROFILE_DAYS + 1):
+                day = today - timedelta(days=offset)
+                found: list[Series] = []
+                for room in rooms:
+                    infos = self._infos_for(room, catalog, day)
+                    series = await self.history.cached_series(room, infos, day) if infos else None
+                    found.extend(series or [])
+                days.append(found)
+            profile = await asyncio.to_thread(week_profile, days)
+        except Exception:
+            self.logger.debug("No week for the image of %s", area_id, exc_info=True)
+            profile = None
+        return profile or seeded_profile(area_id)
 
     async def _cover(self, area_id: str, day: date, style_key: str) -> bytes | None:
         """
@@ -1414,7 +1440,7 @@ class EntropyFMProvider(MusicProvider):
                 for area_id, snap in missing.items()
             },
         }
-        return Catalog(areas, entities, catalog.sun, catalog.changed, catalog.icons)
+        return Catalog(areas, entities, catalog.sun, catalog.changed)
 
     async def _pinned_house_days(self) -> set[date]:
         """Return the days that every room of the whole house has pinned."""

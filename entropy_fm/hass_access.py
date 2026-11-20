@@ -32,8 +32,6 @@ class Snapshot(NamedTuple):
     entity_areas: dict[str, str | None]
     states: list[dict[str, Any]]
     meta: dict[str, EntityMeta]
-    # area id to the icon set on the area in Home Assistant, such as "mdi:sofa"; only areas with one
-    icons: dict[str, str] = {}  # noqa: RUF012 - a NamedTuple default, never changed
 
 
 class HassAccess:
@@ -85,21 +83,6 @@ class HassAccess:
         return {
             str(area["area_id"]): str(area["name"])
             for area in await self.client.get_area_registry()
-        }
-
-    async def area_icons(self) -> dict[str, str]:
-        """Return the icon of each area that has one (`icon` in config/area_registry/list), by area id."""
-        try:
-            if self.plugin is not None:
-                entries = list((await self.plugin.get_area_registry()).values())
-            else:
-                entries = list(await self.client.get_area_registry())
-        except Exception:  # noqa: BLE001 - an icon is a hint for a picture, whatever goes wrong
-            return {}
-        return {
-            str(area["area_id"]): str(area["icon"])
-            for area in cast("list[dict[str, Any]]", entries)
-            if area.get("icon") and area.get("area_id")
         }
 
     async def entity_areas(self) -> dict[str, str | None]:
@@ -216,7 +199,6 @@ class HassAccess:
             entity_areas,
             await self.states(ids),
             await self.entity_meta(ids),
-            await self.area_icons(),
         )
 
     async def time_zone(self) -> tzinfo:
