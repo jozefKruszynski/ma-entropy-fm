@@ -22,7 +22,13 @@ from entropy_fm.const import (
     CONF_STYLES,
     WHOLE_HOUSE_ID,
 )
-from entropy_fm.library import Catalog, TrackRef, build_catalog, quiet_areas
+from entropy_fm.library import (
+    Catalog,
+    TrackRef,
+    build_catalog,
+    parse_track_id,
+    quiet_areas,
+)
 from entropy_fm.plan import condensed_seconds
 from entropy_fm.timeline import EntityInfo, VoiceKind
 from music_assistant.mass import MusicAssistant
@@ -350,7 +356,7 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
     )
     past = (await provider.get_artist_albums("kitchen"))[-1]
     tracks = await provider.get_album_tracks(past.item_id)
-    listed = {t.item_id.rsplit("|", 1)[1]: t.duration for t in tracks}
+    listed = {parse_track_id(t.item_id).style: t.duration for t in tracks}
     assert listed == {
         "ambient": 420,
         "berlin_school": 420,
@@ -360,7 +366,7 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
         "glitch": 300,
     }
     for style in ("lofi", "ambient"):
-        item_id = f"{past.item_id}|_scape|{style}"
+        item_id = f"{past.item_id}|_scape|{style}|condensed"
         details = await provider.get_stream_details(item_id, MediaType.TRACK)
         assert details.duration == condensed_seconds(style)
         assert (await provider.get_track(item_id)).duration == details.duration
@@ -557,7 +563,8 @@ async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_li
     assert await provider.sync_if_rooms_changed()
     assert not await provider.sync_if_rooms_changed()
     full = [t.duration async for t in provider.get_library_tracks()]
-    assert set(full) == {900}
+    assert full
+    assert all(600 <= seconds <= 1320 for seconds in full)
 
     _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
     assert await provider.sync_if_rooms_changed()
@@ -569,20 +576,20 @@ async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_li
     ]
     listed = await provider.get_album_tracks(albums[2].item_id)
     for track in listed:
-        style = track.item_id.rsplit("|", 1)[1]
+        style = parse_track_id(track.item_id).style
         assert track.duration == condensed_seconds(style)
         assert (await provider.get_track(track.item_id)).duration == track.duration
     library = [t async for t in provider.get_library_tracks()]
     assert library
     assert {t.duration for t in library} == {condensed_seconds(s) for s in ("ambient", "lofi")}
-    assert all(t.duration == condensed_seconds(t.item_id.rsplit("|", 1)[1]) for t in library)
+    assert all(t.duration == condensed_seconds(parse_track_id(t.item_id).style) for t in library)
     assert {t.duration for t in library} != set(full)
 
     # back to full: asked again
     _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
     assert await provider.sync_if_rooms_changed()
     assert len(asked) == 3
-    assert {t.duration async for t in provider.get_library_tracks()} == {900}
+    assert sorted([t.duration async for t in provider.get_library_tracks()]) == sorted(full)
 
 
 async def test_a_sync_marker_of_an_earlier_version_asks_for_one_more_sync(

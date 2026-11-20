@@ -14,7 +14,7 @@ from music_assistant_models.errors import MediaNotFoundError
 from music_assistant_models.media_items import Album
 
 from entropy_fm import EntropyFMProvider
-from entropy_fm.const import MIN_SCAPE_SECONDS_OF_DAY, NOMINAL_SCAPE_SECONDS
+from entropy_fm.const import MIN_SCAPE_SECONDS_OF_DAY
 from entropy_fm.styles import STYLES
 from music_assistant.mass import MusicAssistant
 from music_assistant.models.music_provider import MusicProvider
@@ -224,15 +224,19 @@ async def test_whole_house_album_is_the_house_in_every_style(
     assert {track.artists[0].name for track in tracks} == {"Whole House"}
 
 
-async def test_a_track_is_listed_with_a_nominal_length(
+async def test_a_full_track_is_listed_with_the_length_it_plays(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """A soundscape is listed with a nominal length; its real one (10 to 22 minutes) is known when it plays."""
+    """A past day is listed with its real length (10 to 22 minutes), the one the stream tells."""
     provider, _ = await _setup(mass, fake_hass)
     albums = await _all_albums(provider)
     past = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
     tracks = await provider.get_album_tracks(past.item_id)
-    assert {track.duration for track in tracks} == {NOMINAL_SCAPE_SECONDS}
+    assert len(tracks) == len(STYLES)
+    for track in tracks:
+        details = await provider.get_stream_details(track.item_id, MediaType.TRACK)
+        assert 600 <= track.duration <= 1320
+        assert track.duration == details.duration
 
 
 async def test_get_track_and_unknown_items(mass: MusicAssistant, fake_hass: MagicMock) -> None:
@@ -439,8 +443,7 @@ async def test_a_soundscape_is_as_long_as_its_day_and_streams_the_same_each_time
         b = np.frombuffer(second, dtype="<i2").astype(np.int32)
         assert np.abs(a - b).max() <= 2, (style, (a != b).mean())
         assert any(first)
-    assert (
-        await provider.get_track(f"{past.item_id}|_scape|minimal")
-    ).duration == NOMINAL_SCAPE_SECONDS
+    details = await provider.get_stream_details(f"{past.item_id}|_scape|minimal", MediaType.TRACK)
+    assert (await provider.get_track(f"{past.item_id}|_scape|minimal")).duration == details.duration
     # a soundscape of today needs three hours of the day; before that it is not found
     assert MIN_SCAPE_SECONDS_OF_DAY == 3 * 3600

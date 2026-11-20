@@ -119,6 +119,7 @@ from .const import (
     MAX_DAYS,
     MAX_ENERGY_OFFSET,
     MIN_SCAPE_SECONDS_OF_DAY,
+    NOMINAL_SCAPE_SECONDS,
     OFFERED_FILE,
     PLAYABLE_COMPRESSION,
     SCAPE_ID,
@@ -147,6 +148,7 @@ from .library import (
     album_id,
     album_name,
     build_catalog,
+    canonical_track_id,
     covered_seconds,
     day_bounds,
     parse_album_id,
@@ -168,7 +170,7 @@ from .pins import (
     save_membership,
     write_atomic,
 )
-from .plan import CONDENSED, DEFAULT_LENGTH, FULL, LENGTHS, nominal_seconds
+from .plan import CONDENSED, DEFAULT_LENGTH, FULL, LENGTHS, condensed_seconds
 from .quality import (
     AUTO,
     DEFAULT_QUALITY,
@@ -224,6 +226,8 @@ ARTIST_KEY = "@artist|"
 TRACK_TARGETS = frozenset({SCAPE_ID})
 # how many soundscapes are kept between a request for their length and the stream
 MAX_KEPT_SCAPES = 16
+# how many lengths of full pieces are kept for the listings (a few integers each)
+MAX_KEPT_SECONDS = 1024
 # how long the benchmark of the Auto quality stays valid, in seconds
 AUTO_EXPIRATION = 30 * 86400
 CACHE_CATEGORY_AUTO = 6
@@ -608,6 +612,8 @@ class EntropyFMProvider(MusicProvider):
         )
         # what a day was like, for its titles: kept for the hour (a past day for good)
         self._facts_kept: OrderedDict[tuple[Any, ...], DayFacts] = OrderedDict()
+        # the length of the full piece of a day, for the listings: kept for ten minutes of the day (a past day for good)
+        self._seconds_kept: OrderedDict[tuple[Any, ...], int] = OrderedDict()
         self.history = HistoryStore(
             self.hass, self.mass.cache, self.instance_id, self.logger, self._pinned_scope
         )
@@ -1266,6 +1272,18 @@ class EntropyFMProvider(MusicProvider):
             favorite=True if item_id in self.membership.albums else None,
         )
 
+    def _item_id(self, ref: TrackRef) -> str:
+        """
+        Return the id a track is listed under: the old id for a full piece, a longer one for a condensed piece.
+
+        Music Assistant never rewrites the length of an item it has stored, so the length is in the id (and in the
+        version of the track, see `_track`) and a change of *Piece length* lists other items. Either id plays the length
+        that is set.
+        """
+        return track_id(
+            ref.area_id, ref.day, ref.target, ref.style, condensed=self._length_mode == CONDENSED
+        )
+
     def _track(  # noqa: PLR0913, PLR0917
         self,
         ref: TrackRef,
@@ -1278,11 +1296,15 @@ class EntropyFMProvider(MusicProvider):
         facts: DayFacts | None = None,
     ) -> Track:
         """Return one track of an album, in the style of the reference."""
-        item_id = track_id(ref.area_id, ref.day, ref.target, ref.style)
+        item_id = self._item_id(ref)
         style = get_style(ref.style)
         # with a single style offered there is nothing to tell apart, so no version is shown
         if version is None:
             version = style.version if len(self._offered_styles) > 1 else ""
+        # the version tells the two lengths apart for Music Assistant, which takes tracks of one album with the same title,
+        # artist, version and number for one item (and then keeps its stored length)
+        if self._length_mode == CONDENSED:
+            version = f"{version}, Condensed" if version else "Condensed"
         return Track(
             item_id=item_id,
             provider=self.instance_id,
@@ -1299,16 +1321,17 @@ class EntropyFMProvider(MusicProvider):
                 images=self._images(ref.area_id, ref.day, ref.style or style.key),
             ),
             provider_mappings={self._mapping(item_id)},
-            favorite=True if item_id in self.membership.tracks else None,
+            favorite=True if canonical_track_id(item_id) in self.membership.tracks else None,
         )
 
-    def _day_tracks(
+    def _day_tracks(  # noqa: PLR0913, PLR0917
         self,
         area_id: str,
         name: str,
         day: date,
         duration: int,
         facts: DayFacts | None,
+        full_seconds: int = NOMINAL_SCAPE_SECONDS,
     ) -> list[Track]:
         """
         Return the tracks of an album: the soundscape of the day in each style that is offered.
@@ -1321,6 +1344,7 @@ class EntropyFMProvider(MusicProvider):
         :param day: The day.
         :param duration: The seconds of the day that have happened, in tracks of the shortest compression.
         :param facts: What the day was like, None when it could not be read.
+        :param full_seconds: The length of the full piece of the day; a condensed piece has its own, which is fixed.
         """
         lang = self._language
         room = name if area_id != WHOLE_HOUSE_ID else ("Huis" if lang == "nl" else "House")
@@ -1333,7 +1357,7 @@ class EntropyFMProvider(MusicProvider):
                 name,
                 make_title(facts, style.key, seed, room, lang),
                 number,
-                nominal_seconds(style.key, self._length_mode),
+                condensed_seconds(style.key) if self._length_mode == CONDENSED else full_seconds,
                 track_description(style.key, facts, lang),
                 facts=facts,
             )
@@ -1341,13 +1365,14 @@ class EntropyFMProvider(MusicProvider):
             if scapes
         ]
 
-    def _tracks_of(
+    def _tracks_of(  # noqa: PLR0913, PLR0917
         self,
         catalog: Catalog,
         area_id: str,
         day: date,
         duration: int,
         facts: DayFacts | None = None,
+        full_seconds: int = NOMINAL_SCAPE_SECONDS,
     ) -> list[Track]:
         """
         Return the tracks of any album: its soundscape in each style.
@@ -1357,10 +1382,55 @@ class EntropyFMProvider(MusicProvider):
         :param day: The day.
         :param duration: The seconds of the day that have happened at the shortest compression.
         :param facts: What the day was like, None when it could not be read.
+        :param full_seconds: The length of the full piece of the day.
         """
         if area_id == WHOLE_HOUSE_ID:
-            return self._day_tracks(area_id, WHOLE_HOUSE_NAME, day, duration, facts)
-        return self._day_tracks(area_id, catalog.areas[area_id], day, duration, facts)
+            return self._day_tracks(area_id, WHOLE_HOUSE_NAME, day, duration, facts, full_seconds)
+        return self._day_tracks(area_id, catalog.areas[area_id], day, duration, facts, full_seconds)
+
+    async def _full_seconds(self, area_id: str, day: date, *, cached_only: bool = False) -> int:
+        """
+        Return the length of the full piece of a day, as the stream will say it; the nominal one when it is unknown.
+
+        The length is set by the analysis of the day (how busy it was, how many unusual moments), the same for every
+        style, so it is read from the same soundscape reading that the stream uses: the history of the day and of
+        the days it is measured against, which the titles read too, and the analysis of it. Nothing is rendered and
+        no score is written. A past day is read once and kept; today is read again every ten minutes of the day, so
+        its listed length is that of the day so far and the stream may tell a longer one later. A day that cannot be
+        read is listed with the nominal length.
+
+        :param area_id: The room, or the whole house.
+        :param day: The day.
+        :param cached_only: Do not read the day, only use a reading that is kept (for searching).
+        """
+        if self._length_mode != FULL:
+            return NOMINAL_SCAPE_SECONDS
+        try:
+            tz, now = await self._timezone(), await self._now()
+            covered = covered_seconds(day, tz, now)
+            rooms = (
+                tuple(self._house_rooms(await self._catalog_all()))
+                if area_id == WHOLE_HOUSE_ID
+                else ()
+            )
+            key = (area_id, day, int(covered // 600) if covered < 86400 else -1, rooms)
+            found = self._seconds_kept.get(key)
+            if found is not None:
+                self._seconds_kept.move_to_end(key)
+                return found
+            if cached_only or covered < MIN_SCAPE_SECONDS_OF_DAY:
+                return NOMINAL_SCAPE_SECONDS
+            ref = TrackRef(area_id, day, SCAPE_ID, self._default_style.key)
+            found = int((await self._scape_of(ref)).duration)
+        except Exception:
+            self.logger.debug("Could not read the length of %s on %s", area_id, day, exc_info=True)
+            return NOMINAL_SCAPE_SECONDS
+        if found < 1:
+            return NOMINAL_SCAPE_SECONDS
+        self._seconds_kept[key] = found
+        while len(self._seconds_kept) > MAX_KEPT_SECONDS:
+            self._seconds_kept.popitem(last=False)
+        return found
 
     async def _facts(
         self, area_id: str, day: date, *, cached_only: bool = False
@@ -1531,9 +1601,10 @@ class EntropyFMProvider(MusicProvider):
                 for day in await self._browse_days(area_id):
                     duration = track_seconds(day, tz, now, self._compression)
                     facts = await self._facts(area_id, day, cached_only=True)
+                    full = await self._full_seconds(area_id, day, cached_only=True)
                     found.extend(
                         track
-                        for track in self._tracks_of(catalog, area_id, day, duration, facts)
+                        for track in self._tracks_of(catalog, area_id, day, duration, facts, full)
                         if query
                         in f"{track.name} {track.album.name if track.album else ''} {track.version}".lower()
                     )
@@ -1581,7 +1652,8 @@ class EntropyFMProvider(MusicProvider):
             for day in await self._library_days_of(area_id):
                 duration = track_seconds(day, tz, now, self._compression)
                 facts = await self._facts(area_id, day)
-                for track in self._tracks_of(catalog, area_id, day, duration, facts):
+                full = await self._full_seconds(area_id, day)
+                for track in self._tracks_of(catalog, area_id, day, duration, facts, full):
                     yield track
 
     async def get_artist(self, prov_artist_id: str) -> Artist:
@@ -1619,7 +1691,14 @@ class EntropyFMProvider(MusicProvider):
         area_id, day, _ = await self._check_album(prov_album_id)
         catalog = await self._catalog_all()
         duration = track_seconds(day, await self._timezone(), await self._now(), self._compression)
-        return self._tracks_of(catalog, area_id, day, duration, await self._facts(area_id, day))
+        return self._tracks_of(
+            catalog,
+            area_id,
+            day,
+            duration,
+            await self._facts(area_id, day),
+            await self._full_seconds(area_id, day),
+        )
 
     async def get_track(self, prov_track_id: str) -> Track:
         """Return the track with the given id."""
@@ -1628,9 +1707,10 @@ class EntropyFMProvider(MusicProvider):
         duration = track_seconds(
             ref.day, await self._timezone(), await self._now(), self._compression
         )
-        wanted = track_id(ref.area_id, ref.day, ref.target, ref.style)
+        wanted = self._item_id(ref)
         facts = await self._facts(ref.area_id, ref.day)
-        for track in self._tracks_of(catalog, ref.area_id, ref.day, duration, facts):
+        full = await self._full_seconds(ref.area_id, ref.day)
+        for track in self._tracks_of(catalog, ref.area_id, ref.day, duration, facts, full):
             if track.item_id == wanted:
                 return track
         raise MediaNotFoundError(f"Track {prov_track_id} not found")
@@ -1757,6 +1837,8 @@ class EntropyFMProvider(MusicProvider):
                     return
                 area_id, day = ref.area_id, ref.day
                 kept = self.membership.tracks
+                # a heart is on the day and the style, not on the length: both ids of a track are one heart
+                prov_item_id = canonical_track_id(prov_item_id)
             else:
                 return
         except ValueError:

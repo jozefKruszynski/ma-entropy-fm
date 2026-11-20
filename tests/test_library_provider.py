@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import shutil
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -15,6 +15,7 @@ from music_assistant_models.media_items import Album, Artist, Track
 
 from entropy_fm import EntropyFMProvider
 from entropy_fm.const import CONF_QUALITY, STORAGE_FOLDER
+from entropy_fm.library import parse_track_id
 from entropy_fm.pins import load_membership
 from music_assistant.mass import MusicAssistant
 from tests.test_provider import (  # noqa: F401
@@ -615,3 +616,154 @@ async def test_voice_tracks_of_an_earlier_version_are_dropped_and_ensemble_pins_
     assert not any("sensor.fridge_power" in item for item in listed)
     await provider.set_favorite(stale_id, MediaType.TRACK, favorite=True)
     assert stale_id not in provider.membership.tracks
+
+
+# ---------------------------------------------------------------- the length is in the id
+
+
+async def test_a_condensed_id_differs_from_the_full_one_and_both_parse() -> None:
+    """A full piece keeps the id it always had; a condensed one adds a last part; both name the same track."""
+    from entropy_fm.library import canonical_track_id, track_id  # noqa: PLC0415
+
+    day = date(2026, 11, 10)
+    full = track_id("kitchen", day, "_scape", "lofi")
+    short = track_id("kitchen", day, "_scape", "lofi", condensed=True)
+    assert full == "kitchen|2026-11-10|_scape|lofi"
+    assert short == "kitchen|2026-11-10|_scape|lofi|condensed"
+    assert parse_track_id(full) == parse_track_id(short)
+    assert canonical_track_id(short) == full == canonical_track_id(full)
+    # the id before there were styles still is the default style
+    assert parse_track_id("kitchen|2026-11-10|_scape").style == "ambient"
+    with pytest.raises(ValueError):  # noqa: PT011
+        parse_track_id(short + "|more")
+
+
+async def test_switching_the_length_lists_other_ids_and_old_ids_still_play_the_length_set(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Condensed lists new ids; the ids of the full pieces (queues, links) resolve and play the condensed piece."""
+    from entropy_fm.plan import condensed_seconds  # noqa: PLC0415
+
+    provider, _ = await _setup(mass, fake_hass)
+    full = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
+    _quiet(provider, monkeypatch, piece_length="condensed", **{CONF_QUALITY: "light"})
+    short = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
+    assert len(short) == len(full)
+    assert not set(short) & set(full)
+    assert all(i.endswith("|condensed") for i in short)
+    today = (await provider._now()).date()  # noqa: SLF001
+    old = next(
+        i
+        for i in full
+        if i.startswith("kitchen|") and i.endswith("|lofi") and parse_track_id(i).day < today
+    )
+    details = await provider.get_stream_details(old, MediaType.TRACK)
+    assert details.duration == condensed_seconds("lofi")
+    # the track of an old id is listed under the id of the length that is set
+    assert (await provider.get_track(old)).item_id == old + "|condensed"
+    assert (await provider.get_track(old + "|condensed")).duration == condensed_seconds("lofi")
+    # and the other way round: a link to a condensed track still plays after going back to full
+    _quiet(provider, monkeypatch, piece_length="full")
+    back = await provider.get_stream_details(old + "|condensed", MediaType.TRACK)
+    assert back.duration == full[old].duration
+    # the cache of rendered audio does not tell the ids apart, only the length that is set
+    ref = parse_track_id(old)
+    key = provider._audio_key(ref, today)  # noqa: SLF001
+    _quiet(provider, monkeypatch, piece_length="condensed")
+    assert provider._audio_key(ref, today) != key  # noqa: SLF001
+
+
+async def test_hearts_on_tracks_survive_a_change_of_the_length(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heart is on the day and the style: the track of the other length shows it, and either id can take it off."""
+    provider, _ = await _setup(mass, fake_hass)
+    album = await _album(provider, "kitchen", 1)
+    day = date.fromisoformat(album.item_id.split("|")[1])
+    full_id = album.item_id + "|_scape|minimal"
+    await _heart(provider, await provider.get_track(full_id))
+    assert provider.pins.has("kitchen", day)
+
+    _quiet(provider, monkeypatch, piece_length="condensed")
+    short_id = full_id + "|condensed"
+    tracks = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
+    assert [i for i, t in tracks.items() if t.favorite] == [short_id]
+    assert (await provider.get_track(short_id)).favorite is True
+    # hearting the condensed track is the same heart, and un-hearting it releases the day
+    await _heart(provider, short_id, MediaType.TRACK)
+    assert provider.membership.tracks == {full_id}
+    await _unheart(provider, short_id, MediaType.TRACK)
+    assert not provider.membership.tracks
+    assert not provider.pins.has("kitchen", day)
+    assert all(t.favorite is None for t in await _collect(provider.get_library_tracks()))
+
+    # a heart given to a condensed track shows on the full one after going back
+    await _heart(provider, short_id, MediaType.TRACK)
+    _quiet(provider, monkeypatch, piece_length="full")
+    assert (await provider.get_track(full_id)).favorite is True
+
+
+async def test_after_a_switch_and_a_sync_the_library_has_the_condensed_tracks_only(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server stores new items for new ids and drops the old ones: the library tracks have the new lengths."""
+    from entropy_fm.plan import condensed_seconds  # noqa: PLC0415
+    from tests.test_rooms import _sync  # noqa: PLC0415
+
+    provider, _ = await _setup(mass, fake_hass)
+    # the first request writes down the length that the library is listed with
+    assert await provider.sync_if_rooms_changed()
+    await _sync(mass, provider)
+    before = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
+    assert before
+    assert not any(t.duration == condensed_seconds("lofi") for t in before)
+
+    _quiet(provider, monkeypatch, piece_length="condensed")
+    assert await provider.sync_if_rooms_changed()
+    await _sync(mass, provider)
+    after = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
+    assert all(t.version.endswith("Condensed") for t in after)
+    assert not any(t.version.endswith("Condensed") for t in before)
+    assert len(after) == len(before)
+    for track in after:
+        ref = parse_track_id(track.provider_mappings.copy().pop().item_id)
+        assert track.duration == condensed_seconds(ref.style)
+
+
+async def test_full_listings_say_the_length_the_stream_says_for_past_days(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """The library, the album, the track and the stream agree for finished days, in every style."""
+    provider, _ = await _setup(mass, fake_hass)
+    today = (await provider._now()).date()  # noqa: SLF001
+    library = [t for t in await _collect(provider.get_library_tracks()) if _day(t) < today]
+    assert library
+    seen: set[int] = set()
+    for track in library[:: max(len(library) // 12, 1)]:
+        details = await provider.get_stream_details(track.item_id, MediaType.TRACK)
+        assert 600 <= track.duration <= 1320
+        assert track.duration == details.duration
+        assert (await provider.get_track(track.item_id)).duration == details.duration
+        seen.add(track.duration)
+    # the length follows the day: it is not one number
+    assert len({t.duration for t in library}) > 1
+    album = library[0].album
+    assert album is not None
+    listed = {t.item_id: t.duration for t in await provider.get_album_tracks(album.item_id)}
+    assert all(listed[t.item_id] == t.duration for t in library if t.album == album)
+    # a day that cannot be read is listed with the nominal length
+    from entropy_fm.const import NOMINAL_SCAPE_SECONDS  # noqa: PLC0415
+
+    async def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("down")
+
+    provider._scapes.clear()  # noqa: SLF001
+    provider._seconds_kept.clear()  # noqa: SLF001
+    provider._scape_of = broken  # type: ignore[method-assign]  # noqa: SLF001
+    unread = await provider._full_seconds("kitchen", today - timedelta(days=2))  # noqa: SLF001
+    assert unread == NOMINAL_SCAPE_SECONDS
+
+
+def _day(track: Track) -> date:
+    """Return the day of a track."""
+    return date.fromisoformat(track.item_id.split("|")[1])

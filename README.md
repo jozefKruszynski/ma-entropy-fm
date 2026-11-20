@@ -120,7 +120,7 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Minimal, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play. |
+| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Minimal, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play (a full piece is read from its day when it is listed). |
 | Key | D | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | The root note that the pitches are tuned to; the key of a day walks away from it and back. |
 | Scale | Dorian | Dorian, Natural minor (Aeolian), Mixolydian, Lydian, Major (Ionian), Minor pentatonic, Major pentatonic | The scale of the pieces. A style that does not have the scale uses its own: Berlin School and Minimal are in a minor mode, Ritual keeps a Japanese pentatonic, Cinematic Glitch is in aeolian or phrygian. |
 | Activity offset | 0 | -50 to 50 | Points added to how lively the house seems. The activity brings layers in and out and sets how dense and how fast they are; it never writes notes. |
@@ -257,6 +257,13 @@ Home Assistant for them.
   (a new title, a changed *Piece length*, a redrawn cover). Use *Refresh metadata* on the item, or remove it and add it
   again, to see the new data. New items are added from a library sync, which Entropy FM asks for when the rooms that
   are shown or the piece length change.
+- **Tracks stored before the length fix keep their old length until they are synced again.** A track used to be listed
+  with a nominal 15 minutes whatever its real length, and Music Assistant never rewrites a stored length. A track is now
+  listed with the length it plays (a full piece with the real length of its day, a condensed piece with its fixed one),
+  and the length is part of its id and its version ("Ambient, Condensed"), so a changed *Piece length* lists new items
+  and the next sync replaces the old ones; hearts follow, because they are kept for the day and the style. Items whose
+  ids do not change (full pieces stored before the upgrade) keep the old length until you use *Refresh metadata* on them.
+  The soundscape of today is listed with the length of the day so far and can play longer later.
 - **The frontend shows no track descriptions**, and labels the description of an album "Review".
 - **AI covers are hidden** for the reason above: Music Assistant caches the first cover it receives, which is the
   drawn one, so an AI cover would never show. A change in core Music Assistant is needed first.
