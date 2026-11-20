@@ -16,11 +16,14 @@ imported, so the same house can be played by an older engine to compare.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 import demo_render
 import numpy as np
 from demo_render import DAY, hours, intervals_to_events
+
+if TYPE_CHECKING:
+    from entropy_fm.timeline import Series
 
 FIRST_DAY = date(2026, 11, 4)
 DAYS = 14
@@ -214,22 +217,21 @@ def _jitter(rng: np.random.Generator, span: float = 900.0) -> float:
     return float(rng.uniform(-span, span))
 
 
-def build_day(engine: ModuleType, index: int) -> dict[str, list[object]]:
+def build_day(index: int) -> dict[str, list[Series]]:
     """
     Return the series of the five rooms of the sparse house and the sun on one day of the fortnight.
 
-    :param engine: The imported `timeline` module of the engine under test; entities are classified with
-        `entropy_fm.roles` of the same package.
     :param index: The day, counted from the 4th of November.
     """
     from entropy_fm import roles  # noqa: PLC0415
+    from entropy_fm.timeline import EntityInfo, VoiceKind, build_series  # noqa: PLC0415
 
     rng = np.random.default_rng(7000 + index)
     weekday = (FIRST_DAY + timedelta(days=index)).weekday()
     weekend = weekday >= 5
     workday = not weekend
     late = 5400.0 if weekend else 0.0
-    areas: dict[str, list[object]] = {
+    areas: dict[str, list[Series]] = {
         "kitchen": [],
         "living": [],
         "bedroom": [],
@@ -249,7 +251,7 @@ def build_day(engine: ModuleType, index: int) -> dict[str, list[object]]:
         role = roles.classify(entity_id, name, device_class, unit, state)
         if role is None:
             return
-        info = engine.EntityInfo(
+        info = EntityInfo(
             entity_id,
             name,
             area,
@@ -258,7 +260,7 @@ def build_day(engine: ModuleType, index: int) -> dict[str, list[object]]:
             role.description,
             (device_class or "").lower(),
         )
-        areas[area].append(engine.build_series(info, data[0], data[1]))
+        areas[area].append(build_series(info, data[0], data[1]))
 
     def lights(area: str, entity_id: str, name: str, periods: list[tuple[float, float]]) -> None:
         add(area, entity_id, name, None, None, intervals_to_events(periods), "on")
@@ -393,9 +395,9 @@ def build_day(engine: ModuleType, index: int) -> dict[str, list[object]]:
         wash = demo_render.shifted(wash, rng.uniform(-3600.0, 7200.0))
     add("kitchen", "sensor.washing_machine_power", "Washing machine", "power", "W", wash)
 
-    sun = engine.EntityInfo("sensor.sun_solar_elevation", "Sun", None, engine.VoiceKind.SUN)
+    sun = EntityInfo("sensor.sun_solar_elevation", "Sun", None, VoiceKind.SUN)
     sun_data = demo_render.sun()
-    return {**areas, "sun": [engine.build_series(sun, sun_data[0], sun_data[1])]}
+    return {**areas, "sun": [build_series(sun, sun_data[0], sun_data[1])]}
 
 
 __all__ = ["DAYS", "FIRST_DAY", "build_day"]

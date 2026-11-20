@@ -1,5 +1,7 @@
 """Tests of Cinematic Glitch: the day arc, the drums, the edits on the grid, the brakes, the voices, the tiers."""
 
+from typing import Any
+
 import numpy as np
 
 from entropy_fm import glitch, glitch_drums, glitch_voices
@@ -28,6 +30,7 @@ def _grid(score: Score) -> float:
 def test_the_night_has_no_drums_and_no_growl_and_the_day_has_both() -> None:
     """In the night there are swells, washes and distant booms alone; drums and growl enter with the day."""
     score, plan = demo("glitch")
+    assert score.glitch is not None
     a, b = _arc(plan, "night")
     night = [n for n in score.notes if a <= n.t < b]
     assert night
@@ -82,6 +85,7 @@ def test_the_drums_sit_on_the_grid_of_the_kit() -> None:
 def test_edits_never_overlap_on_a_bus_and_stay_on_the_grid() -> None:
     """Edits of the same layer do not overlap; those of the house start on the grid of the tempo."""
     score, _ = demo("glitch")
+    assert score.glitch is not None
     step = _grid(score)
     edits = score.glitch.edits
     assert edits
@@ -100,6 +104,7 @@ def test_edits_never_overlap_on_a_bus_and_stay_on_the_grid() -> None:
 def test_the_events_of_the_house_are_rate_limited() -> None:
     """The edits that the house brings are at least two bars apart (a bar is four beats)."""
     score, _ = demo("glitch")
+    assert score.glitch is not None
     bar = 4.0 * 60.0 / score.tempo
     times = sorted(e.t for e in score.glitch.edits if e.why == "event")
     assert times
@@ -114,6 +119,7 @@ def test_the_brakes_are_short_and_hard_and_sometimes_doubled() -> None:
     brakes, doubles, tapes, at_bar_end = 0, 0, 0, 0
     for index in range(2, 14):
         score, _ = the_demo().score(index, ("kitchen",), "glitch", STANDARD)
+        assert score.glitch is not None
         bar = 4.0 * 60.0 / score.tempo
         edits = score.glitch.edits
         for edit in edits:
@@ -158,7 +164,7 @@ def test_a_brake_falls_fast_cuts_hard_and_comes_back_on_the_grid() -> None:
 def test_every_edit_kind_keeps_the_length_and_stays_finite() -> None:
     """Each edit changes a buffer in place without changing its length or making it non-finite."""
     rng = np.random.default_rng(3)
-    cases = {
+    cases: dict[str, dict[str, Any]] = {
         "stutter": {"slices": (0.2, 0.2, 0.1, 0.1), "gains": (1, 1, 1, 1)},
         "tape": {"stop": 0.38, "span": 0.5, "wind": 0.0},
         "brake": {"stop": 0.1, "span": 0.25},
@@ -239,6 +245,7 @@ def test_the_calm_parts_have_no_hiss_and_a_quiet_top_end() -> None:
 def test_the_pitch_glides_of_the_day_are_the_tape_stops_and_brakes_only() -> None:
     """A fall or a rise of three semitones inside a second and a half only happens near a tape stop or a brake."""
     score, plan = demo("glitch")
+    assert score.glitch is not None
     audio = window(score, plan, 40)
     from soundscapes import pick_windows  # noqa: PLC0415
 
@@ -255,6 +262,8 @@ def test_the_same_day_is_the_same_score() -> None:
     second, _ = the_demo().score(13, ("kitchen",), "glitch", STANDARD)
     assert first.notes == second.notes
     assert first.glitch == second.glitch
+    assert first.gain_db is not None
+    assert second.gain_db is not None
     assert np.array_equal(first.gain_db, second.gain_db)
 
 

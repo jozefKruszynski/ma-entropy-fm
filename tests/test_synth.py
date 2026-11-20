@@ -1,5 +1,6 @@
 """Tests of the scales, pitches and panning."""
 
+import numpy as np
 import pytest
 
 from entropy_fm.synth import Scale, midi_to_hz, pan_gains, smoothstep
@@ -27,6 +28,6 @@ def test_pan_is_equal_power_and_smoothstep_is_a_ramp() -> None:
     for pan in (-1.0, -0.3, 0.0, 0.8, 1.0):
         left, right = pan_gains(pan)
         assert left**2 + right**2 == pytest.approx(1.0)
-    assert float(smoothstep(0.0)) == 0.0
-    assert float(smoothstep(1.0)) == 1.0
-    assert 0.0 < float(smoothstep(0.5)) < 1.0
+    assert float(smoothstep(np.array(0.0))) == 0.0
+    assert float(smoothstep(np.array(1.0))) == 1.0
+    assert 0.0 < float(smoothstep(np.array(0.5))) < 1.0

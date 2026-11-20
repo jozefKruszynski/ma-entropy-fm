@@ -3,6 +3,7 @@
 import shutil
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 import pytest
@@ -45,7 +46,7 @@ def test_the_limiter_joins_blocks_without_a_seam() -> None:
     assert np.allclose(whole, split, atol=1e-5)
 
 
-def _loudness_module():  # noqa: ANN202
+def _loudness_module() -> ModuleType:
     sys.path.insert(0, str(SCRIPTS))
     import loudness_report  # noqa: PLC0415
 

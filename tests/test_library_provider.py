@@ -15,7 +15,7 @@ from music_assistant_models.media_items import Album, Artist, Track
 
 from entropy_fm import EntropyFMProvider
 from entropy_fm.const import CONF_QUALITY, STORAGE_FOLDER
-from entropy_fm.library import parse_track_id
+from entropy_fm.library import Catalog, parse_track_id
 from entropy_fm.pins import load_membership
 from music_assistant.mass import MusicAssistant
 from tests.test_provider import (  # noqa: F401
@@ -87,11 +87,11 @@ async def test_the_features_hearts_but_no_library_edit(
 
 def _clock(provider: EntropyFMProvider, monkeypatch: pytest.MonkeyPatch, shift_days: int) -> None:
     """Move the clock of the provider some days on, as midnights go by."""
-    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+    from datetime import UTC, datetime, timedelta, tzinfo  # noqa: PLC0415
 
     real = provider._days_and_catalog  # noqa: SLF001
 
-    async def shifted() -> tuple:
+    async def shifted() -> tuple[list[date], Catalog, tzinfo, datetime]:
         days, catalog, tz, now = await real()
         later = now + timedelta(days=shift_days)
         return days, catalog, tz, later
@@ -316,7 +316,8 @@ async def test_hearts_of_an_earlier_library_survive_and_the_removal_list_is_drop
     provider.membership = load_membership(provider.storage_root)
     assert provider.membership.legacy_removed
     await provider._migrate_library_model()  # noqa: SLF001
-    assert not provider.membership.legacy_removed
+    migrated = provider.membership
+    assert not migrated.legacy_removed
     assert "removed" not in json.loads(path.read_text())
     stored = load_membership(provider.storage_root)
     assert not stored.legacy_removed
@@ -393,7 +394,7 @@ async def test_keep_every_day_of_these_rooms_is_a_setting(
         if entry.key == "keep_rooms"
         for o in entry.options or []
     ]
-    assert sorted(options) == ["kitchen", "living_room"]
+    assert sorted(options, key=str) == ["kitchen", "living_room"]
     browsable = await provider.get_artist_albums("kitchen")
     _quiet(provider, monkeypatch, keep_rooms=["kitchen"])
     await provider._pin_followed()  # noqa: SLF001

@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 import numpy as np
 
@@ -246,28 +247,42 @@ def make_loop(
     return body, a, b
 
 
-def zones_with_layers(items: list[dict[str, object]]) -> list[dict[str, object]]:
+class Zone(TypedDict):
+    """One sample of an instrument: the keys and velocities it covers, and its measured root."""
+
+    file: str
+    root: float
+    vlo: int
+    vhi: int
+    lo: NotRequired[int]
+    hi: NotRequired[int]
+    name: NotRequired[str]
+    loop_start: NotRequired[float]
+    loop_end: NotRequired[float]
+
+
+def zones_with_layers(items: list[Zone]) -> list[Zone]:
     """Give every zone the keys it covers: from half way to its lower neighbour to half way to the upper."""
-    by_layer: dict[tuple[int, int], list[dict[str, object]]] = {}
+    by_layer: dict[tuple[int, int], list[Zone]] = {}
     for item in items:
-        by_layer.setdefault((int(item["vlo"]), int(item["vhi"])), []).append(item)  # type: ignore[call-overload]
+        by_layer.setdefault((int(item["vlo"]), int(item["vhi"])), []).append(item)
     for group in by_layer.values():
-        group.sort(key=lambda z: float(z["root"]))  # type: ignore[arg-type]
+        group.sort(key=lambda z: float(z["root"]))
         for index, zone in enumerate(group):
-            root = float(zone["root"])  # type: ignore[arg-type]
-            zone["lo"] = 0 if index == 0 else int((float(group[index - 1]["root"]) + root) // 2) + 1  # type: ignore[arg-type]
+            root = float(zone["root"])
+            zone["lo"] = 0 if index == 0 else int((float(group[index - 1]["root"]) + root) // 2) + 1
             zone["hi"] = (
                 127
                 if index == len(group) - 1
                 else int((root + float(group[index + 1]["root"])) // 2)
-            )  # type: ignore[arg-type]
+            )
     return items
 
 
 def felt_piano(vsco: Path) -> dict[str, object]:
     """The upright piano of VSCO 2 CE at two velocities, C and G of every octave: a soft, felted piano."""  # noqa: D401
     folder = vsco / "Keys" / "Upright Nr1"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     for layer, (vlo, vhi) in {"pp": (1, 70), "mf": (71, 127)}.items():
         for octave in range(1, 7):
             for pc in ("C", "G"):
@@ -289,7 +304,7 @@ def felt_piano(vsco: Path) -> dict[str, object]:
 
 def strings(vsco: Path) -> dict[str, object]:
     """The violin and cello sections of VSCO 2 CE (sustain, vibrato), each with a seamless loop."""  # noqa: D401
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     sources = (
         ("violins", vsco / "Strings" / "Violin Section" / "susVib", "VlnEns_susVib_{n}_v1.wav"),
         ("cellos", vsco / "Strings" / "Cello Section" / "susvib", "susvib_{n}_v1_1.wav"),
@@ -331,9 +346,9 @@ def strings(vsco: Path) -> dict[str, object]:
     }
 
 
-def zones_with_layers_by_name(items: list[dict[str, object]]) -> list[dict[str, object]]:
+def zones_with_layers_by_name(items: list[Zone]) -> list[Zone]:
     """Like `zones_with_layers`, but the zones are mapped separately for each named group."""
-    out: list[dict[str, object]] = []
+    out: list[Zone] = []
     for group in sorted({str(item["name"]) for item in items}):
         out.extend(zones_with_layers([item for item in items if item["name"] == group]))
     return out
@@ -342,7 +357,7 @@ def zones_with_layers_by_name(items: list[dict[str, object]]) -> list[dict[str, 
 def electric_piano(vcsl: Path) -> dict[str, object]:
     """The FM electric piano that the VCSL sampled from a Yamaha TX81Z, three velocities."""  # noqa: D401
     folder = vcsl / "Electrophones" / "TX81Z" / "FM Piano"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     for layer, (vlo, vhi) in {"vl1": (1, 60), "vl2": (61, 100), "vl3": (101, 127)}.items():
         for path in sorted(folder.glob(f"FMPiano_*_{layer}.wav")):
             named = re.search(r"FMPiano_([A-G]#?)(\d)_", path.name)
@@ -366,7 +381,7 @@ def electric_piano(vcsl: Path) -> dict[str, object]:
 def pluck(vcsl: Path) -> dict[str, object]:
     """A strumstick, plucked with the finger: a soft, guitar-like voice."""  # noqa: D401
     folder = vcsl / "Chordophones" / "Composite Chordophones" / "Strumstick" / "Finger"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     for path in sorted(folder.glob("*_vl2_rr1.wav")):
         named = re.search(r"_([A-G]#?)(\d)_vl", path.name)
         assert named
@@ -432,7 +447,7 @@ def slit_drum(vcsl: Path) -> dict[str, object]:
     a gentler spread than the recording's.
     """
     folder = vcsl / "Idiophones" / "Struck Idiophones" / "Slit Drum"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     layers = {"v1": (1, 50, 0.45), "v2": (51, 92, 0.65), "v3": (93, 127, 0.9)}
     for tongue in ("Hi", "Lo"):
         for layer, (vlo, vhi, peak) in layers.items():
@@ -443,7 +458,7 @@ def slit_drum(vcsl: Path) -> dict[str, object]:
             items.append({"file": name, "root": root, "vlo": vlo, "vhi": vhi})
     return {
         "name": "Slit drum, VCSL",
-        "zones": sorted(items, key=lambda i: (i["root"], i["vlo"])),  # type: ignore[arg-type,return-value]
+        "zones": sorted(items, key=lambda i: (i["root"], i["vlo"])),
         "release": 0.25,
         "voices": 6,
     }
@@ -452,7 +467,7 @@ def slit_drum(vcsl: Path) -> dict[str, object]:
 def woodblock(vcsl: Path) -> dict[str, object]:
     """A woodblock of the VCSL (one pitch, about 1.37 kHz), three velocities, trimmed to its short ring."""  # noqa: D401
     folder = vcsl / "Idiophones" / "Struck Idiophones" / "Woodblock"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     layers = {
         "pp": ("wood_click_pp_rr1", 1, 50, 0.45),
         "mp": ("wood_click_mp", 51, 92, 0.65),
@@ -470,7 +485,7 @@ def woodblock(vcsl: Path) -> dict[str, object]:
 def grand_piano(piano: Path) -> dict[str, object]:
     """Splendid Grand Piano (public domain): two velocity layers, a note every three semitones."""
     folder = piano / "Samples"
-    items: list[dict[str, object]] = []
+    items: list[Zone] = []
     for layer, (vlo, vhi) in {"PP": (1, 72), "FF": (73, 127)}.items():
         have = {note_number(p.stem.split(" ", 1)[1]): p for p in folder.glob(f"{layer} *.flac")}
         chosen: list[int] = []

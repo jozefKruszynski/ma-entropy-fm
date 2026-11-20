@@ -5,17 +5,17 @@ import importlib
 import json
 import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from music_assistant_models.config_entries import ConfigActionResult
+from music_assistant_models.config_entries import ConfigActionResult, ConfigEntry
 from music_assistant_models.enums import ConfigEntryType
 from music_assistant_models.errors import ActionUnavailable
 from music_assistant_models.media_items import Album
@@ -39,7 +39,7 @@ from entropy_fm.covers import (
     profile_of,
 )
 from entropy_fm.maart import CoverLook, build_prompt
-from entropy_fm.timeline import EntityInfo, VoiceKind, build_series
+from entropy_fm.timeline import EntityInfo, Series, VoiceKind, build_series
 from music_assistant.mass import MusicAssistant
 from tests.test_library_provider import _quiet
 from tests.test_provider import _setup
@@ -51,7 +51,7 @@ PERSONAL = ("Anna", "Marek", "Jozef", "Karl", "Bilbo", "Sarah", "Wels", "Vienna"
 LOOK = CoverLook(style="music_assistant", custom_prompt="", title_overlay=True)
 
 
-def _day() -> list:
+def _day() -> list[Series]:
     """Return a day full of personal names, ids and numbers."""
     infos = [
         EntityInfo("sensor.annas_bedroom_power", "Anna's Heater", "marek_office", VoiceKind.DRONE),
@@ -186,12 +186,12 @@ def test_the_copy_of_the_upstream_presets_is_used_when_the_server_has_none(
     monkeypatch.setattr(maart, "_UPSTREAM", {})
     real = importlib.import_module
 
-    def refuse(name: str, *args: object) -> object:
+    def refuse(name: str, package: str | None = None) -> ModuleType:
         if name.startswith(maart.UPSTREAM_MODULE):
             raise ImportError(name)
-        return real(name, *args)
+        return real(name, package)
 
-    monkeypatch.setattr(maart.importlib, "import_module", refuse)
+    monkeypatch.setattr(importlib, "import_module", refuse)
     assert maart.upstream() is None
     assert "Music Assistant playlist cover" in build_prompt("K", LOOK, "C ")
     # a server that has the module: its presets and its text win
@@ -213,14 +213,14 @@ def test_the_copy_of_the_upstream_presets_is_used_when_the_server_has_none(
         CUSTOM_LAYOUT=maart.TitleLayout.TOP_LEFT_LARGE,
     )
 
-    def provide(name: str, *args: object) -> object:
+    def provide(name: str, package: str | None = None) -> ModuleType | SimpleNamespace:
         if name == f"{maart.UPSTREAM_MODULE}.ai_constants":
             return fake
         if name.startswith(maart.UPSTREAM_MODULE):
             raise ImportError(name)
-        return real(name, *args)
+        return real(name, package)
 
-    monkeypatch.setattr(maart.importlib, "import_module", provide)
+    monkeypatch.setattr(importlib, "import_module", provide)
     assert build_prompt("K", LOOK, "C ") == "Cover K. C DC UPSTREAM ART Nothing in the x. F"
 
 
@@ -386,7 +386,7 @@ async def test_a_slow_engine_an_answer_that_is_not_an_image_and_the_rate_limit_f
     assert await _make(limited, "x5", None) == DRAWN
 
 
-def _provider_module(provider: object, name: str):  # noqa: ANN202
+def _provider_module(provider: object, name: str) -> ModuleType:
     """Return a module of the provider as the server loaded it."""
     return importlib.import_module(f"{type(provider).__module__}.{name}")
 
@@ -467,7 +467,7 @@ async def test_the_ai_options_are_hidden_without_an_engine_and_the_api_may_be_mi
     _ai_covers_on(provider, monkeypatch)
     api = _provider_module(provider, "imageapi")
 
-    def keys(entries) -> dict:  # noqa: ANN001
+    def keys(entries: Iterable[ConfigEntry]) -> dict[str, ConfigEntry]:
         return {entry.key: entry for entry in entries}
 
     entries = keys(await provider._cover_entries())  # noqa: SLF001
@@ -486,7 +486,7 @@ async def test_the_ai_options_are_hidden_without_an_engine_and_the_api_may_be_mi
     engine.name = "E"
     engine.provider.name = "P"
 
-    async def one(_: MusicAssistant) -> list:
+    async def one(_: MusicAssistant) -> list[MagicMock]:
         return [engine]
 
     monkeypatch.setattr(api, "engines", one)
@@ -528,11 +528,13 @@ async def test_the_engine_gets_the_area_as_title_and_a_context_of_mood_words(
     albums = [
         a for a in await provider.get_artist_albums("kitchen") if a.item_id.startswith("kitchen|")
     ]
-    paths = [next(iter(a.metadata.images)).path for a in albums[:2]]
+    paths = [next(iter(a.metadata.images or [])).path for a in albums[:2]]
     first = await provider.resolve_image(paths[0])
+    assert isinstance(first, bytes)
     assert _picture(first).size == (1024, 1024)
     await provider.covers.wait()
     made = await provider.resolve_image(paths[0])
+    assert isinstance(made, bytes)
     assert made.startswith(b"\xff\xd8")
     assert made != first
     assert len(prompts) == 1
@@ -561,6 +563,7 @@ async def test_the_engine_gets_the_area_as_title_and_a_context_of_mood_words(
     assert len(prompts) == 1
     fail[0] = True
     shown = await provider.resolve_image(paths[1])
+    assert isinstance(shown, bytes)
     await provider.covers.wait()
     assert _picture(shown).size == (1024, 1024)
     assert await provider.resolve_image(paths[1]) == shown

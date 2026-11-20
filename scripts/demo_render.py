@@ -11,15 +11,23 @@ character of the day, the anomalies) and makes the score of its soundscape in a 
     uv run python scripts/soundscapes.py [output folder]    the deliverable files of the soundscapes
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import wave
 from datetime import date, timedelta
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from entropy_fm.baseline import EntityBaseline
+    from entropy_fm.plan import Plan
+    from entropy_fm.quality import Quality
+    from entropy_fm.score import Score
+    from entropy_fm.timeline import Series, VoiceKind
 
 REPOSITORY = Path(__file__).parents[1]
 sys.path.insert(0, str(REPOSITORY))
@@ -168,15 +176,16 @@ ANOMALY_DAY = DAYS - 1
 ROUTINE_TUESDAY = 6
 
 
-def build_day(timeline: ModuleType, index: int = ANOMALY_DAY) -> dict[str, list[object]]:
+def build_day(index: int = ANOMALY_DAY) -> dict[str, list[Series]]:
     """
     Return the series of the Kitchen, the Living Room and the sun on one day of the fortnight.
 
-    :param timeline: The imported timeline module.
     :param index: The day, counted from the 4th of November; the last one is the anomaly day.
     """
+    from entropy_fm.timeline import EntityInfo, VoiceKind, build_series  # noqa: PLC0415
+
     rng = np.random.default_rng(2026 + index)
-    kind = timeline.VoiceKind
+    kind = VoiceKind
     weekend = (FIRST_DAY + timedelta(days=index)).weekday() >= 5
     late = 5400.0 if weekend else 0.0
     heat = 9.0 if index == HEATWAVE else 0.0
@@ -188,12 +197,12 @@ def build_day(timeline: ModuleType, index: int = ANOMALY_DAY) -> dict[str, list[
     def series(
         entity_id: str,
         name: str,
-        voice: object,
+        voice: VoiceKind,
         data: tuple[list[float], list[float]],
         device_class: str = "",
-    ) -> object:
-        info = timeline.EntityInfo(entity_id, name, None, voice, device_class=device_class)
-        return timeline.build_series(info, data[0], data[1])
+    ) -> Series:
+        info = EntityInfo(entity_id, name, None, voice, device_class=device_class)
+        return build_series(info, data[0], data[1])
 
     def warm(points: list[tuple[str, float]]) -> list[tuple[str, float]]:
         return [(clock, value + heat) for clock, value in points]
@@ -443,23 +452,25 @@ class Demo:
         if house == "sparse":
             import sparse_house  # noqa: PLC0415
 
-            self.days = [sparse_house.build_day(timeline, index) for index in range(DAYS)]
+            self.days = [sparse_house.build_day(index) for index in range(DAYS)]
         else:
-            self.days = [build_day(timeline, index) for index in range(DAYS)]
+            self.days = [build_day(index) for index in range(DAYS)]
 
     def day_of(self, index: int) -> date:
         """Return the date of a day of the fortnight."""
         return FIRST_DAY + timedelta(days=index)
 
-    def baselines(self, index: int, areas: tuple[str, ...]) -> dict[str, object]:
+    def baselines(self, index: int, areas: tuple[str, ...]) -> dict[str, EntityBaseline]:
         """Return the baseline of the entities of some areas from the week before a day."""
-        found: dict[str, object] = {}
+        found: dict[str, EntityBaseline] = {}
         for area in areas:
             before = [self.days[i][area] for i in range(max(index - 7, 0), index)]
             found.update(self.baseline.build_baselines(before))
         return found
 
-    def week(self, index: int, areas: tuple[str, ...], baselines: dict[str, object]) -> list[float]:
+    def week(
+        self, index: int, areas: tuple[str, ...], baselines: dict[str, EntityBaseline]
+    ) -> list[float]:
         """Return how busy the week before a day was, rescaled with the baselines of the day, or nothing."""
         try:
             from entropy_fm.character import raw_energy  # noqa: PLC0415
@@ -475,15 +486,15 @@ class Demo:
 
     def make(  # noqa: PLR0913, PLR0917
         self,
-        series: list[object],
+        series: list[Series],
         day: date,
         style: str,
         area_key: str,
-        baselines: dict[str, object] | None = None,
-        tier: object = None,
+        baselines: dict[str, EntityBaseline] | None = None,
+        tier: Quality | None = None,
         length_mode: str = "full",
         week: list[float] | None = None,
-    ) -> tuple[object, object]:
+    ) -> tuple[Score, Plan]:
         """Return the score and the plan of the soundscape of some series on a day, as the provider makes them."""
         chosen = self.styles.get_style(style)
         home = self.synth.Scale(2, "dorian")
@@ -510,7 +521,7 @@ class Demo:
         except ImportError:  # an older engine has no character of the day
             pass
         else:
-            extra["character"] = measure_character(analysis, traits, day, series, week=week or ())  # type: ignore[arg-type]
+            extra["character"] = measure_character(analysis, traits, day, series, week=week or ())
         return self.scape.scape_score(
             series,
             analysis,
@@ -530,9 +541,9 @@ class Demo:
         index: int,
         areas: tuple[str, ...],
         style: str,
-        tier: object = None,
+        tier: Quality | None = None,
         length_mode: str = "full",
-    ) -> tuple[object, object]:
+    ) -> tuple[Score, Plan]:
         """Return the score and the plan of a day of the fortnight, for some areas, in a style."""
         series = [item for area in areas for item in self.days[index][area]] + self.days[index][
             "sun"

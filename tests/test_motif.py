@@ -110,6 +110,7 @@ def test_each_style_states_the_motif_at_least_once_and_at_most_twice(
 ) -> None:
     """The motif of the room is stated once or twice in a piece, not in every peak or plateau."""
     _, base = demo(style)
+    assert base.day is not None
     scale = scale_of_day(STYLES[style], HOME, base.day, character)
     plan = replace(base, character=character, scale=scale, choices={}, notes=[])
     score = COMPOSERS[style](plan)

@@ -17,6 +17,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ[name] = "1"
@@ -25,12 +26,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import demo_render as demo_module  # noqa: E402
 
+if TYPE_CHECKING:
+    from entropy_fm.quality import Quality
+
 # milliseconds of CPU per second of audio, for the whole house, on the machine of the reference runs
 BUDGETS = {"light": 20.0, "standard": 60.0, "rich": 120.0}
 
 
 def measure(
-    demo: demo_module.Demo, style: str, areas: tuple[str, ...], tier: object, seconds: int | None
+    demo: demo_module.Demo, style: str, areas: tuple[str, ...], tier: Quality, seconds: int | None
 ) -> float:
     """Return the CPU milliseconds per second of audio of one style, area set and tier, cold."""
     from entropy_fm.glitch_voices import STACKS  # noqa: PLC0415
@@ -42,7 +46,7 @@ def measure(
     score, _ = demo.score(demo_module.ANOMALY_DAY, areas, style, tier)
     stop = score.length if seconds is None else min(seconds, score.length)
     start = time.process_time()
-    for _ in render_blocks(score, tier, "bench", 0, None, stop):  # type: ignore[arg-type]
+    for _ in render_blocks(score, tier, "bench", 0, None, stop):
         pass
     return (time.process_time() - start) / stop * 1000.0
 

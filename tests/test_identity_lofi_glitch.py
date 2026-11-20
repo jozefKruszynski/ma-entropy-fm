@@ -39,6 +39,7 @@ HELD_SHARE = 0.6
 def _made(style: str, *, quiet: bool) -> tuple[Score, Plan]:
     """Return the score and the plan of the same room and day, made on a clearly quiet or a clearly busy character."""
     _, base = demo(style)
+    assert base.day is not None
     character = QUIET if quiet else BUSY
     scale = scale_of_day(STYLES[style], HOME, base.day, character)
     plan = replace(base, character=character, scale=scale, choices={}, notes=[])
@@ -269,6 +270,7 @@ def _day_of(
 ) -> tuple[Score, Plan]:
     """Return the score and the plan of the nth day of a room; its character has this energy, or is the demo's own."""
     _, base = demo("glitch")
+    assert base.day is not None
     character = base.character
     if energy is not None:
         level = LOW if energy < 0.34 else (HIGH if energy > 0.67 else NEUTRAL.level)

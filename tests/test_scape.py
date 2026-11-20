@@ -11,14 +11,14 @@ import pytest
 from entropy_fm.character import ALL_DAY, FLAT, HIGH, LOW, NEUTRAL, DayCharacter
 from entropy_fm.day_analysis import analyze_day
 from entropy_fm.plan import MAX_SECONDS, MIN_SECONDS, Plan, build_plan, length_of
-from entropy_fm.quality import LIGHT, RICH, STANDARD
+from entropy_fm.quality import LIGHT, RICH, STANDARD, Quality
 from entropy_fm.scape import scape_score
 from entropy_fm.scape_ambient import LENGTHS
 from entropy_fm.scape_berlin import CELLS_A, CELLS_B, CELLS_C, _mutate
 from entropy_fm.score import CR, Score
 from entropy_fm.styles import STYLES, get_style
 from entropy_fm.synth import Scale
-from entropy_fm.timeline import EntityInfo, VoiceKind, build_series
+from entropy_fm.timeline import EntityInfo, Series, VoiceKind, build_series
 from entropy_fm.voices import VOICES
 
 from .scape_tools import demo, the_demo
@@ -26,7 +26,9 @@ from .scape_tools import demo, the_demo
 STYLE_KEYS = list(STYLES)
 
 
-def _score(style: str, index: int = 13, areas: tuple[str, ...] = ("kitchen",), tier=STANDARD):  # noqa: ANN001, ANN202
+def _score(
+    style: str, index: int = 13, areas: tuple[str, ...] = ("kitchen",), tier: Quality = STANDARD
+) -> tuple[Score, Plan]:
     return the_demo().score(index, areas, style, tier)
 
 
@@ -87,6 +89,8 @@ def test_a_score_is_deterministic(style: str) -> None:
     second, _ = the_demo().score(13, ("kitchen",), style, STANDARD)
     assert first.notes == second.notes
     assert first.choices == second.choices
+    assert first.gain_db is not None
+    assert second.gain_db is not None
     assert np.array_equal(first.gain_db, second.gain_db)
 
 
@@ -203,7 +207,7 @@ def test_the_six_styles_use_different_voices() -> None:
     assert not any(v.startswith("drum:") for v in sets["ambient"])
 
 
-def _series(events: int) -> list:
+def _series(events: int) -> list[Series]:
     """A fridge, a lamp and a motion sensor that flips `events` times in the day."""  # noqa: D401
     times = [0.0, *[30000.0 + 120.0 * k for k in range(events)]]
     values = [float(k % 2) for k in range(len(times))]

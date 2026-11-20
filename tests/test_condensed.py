@@ -174,6 +174,7 @@ def test_the_glides_of_condensed_glitch_are_the_tape_stops_and_brakes_only() -> 
     from .test_glitch import GLIDING  # noqa: PLC0415
 
     score, plan = demo("glitch", length_mode=CONDENSED)
+    assert score.glitch is not None
     audio = window(score, plan, 40)
     start = pick_windows(plan, 40)[1][1]
     allowed = [e.t - start for e in score.glitch.edits if e.kind in GLIDING or e.why == "drop"]

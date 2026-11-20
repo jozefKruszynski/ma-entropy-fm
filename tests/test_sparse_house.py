@@ -402,7 +402,7 @@ def test_the_rooms_of_the_sparse_house_differ() -> None:
     curves = {}
     for room in ("living", "bedroom", "office"):
         _, plan = demo_house.score(13, (room,), "ambient")
-        activity_curve = np.asarray(plan.activity)  # type: ignore[attr-defined]
+        activity_curve = np.asarray(plan.activity)
         curves[room] = np.interp(
             np.linspace(0, 1, 1000), np.linspace(0, 1, len(activity_curve)), activity_curve
         )

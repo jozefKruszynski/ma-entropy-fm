@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -24,14 +25,18 @@ from soundscapes import pick_windows
 from entropy_fm import levels
 from entropy_fm.render import Renderer
 
+if TYPE_CHECKING:
+    from entropy_fm.quality import Quality
+    from entropy_fm.score import Score
+
 DAYS = (demo_render.ANOMALY_DAY, demo_render.ANOMALY_DAY - 3, demo_render.ANOMALY_DAY - 6)
 
 
 def level_of(
-    score: object, tier: object, start: int, layer: str, seconds: int = 24
+    score: Score, tier: Quality, start: int, layer: str, seconds: int = 24
 ) -> float | None:
     """Return the RMS in dB of a layer alone, before the master, over some seconds; None when it is silent."""
-    renderer = Renderer(score, tier, "gain", frozenset({layer}))  # type: ignore[arg-type]
+    renderer = Renderer(score, tier, "gain", frozenset({layer}))
     blocks = [renderer.render_block(block) for block in range(start - 8, start + seconds)]
     audio = np.concatenate(blocks[8:])
     if float(np.abs(audio).max()) < 1e-5:

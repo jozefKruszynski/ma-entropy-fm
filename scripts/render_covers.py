@@ -8,6 +8,7 @@ Writes each cover as the 1024 pixel JPEG that the provider serves, and prints wh
 
 import sys
 import time
+from datetime import timedelta
 from importlib import import_module
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def main() -> None:
         for index in (6, demo_module.ANOMALY_DAY):
             series = demo.days[index]["kitchen"]
             profile = covers.profile_of(series)
-            day = demo_module.FIRST_DAY + demo_module.timedelta(days=index)
+            day = demo_module.FIRST_DAY + timedelta(days=index)
             traits = palette.DayTraits(energy=profile.intensity)
             chosen = demo.styles.get_style(style)
             derived = palette.derive_palette(chosen, day, demo.synth.Scale(2, "dorian"), traits)

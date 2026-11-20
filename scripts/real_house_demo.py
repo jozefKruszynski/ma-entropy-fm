@@ -11,8 +11,11 @@ plug, twenty lights that a scene switches together, and the sun. The window is 1
 dinner is cooked on the hob and in the oven, and the dishwasher starts at 19:45.
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -20,33 +23,44 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import demo_render as demo_module
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from entropy_fm.plan import Plan
+    from entropy_fm.quality import Quality
+    from entropy_fm.score import Score
+    from entropy_fm.timeline import Series
+
 DAY = 86400.0
 hours = demo_module.hours
 
 
-def build_real_kitchen(demo: demo_module.Demo) -> list:
+def build_real_kitchen() -> list[Series]:
     """Return the series of the kitchen of a real house on one day."""
-    timeline = demo.timeline
-    kinds = timeline.VoiceKind
+    from entropy_fm.timeline import (  # noqa: PLC0415
+        EntityInfo,
+        VoiceKind,
+        build_series,
+        category_value,
+    )
+
+    kinds = VoiceKind
     rng = np.random.default_rng(7)
-    series = []
+    series: list[Series] = []
 
     def add(  # noqa: PLR0913, PLR0917
         entity_id: str,
-        kind: object,
+        kind: VoiceKind,
         times: list[float],
-        values: list[float],
+        values: Sequence[float | str],
         device_class: str = "",
         device: str = "",
-        *,
-        text: bool = False,
     ) -> None:
-        if text:
-            values = [timeline.category_value(str(v)) or 0.0 for v in values]  # type: ignore[arg-type]
-        info = timeline.EntityInfo(
+        numbers = [(category_value(v) or 0.0) if isinstance(v, str) else v for v in values]
+        info = EntityInfo(
             entity_id, entity_id, "kitchen", kind, device_class=device_class, device_id=device
         )
-        series.append(timeline.build_series(info, times, values))
+        series.append(build_series(info, times, numbers))
 
     times, values = demo_module.fridge(rng)
     add("sensor.fridge_plug_power", kinds.DRONE, times, values, "power", "fridge")
@@ -67,7 +81,6 @@ def build_real_kitchen(demo: demo_module.Demo) -> list:
         [state for _, state, _ in phases],
         "enum",
         "karl",
-        text=True,
     )
     add(
         "sensor.siemens_dishwasher_program_phase",
@@ -76,9 +89,8 @@ def build_real_kitchen(demo: demo_module.Demo) -> list:
         [phase for _, _, phase in phases],
         "enum",
         "karl",
-        text=True,
     )
-    progress_t = list(np.arange(hours("19:45"), hours("21:20"), 300.0))
+    progress_t = [float(t) for t in np.arange(hours("19:45"), hours("21:20"), 300.0)]
     add(
         "sensor.siemens_dishwasher_program_progress",
         kinds.PROGRESS,
@@ -108,7 +120,6 @@ def build_real_kitchen(demo: demo_module.Demo) -> list:
         ["inactive", "run", "finished"],
         "enum",
         "bilbo",
-        text=True,
     )
     # the hob: four zones, power levels as text, and its estimated power
     zones = {
@@ -168,14 +179,16 @@ def build_real_kitchen(demo: demo_module.Demo) -> list:
     )
     add("sensor.kitchen_temperature", kinds.TEMPERATURE, times, values, "temperature", "thermo")
     sun_t = [0.0, hours("07:45"), hours("16:40")]
-    sun = timeline.EntityInfo("sun.sun", "Sun", None, kinds.SUN)
-    series.append(timeline.build_series(sun, sun_t, [0.0, 1.0, 0.0]))
+    sun = EntityInfo("sun.sun", "Sun", None, kinds.SUN)
+    series.append(build_series(sun, sun_t, [0.0, 1.0, 0.0]))
     return series
 
 
-def real_score(demo: demo_module.Demo, style: str, tier: object = None) -> tuple[object, object]:
+def real_score(
+    demo: demo_module.Demo, style: str, tier: Quality | None = None
+) -> tuple[Score, Plan]:
     """Return the score and the plan of the soundscape of the real-house kitchen in a style."""
-    return demo.make(build_real_kitchen(demo), demo_module.FIRST_DAY, style, "kitchen", None, tier)
+    return demo.make(build_real_kitchen(), demo_module.FIRST_DAY, style, "kitchen", None, tier)
 
 
 def main() -> None:

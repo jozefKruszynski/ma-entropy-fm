@@ -24,12 +24,17 @@ import json
 import sys
 from itertools import pairwise
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 import demo_render
+
+if TYPE_CHECKING:
+    from entropy_fm.plan import Plan
+    from entropy_fm.score import Score
 
 if "--engine" in sys.argv:
     # the demo houses come from here, the engine from the checkout that was asked for
@@ -43,13 +48,13 @@ HOUSES = {
 PRESENCE_FLOOR = 0.12
 
 
-def layers_per_minute(score: object) -> np.ndarray:
+def layers_per_minute(score: Score) -> np.ndarray:
     """Return, for each minute of the piece, how many layers have a note sounding in it while they are present."""
-    length = int(score.length)  # type: ignore[attr-defined]
+    length = int(score.length)
     minutes = max(length // 60, 1)
     found: dict[int, set[str]] = {m: set() for m in range(minutes)}
-    layers = score.layers  # type: ignore[attr-defined]
-    for note in score.notes:  # type: ignore[attr-defined]
+    layers = score.layers
+    for note in score.notes:
         layer = layers.get(note.layer)
         if layer is None:
             continue
@@ -63,17 +68,17 @@ def layers_per_minute(score: object) -> np.ndarray:
     return np.array([len(found[m]) for m in range(minutes)], dtype=float)
 
 
-def hourly_profile(score: object, plan: object) -> np.ndarray:
+def hourly_profile(score: Score, plan: Plan) -> np.ndarray:
     """Return 3 values for each of the 24 hours of the day: notes a minute, layers, mean velocity."""
-    length = float(score.length)  # type: ignore[attr-defined]
-    covered = float(plan.covered)  # type: ignore[attr-defined]
+    length = float(score.length)
+    covered = float(plan.covered)
     per_minute = layers_per_minute(score)
     notes = np.zeros(24)
     velocity = np.zeros(24)
     layers = np.zeros(24)
     seconds = np.zeros(24)
-    layers_of = score.layers  # type: ignore[attr-defined]
-    for note in score.notes:  # type: ignore[attr-defined]
+    layers_of = score.layers
+    for note in score.notes:
         hour = int(min(note.t / length * covered / 3600.0, 23.99))
         # a note counts as loud as it plays: its velocity and how present its layer is
         layer = layers_of.get(note.layer)
