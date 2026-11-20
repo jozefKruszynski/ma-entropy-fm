@@ -4,14 +4,14 @@ How the voices are made, where the samples come from and how loud the pieces are
 
 ## The voice library
 
-All six styles draw on one library of 26 voices, each with a character, a gain and a brightness of
+All six styles draw on one library of 28 voices (Cinematic Glitch adds its own `glitch:*` voices), each with a character, a gain and a brightness of
 its own (no blanket filter, no per-note normalising): a warm round sub, a Moog-style ladder bass, a
 growling Reese (two or three detuned band-limited saws, waveshaped before a moving resonant low-pass,
 with a clean sub under it), an FM growl (the index moves, never the pitch), an acid bass; a string
 machine, a Juno-style pad, a supersaw, tape strings, a tape choir, a glassy wavetable pad, a bowed
 pad, a drawbar organ; a singing analog lead and a flute-like lead (vibrato at most 15 cents), an FM
 electric piano, a felt piano, a soft grand piano, a sampled FM piano, a Juno pluck, a nylon
-Karplus-Strong pluck and a strumstick, a cello section for a slow line; a Moog-style sequencer voice, a blip and a chord stab. Every
+Karplus-Strong pluck and a strumstick, a cello section for a slow line and a chant cello for the Ritual leader; a Moog-style sequencer voice, a blip and a chord stab; a slit drum and a woodblock (VCSL samples). Every
 oscillator is band-limited (a wavetable that holds only the partials that fit), a note never glides
 (a vibrato is at most 15 cents and the kick's thump falls below 150 Hz), and a long pad is made
 once and looped where the tone is in phase, which is what lets a 20 minute piece render on a

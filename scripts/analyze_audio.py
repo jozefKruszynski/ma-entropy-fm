@@ -74,7 +74,7 @@ def noise_floor_db(mono: np.ndarray, frame: int = 2205, share: float = 0.2) -> f
     """
     Return the level in dBFS of what sits above 6 kHz in the quietest 20 percent of 50 ms frames.
 
-    Steady hiss shows there; hats and cymbals only sound in the loud frames and do not count.
+    Steady noise shows there; hats and cymbals only sound in the loud frames and do not count.
 
     :param mono: Samples at 44.1 kHz.
     :param frame: The length of a frame in samples, 50 ms.
@@ -136,7 +136,7 @@ def analyse(path: str) -> None:
     centroid = (spectrum * freqs).sum() / total
     print(f"spectral centroid {centroid:.0f} Hz")
     print(
-        f"hiss floor: above 6 kHz in the quietest 20% of 50 ms frames {noise_floor_db(mono):.1f} dBFS"
+        f"noise floor: above 6 kHz in the quietest 20% of 50 ms frames {noise_floor_db(mono):.1f} dBFS"
     )
     step = max(frames // 30, 1)
     curve = [f"{db(rms[i : i + step].mean()):.0f}" for i in range(0, frames, step)]
@@ -185,7 +185,7 @@ def difference(first_path: str, second_path: str) -> dict[str, float]:
 def table(paths: list[str]) -> None:
     """Print one row of headline numbers per file."""
     print(
-        "| file | s | peak dBFS | RMS dBFS | DC | >6 kHz % | hiss floor dBFS | centroid Hz | longest silence s |"
+        "| file | s | peak dBFS | RMS dBFS | DC | >6 kHz % | noise floor dBFS | centroid Hz | longest silence s |"
     )
     print("|---|---|---|---|---|---|---|---|---|")
     for path in paths:

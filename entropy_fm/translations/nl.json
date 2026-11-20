@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "Entropy FM",
-    "description": "Speelt de geschiedenis van je Home Assistant als generatieve klanklandschappen: elk gebied is een artiest, elke dag een album, en elk album bevat één lang, langzaam evoluerend stuk in zes stijlen. Het leest alleen uit Home Assistant en synthetiseert de audio tijdens het afspelen. Als de kamers die je toont veranderen, of als je de covers opnieuw tekent, vraagt het Music Assistant om zijn eigen items opnieuw te synchroniseren."
+    "description": "Speelt de geschiedenis van je Home Assistant als generatieve klanklandschappen: elk gebied is een artiest, elke dag een album, en elk album bevat één lang, langzaam evoluerend stuk in zes stijlen. Het leest alleen uit Home Assistant en synthetiseert de audio tijdens het afspelen. Als de kamers die je toont veranderen, vraagt het Music Assistant om zijn eigen items opnieuw te synchroniseren."
   },
   "config_entries": {
     "use_ha_plugin": {
@@ -98,37 +98,7 @@
     },
     "covers": {
       "label": "Covers",
-      "description": "Wat de covers van de dagen tonen. Uit: geen covers. Getekend uit de dag: een plaatje dat op je server wordt gemaakt uit de gebeurtenissen van de dag, in de stijl van de covers van Music Assistant; het is elke keer hetzelfde. AI-beeldengine (alleen als Music Assistant een beeldengine heeft): de engine tekent de cover uit de naam van de kamer en een paar abstracte sfeerwoorden; er verlaat niets anders je server. De getekende cover blijft staan tot de AI-cover klaar is."
-    },
-    "cover_engine": {
-      "label": "Beeldengine",
-      "description": "Welke beeldengine van Music Assistant de AI-covers maakt. Standaard volgt de engine die Music Assistant gebruikt."
-    },
-    "cover_style": {
-      "label": "Coverstijl",
-      "description": "De stijl van de AI-covers: de presets van de playlistcovers van Music Assistant (Music Assistant, Neon, Bold, Soft Gradient, Risograph, Gouache) of Custom, dat de prompt hieronder gebruikt."
-    },
-    "cover_prompt": {
-      "label": "Coverprompt",
-      "description": "De prompt van de AI-covers als de stijl Custom is, als sjabloon: {name} is de naam van de kamer en {context} de sfeerwoorden van de dag. Leeg: de standaard van Music Assistant."
-    },
-    "cover_title": {
-      "label": "Titel op de cover",
-      "description": "Aan: Entropy FM tekent de titel (de kamer en de dag) over de AI-cover en de engine krijgt de opdracht het beeld zonder tekst te maken. Uit: de engine wordt gevraagd de titel zelf te tekenen."
-    },
-    "cover_ai_per_hour": {
-      "label": "AI-covers per uur",
-      "description": "Het maximum aantal AI-covers dat per uur wordt aangevraagd, van 1 tot 120. Een cover wordt één keer gemaakt en bewaard; dit remt alleen de eerste keer."
-    },
-    "redraw_covers": {
-      "label": "Covers opnieuw tekenen",
-      "description": "Gooit de tot nu toe gemaakte covers weg en maakt nieuwe terwijl albums worden getoond. AI-covers tellen mee voor de limiet per uur.",
-      "action_label": "Covers opnieuw tekenen"
-    }
-  },
-  "config_actions": {
-    "redraw_covers": {
-      "result": "De covers zijn weggegooid; er worden nieuwe gemaakt terwijl albums worden getoond."
+      "description": "Wat de covers van de dagen tonen. Uit: geen covers. Getekend uit de dag: een plaatje dat op je server wordt gemaakt uit de gebeurtenissen van de dag, in de stijl van de covers van Music Assistant; het is elke keer hetzelfde."
     }
   }
 }

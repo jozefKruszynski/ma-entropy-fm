@@ -7,7 +7,7 @@ notes. It steers the texture, the density, the brightness, the space and the mov
 a generative system plays. The audio is made on your server while it plays, from the history it
 reads from your own Home Assistant and from CC0 samples that ship with the provider. Nothing leaves
 your server; what it keeps is the event timeline of the days you heart and, if you
-want it, a cache of the days that were played.
+want it, a cache of the days that were played, and the drawn covers.
 
 Entropy FM is made and maintained by [@jozefKruszynski](https://github.com/jozefKruszynski), not by
 the Music Assistant team. Questions and problems go to the
@@ -29,10 +29,11 @@ The same room, day and style always give the same title; the title of today can 
 only once an hour. Titles hold kinds of things and times, never an entity id or a name, and a day without
 history, or Home Assistant being away, gives a plain title of the style. The description of a track is a
 short history of the style (Eno's tape loops, the Berlin School, lo-fi hip hop, Reich's phasing, the mood of
-the Akira soundtrack, cinematic neurofunk), how the house drives it, and a line about the day ("A busy afternoon;
-a door at 03:12."). Titles and descriptions follow the language of the server when it is Dutch, and are
-English otherwise. Music Assistant keeps the name, the length and the description of a track from the moment it
-was synced into the library; to see new titles on a track that is already there, refresh its metadata.
+the Akira soundtrack, cinematic neurofunk), how the house drives that style, and one line about the day ("A busy
+afternoon; a door at 03:12."). The description does not list which entity plays which part: the role of every
+entity, and why it has it, is in the diagnostics of the provider. An album has a short review of its own (the room,
+the weekday, what kind of day it was). Titles and descriptions follow the language of the server when it is Dutch,
+and are English otherwise (see *Known limitations* for when a changed title shows).
 
 A soundscape is as long as its day was busy, between 10 and 22 minutes (or, as a condensed piece,
 about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi, Minimal and Cinematic
@@ -44,8 +45,8 @@ style always sound the same.
 | Style | What you hear |
 |---|---|
 | Ambient | Tape loops of different lengths that phase against each other, a felt piano, no beat |
-| Berlin School | Interlocking sequencer lines that mutate by rule, strings, choir and a slow lead, a soft pulse when busy |
-| Lo-fi | A boom-bap band that never plays the loop the same way twice, electric piano, vinyl crackle |
+| Berlin School | Interlocking sequencer lines that mutate by rule, strings, choir and a slow lead, and in the busy day a soft kick, warm toms and a light shaker under the grid |
+| Lo-fi | A boom-bap band that never plays the loop the same way twice, electric piano, a little vinyl crackle |
 | Minimal | Euclidean percussion with a shuffle, a short figure that mutates, a deep rolling bass, 118 to 124 BPM |
 | Ritual | One plucked line in a Japanese scale, answered off the beat by a slit drum and a woodblock, over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko |
 | Cinematic Glitch | Film-score swells and brass stabs, a growling bass and hard half-time drums, cut up by the doors, switches and appliances of the house |
@@ -57,7 +58,7 @@ of its own). Every sensor is measured against its own previous 7 days, so a quie
 sensors that are dead or stuck are left out, and every style keeps a full base arrangement on a calm day: the house
 shapes the density, the colour and the peaks.
 
-How the house steers each style, and how an entity gets its sound, is in
+How the house steers each style (a table of what every driver does in every style), and how an entity gets its sound, is in
 [docs/how-it-works.md](docs/how-it-works.md); the voices, the samples and the loudness are in
 [docs/sound-design.md](docs/sound-design.md).
 
@@ -119,7 +120,7 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Piece length | Full | Full, Condensed | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Minimal, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play. |
+| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Minimal, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play. |
 | Key | D | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | The root note that the pitches are tuned to; the key of a day walks away from it and back. |
 | Scale | Dorian | Dorian, Natural minor (Aeolian), Mixolydian, Lydian, Major (Ionian), Minor pentatonic, Major pentatonic | The scale of the pieces. A style that does not have the scale uses its own: Berlin School and Minimal are in a minor mode, Ritual keeps a Japanese pentatonic, Cinematic Glitch is in aeolian or phrygian. |
 | Activity offset | 0 | -50 to 50 | Points added to how lively the house seems. The activity brings layers in and out and sets how dense and how fast they are; it never writes notes. |
@@ -132,13 +133,11 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Covers | Drawn from the day | Off, Drawn from the day, AI image engine | Off: no covers. Drawn: a picture made on your server from the events of the day. AI image engine: only offered when Music Assistant has an image engine. |
-| Image engine | default engine | the engines of Music Assistant | Which engine makes the AI covers. Advanced; only with AI covers. |
-| Cover style | Music Assistant | Music Assistant, Neon, Bold, Soft Gradient, Risograph, Gouache, Custom | The look of the AI covers. Only with AI covers. |
-| Cover prompt | empty | text with `{name}`, `{context}` | The prompt when the style is Custom; empty uses the default of Music Assistant. |
-| Title on the cover | on | on, off | On: Entropy FM draws the title over the cover and the engine leaves the picture without text. Off: the engine is asked to draw the title. Only with AI covers. |
-| AI covers per hour | 30 | 1 to 120 | The most AI covers asked for in an hour. Only with AI covers. |
-| Redraw covers | button | press | Throws away the covers made so far (the cover files of Entropy FM only, never pinned days, audio or other data) and makes new ones as albums are shown; AI covers count against the hourly limit. The cover paths carry a redraw number, so that the image cache of Music Assistant cannot show an old picture, and the provider asks Music Assistant to re-sync its own items so that stored albums and tracks take the new paths. |
+| Covers | Drawn from the day | Off, Drawn from the day | Off: no covers and no room images. Drawn: a picture made on your server from the events of the day, in the look of the covers of Music Assistant; it is the same every time. |
+
+AI covers (an image engine of Music Assistant drawing the covers, with a style, a prompt, a title overlay, an hourly limit
+and a *Redraw covers* button) are built but hidden in this release, see *Known limitations*. A *Covers* value of "AI image
+engine" that an earlier install stored is read as drawn covers.
 
 ### Performance
 
@@ -165,21 +164,20 @@ CPU milliseconds per second of audio, kitchen, cold, one core:
 
 | style | Light | Standard | Rich |
 |---|---|---|---|
-| ambient | 13.9 | 23.1 | 26.6 |
-| berlin_school | 21.4 | 42.3 | 43.7 |
-| lofi | 18.3 | 30.0 | 33.7 |
-| minimal | 11.8 | 20.8 | 23.9 |
-| ritual | 14.3 | 35.5 | 29.4 |
-| glitch (Cinematic Glitch) | 16.1 | 41.0 | 42.1 |
+| ambient | 13.8 | 22.9 | 24.2 |
+| berlin_school | 30.2 | 43.2 | 46.0 |
+| lofi | 17.5 | 30.3 | 30.5 |
+| minimal | 10.8 | 20.1 | 22.8 |
+| ritual | 14.9 | 34.6 | 32.6 |
+| glitch (Cinematic Glitch) | 15.8 | 46.6 | 45.5 |
 | budget | 20 | 60 | 120 |
 
-The budget is what a tier aims at. Light meets its 20 ms except in Berlin School, and every style
-is inside the budget of Standard and Rich. Cinematic Glitch is the dearest style. Its swells and
-its growling bass are the dearest notes: each is made once and kept (the cache of notes keeps
-them in a pool of their own, so that nothing pushes them out and none is made twice), and the
-swells of one chord share the saws that they are made from. A few numbers move by a few percent
-from one run to the next.
-
+The budget is what a tier aims at. Light meets its 20 ms in every style except Berlin School (30.2 ms), and every
+style is inside the budget of Standard and Rich. Berlin School is the dearest style in Light and, by a hair, in Rich;
+Cinematic Glitch is in Standard. Glitch's swells and its growling bass are its dearest notes: each is made once and kept (the cache
+of notes keeps them in a pool of their own, so that nothing pushes them out and none is made twice), and the swells of
+one chord share the saws that they are made from. A few numbers move by a few percent from one run to the next (this
+table is from one run of `scripts/bench.py` on a two-core x86-64 server).
 
 | | Light | Standard | Rich |
 |---|---|---|---|
@@ -229,6 +227,40 @@ machine keep *Keep every day forever* short, or choose *Off*.
 two rooms can play at the same time; they take turns on the processor, and each costs what the
 table says.
 
+## Covers and room images
+
+Albums and tracks have a cover in the look of the AI covers of Music Assistant's playlists: a
+gradient of two or three colours chosen for the mood, a soft bloom and fine grain, a large white
+line-art glyph cropped off the top and right edges, and the title in the lower-left corner.
+
+- **Drawn from the day** (the default, and for now the only kind): a 1024 pixel JPEG made on your server with
+  Pillow, with no network at all. The gradient follows the style and the key and mode of the day, and the
+  glyph is that of the style, shaped by what happened that day. The same area, day and style always give the
+  same cover.
+- **Off**: no covers and no room images.
+- **AI covers come later.** The code is in the repository behind `AI_COVERS_ENABLED` in
+  `entropy_fm/const.py` and is off. Music Assistant keeps the first cover it is given for an item and does
+  not ask again, so an AI cover (shown only after the drawn one) would never appear, and a redraw would change
+  nothing that can be seen. They come back when core Music Assistant can take a replacement image.
+
+Every room, and the whole house, is an artist with a drawn image of its own: a square one with the name of the room,
+and a wide one for the backdrop of the artist page. Its figure is a clock of the typical day of the room, from the
+last 7 days that Entropy FM already keeps: 24 spokes, one per hour, as long as the presence (motion, doors, CO2) in
+that hour, a wave round it for the lights and small rings for the appliances and the media. A room without kept
+history gets a figure of the same kind from its id. The images follow the *Covers* setting, and nothing is read from
+Home Assistant for them.
+
+## Known limitations
+
+- **Music Assistant keeps stored items as they were.** Once a room, a day or a track is in the library, Music
+  Assistant does not rewrite its name, its length, its description or its images when the provider's data changes
+  (a new title, a changed *Piece length*, a redrawn cover). Use *Refresh metadata* on the item, or remove it and add it
+  again, to see the new data. New items are added from a library sync, which Entropy FM asks for when the rooms that
+  are shown or the piece length change.
+- **The frontend shows no track descriptions**, and labels the description of an album "Review".
+- **AI covers are hidden** for the reason above: Music Assistant caches the first cover it receives, which is the
+  drawn one, so an AI cover would never show. A change in core Music Assistant is needed first.
+
 ## Privacy
 
 - Persons, device trackers, locks, alarm panels and cameras are never used, and neither is any
@@ -240,43 +272,13 @@ table says.
   Home Assistant gives with the states the provider reads anyway; it reads no history for it.
 - You can keep more out with *Extra exclusions* or the `entropy_fm_mute` label in Home Assistant.
 - The provider only reads from Home Assistant: the registries, the labels, the current states of
-  the entities that can play and the history of a day when you play it. It sends nothing anywhere
-  else, with one opt-in exception (AI covers, below), and does not write into its own folder.
+  the entities that can play and the history of a day when it plays it, names it or draws its cover. It
+  sends nothing anywhere else, and does not write into its own folder.
 - What it keeps is only what you ask for: a pin (the event timeline of one area on one day, a few
-  kilobytes) for what you heart, in the storage folder of the server; and rendered
-  audio of past days in the cache folder, if the cache is on. Taking the heart off an item
-  deletes its pins; the cache is a normal cache folder.
-
-### Covers
-
-Albums and tracks have a cover in the look of the AI covers of Music Assistant's playlists: a
-gradient of two or three colours chosen for the mood, a soft bloom and fine grain, a large white
-line-art glyph cropped off the top and right edges, and the title in the lower-left corner.
-
-- **Drawn from the day** (the default): a 1024 pixel JPEG made on your server with Pillow, with no
-  network at all. The gradient follows the style and the key and mode of the day, and the glyph is
-  that of the style, shaped by what happened that day. The same area, day and style always give
-  the same cover.
-- **AI image engine** (off by default, and only offered when Music Assistant has an image engine
-  from a plugin): the engine you pick makes the cover with the presets of Music Assistant's own
-  covers, and the title is drawn over it afterwards. A cover is made in the background the first
-  time something asks for it (the drawn cover is shown meanwhile), kept, and made again only when
-  its title, style, prompt or engine changes. At most 30 an hour by default; a failure is retried
-  after 1 hour, 6 hours and 24 hours, then only when something changes.
-- **Off**: no covers.
-
-*Redraw covers* throws away every cover that Entropy FM made, asks the server for a library sync
-of this source and counts a redraw, which is part of every cover path (`cover|<room>|<day>|<style>|g<n>`;
-paths without it still resolve). New covers are made as albums are shown, within the AI limit.
-
-What the image engine is sent, when you turn AI covers on: the name of the area (the label you gave
-it in Home Assistant, never the date, an entity or a person); one short description made only of
-mood words from a fixed list (the style, a colour and a mood from the key and mode of the day,
-whether the day was quiet or busy, a line about light, and up to three abstract motifs); and the
-preset text of the style you picked or your own prompt. It never contains an entity id, a name, a
-person, a time or a count, and a test checks that with a house full of personal names. The engine
-is a plugin of your own Music Assistant, so what leaves your server is decided by that plugin and by
-you.
+  kilobytes) for what you heart, in the storage folder of the server; rendered
+  audio of past days in the cache folder, if the cache is on; and the drawn covers and room images,
+  small JPEGs in the cache folder. Taking the heart off an item deletes its pins; the cache is a
+  normal cache folder.
 
 ## For developers
 

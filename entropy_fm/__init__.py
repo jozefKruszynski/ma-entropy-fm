@@ -72,6 +72,7 @@ from .audiocache import AudioCache, cache_key
 from .autotune import benchmark, heaviest_style
 from .baseline import EntityBaseline
 from .const import (
+    AI_COVERS_ENABLED,
     ARTIST_PATH_PREFIX,
     ARTIST_PROFILE_DAYS,
     CONF_AUDIO_CACHE_MB,
@@ -361,10 +362,11 @@ class EntropyFMProvider(MusicProvider):
         """
         Return the settings of the covers.
 
-        The AI option is only offered when the server has an image engine, and its settings (which
-        engine, how many covers an hour) only appear when it is chosen.
+        Only drawn covers and off are offered while `AI_COVERS_ENABLED` is off (see const.py). With it on,
+        the AI option is offered when the server has an image engine, its settings (which engine, how many
+        covers an hour) appear when it is chosen, and so does the button *Redraw covers*.
         """
-        has_engine = bool(await imageapi.engines(self.mass))
+        has_engine = AI_COVERS_ENABLED and bool(await imageapi.engines(self.mass))
         options = [
             ConfigValueOption(COVER_OFF, "Off"),
             ConfigValueOption(COVER_PROCEDURAL, "Drawn from the day"),
@@ -422,14 +424,15 @@ class EntropyFMProvider(MusicProvider):
                     ),
                 ]
             )
-        entries.append(
-            ConfigEntry(
-                key=CONF_REDRAW_COVERS,
-                type=ConfigEntryType.ACTION,
-                action=CONF_REDRAW_COVERS,
-                required=False,
+        if AI_COVERS_ENABLED:
+            entries.append(
+                ConfigEntry(
+                    key=CONF_REDRAW_COVERS,
+                    type=ConfigEntryType.ACTION,
+                    action=CONF_REDRAW_COVERS,
+                    required=False,
+                )
             )
-        )
         return tuple(entries)
 
     async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
@@ -649,7 +652,7 @@ class EntropyFMProvider(MusicProvider):
 
         :param action: The action id of the pressed button.
         """
-        if action != CONF_REDRAW_COVERS:
+        if action != CONF_REDRAW_COVERS or not AI_COVERS_ENABLED:
             return await super().handle_config_action(action)
         await self.covers.clear()
         self._cover_generation += 1
@@ -1067,9 +1070,10 @@ class EntropyFMProvider(MusicProvider):
         )
 
     def _cover_mode(self) -> str:
-        """Return what the covers are: off, procedural or AI."""
+        """Return what the covers are: off, procedural or AI; a stored "ai" is drawn while AI covers are hidden."""
         mode = str(self.get_config_value(CONF_COVERS, COVER_PROCEDURAL) or COVER_PROCEDURAL)
-        return mode if mode in {COVER_OFF, COVER_PROCEDURAL, COVER_AI} else COVER_PROCEDURAL
+        allowed = {COVER_OFF, COVER_PROCEDURAL} | ({COVER_AI} if AI_COVERS_ENABLED else set())
+        return mode if mode in allowed else COVER_PROCEDURAL
 
     def accepts_stored_image_path(self, path: str) -> bool:
         """Accept the covers of this provider when they are read back from stored data."""

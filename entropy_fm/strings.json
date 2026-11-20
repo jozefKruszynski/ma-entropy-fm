@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "Entropy FM",
-    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in six styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, or when you redraw the covers, it asks Music Assistant to re-sync its own items."
+    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in six styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, it asks Music Assistant to re-sync its own items."
   },
   "config_entries": {
     "use_ha_plugin": {
@@ -98,37 +98,7 @@
     },
     "covers": {
       "label": "Covers",
-      "description": "What the covers of the days show. Off: no covers. Drawn from the day: a picture made on your server from the events of the day, in the look of the Music Assistant covers; it is the same every time. AI image engine (only offered when Music Assistant has an image engine): the engine draws the cover from the name of the room and a few abstract mood words; nothing else leaves your server. The drawn cover shows until the AI cover is ready."
-    },
-    "cover_engine": {
-      "label": "Image engine",
-      "description": "Which image engine of Music Assistant makes the AI covers. The default follows the engine that Music Assistant uses."
-    },
-    "cover_style": {
-      "label": "Cover style",
-      "description": "The look of the AI covers: the presets of the Music Assistant playlist covers (Music Assistant, Neon, Bold, Soft Gradient, Risograph, Gouache) or Custom, which uses the prompt below."
-    },
-    "cover_prompt": {
-      "label": "Cover prompt",
-      "description": "The prompt of the AI covers when the style is Custom, as a template: {name} is the name of the room and {context} the mood words of the day. Left empty, the default of Music Assistant is used."
-    },
-    "cover_title": {
-      "label": "Title on the cover",
-      "description": "On: Entropy FM draws the title (the room and the day) over the AI cover, and the engine is told to leave the picture without text. Off: the engine is asked to draw the title itself."
-    },
-    "cover_ai_per_hour": {
-      "label": "AI covers per hour",
-      "description": "The most AI covers that are asked for in an hour, from 1 to 120. A cover is made once and kept; this only paces the first time."
-    },
-    "redraw_covers": {
-      "label": "Redraw covers",
-      "description": "Throws away the covers made so far and makes new ones as albums are shown. AI covers count against the hourly limit.",
-      "action_label": "Redraw covers"
-    }
-  },
-  "config_actions": {
-    "redraw_covers": {
-      "result": "The covers are thrown away; new ones are made as albums are shown."
+      "description": "What the covers of the days show. Off: no covers. Drawn from the day: a picture made on your server from the events of the day, in the look of the Music Assistant covers; it is the same every time."
     }
   }
 }

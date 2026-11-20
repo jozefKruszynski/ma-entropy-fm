@@ -4,7 +4,7 @@ Status: implemented. This replaces the song form, the eight styles and their kit
 
 The decision behind it: after a day of chasing radio-quality tracks in eight genres (and getting a mishmash of bells,
 disjointed melodies and styles that all sounded alike) the project went back to its roots, which is a soundscape.
-One long, slowly evolving piece per room and day, in five styles that can be told apart from the first bar.
+One long, slowly evolving piece per room and day, in six styles that can be told apart from the first bar.
 
 ## Rules that every part follows
 
@@ -58,7 +58,7 @@ Ritual has three rules of its own. A voice that sustains has a hint of vibrato (
 fades in after a second or two, with a rate and a phase of each note's own (`dsp.pitch_vibrato`, the `vibrato` argument of
 `voices.render_note`); it is far below the glide test (a few cents is not a glide). The stretched textures are the one
 expensive thing, so they are made once from a few recipes per day and played again from the cache of notes
-(`stretch.py`). And there is no noise anywhere: the washes are rolled off in the spectrum of the stretch and the drums
+(`stretch.py`). And Ritual has no noise: the washes are rolled off in the spectrum of the stretch and the drums
 are sines and damped modes, so the only broadband sound is the knock of a skin.
 
 Cinematic Glitch has rules of its own. The data steers parameters and never writes a note: the heat of the house (activity and power, in the hours of the day) picks the row of the growl, the pattern of the kit and its level, while the notes come from the chord loop, the bass phrases and the patterns that the day deals. Its renderer (`glitch_render.py`) runs three seconds behind the clock so that an edit (a stutter, a tape stop, a brake, a freeze, a gate) is computed once from the unedited audio of a bus and overlaid, the same for every seek. The master gain is a constant (the arrangement is the dynamics: the night is quiet because it has no drums, not because a leveler pumps), the drum bus is glued and saturated, and the other layers duck from every kick. Edits are rate-limited musically (at least two and a half bars apart with the kit, four to seven without) and never overlap on a bus. A brake is a fast exponential fall of the read speed over 60 to 150 ms, a cut of 1.5 ms, silence up to the next grid point and a snap back; it and the tape stop are the only glides the style has (the glide test allows them).

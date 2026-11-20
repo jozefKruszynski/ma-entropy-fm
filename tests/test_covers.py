@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from datetime import date
@@ -390,6 +391,40 @@ def _provider_module(provider: object, name: str):  # noqa: ANN202
     return importlib.import_module(f"{type(provider).__module__}.{name}")
 
 
+def _ai_covers_on(provider: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the hidden AI covers on, as the constant in const.py does when core Music Assistant allows it."""
+    monkeypatch.setattr(sys.modules[type(provider).__module__], "AI_COVERS_ENABLED", True)
+
+
+async def test_ai_covers_and_redraw_are_hidden_and_a_stored_ai_reads_as_drawn(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only off and drawn are offered, the AI settings and the redraw button are gone, "ai" falls back."""
+    provider, _ = await _setup(mass, fake_hass)
+    engine = MagicMock()
+    engine.uid = "p--e"
+    api = _provider_module(provider, "imageapi")
+
+    async def one(_: MusicAssistant) -> list[MagicMock]:
+        return [engine]
+
+    monkeypatch.setattr(api, "engines", one)
+    entries = {entry.key: entry for entry in await provider.get_config_entries()}
+    assert [o.value for o in entries[CONF_COVERS].options or []] == [COVER_OFF, COVER_PROCEDURAL]
+    assert entries[CONF_COVERS].default_value == COVER_PROCEDURAL
+    for key in ("cover_engine", "cover_style", "cover_prompt", "cover_title", CONF_COVER_LIMIT):
+        assert key not in entries
+    assert CONF_REDRAW_COVERS not in entries
+    with pytest.raises(ActionUnavailable):
+        await provider.handle_config_action(CONF_REDRAW_COVERS)
+    _quiet(provider, monkeypatch, **{CONF_COVERS: COVER_AI})
+    assert provider._cover_mode() == COVER_PROCEDURAL  # noqa: SLF001
+    albums = await provider.get_artist_albums("kitchen")
+    album = next(a for a in albums if a.item_id.startswith("kitchen|"))
+    assert album.metadata.images
+    assert await provider.resolve_image(next(iter(album.metadata.images)).path) is not None
+
+
 async def test_albums_and_tracks_carry_a_drawn_cover_that_the_provider_serves(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
@@ -429,6 +464,7 @@ async def test_the_ai_options_are_hidden_without_an_engine_and_the_api_may_be_mi
 ) -> None:
     """No image engines (or no API at all) means no AI option; the provider still loads."""
     provider, _ = await _setup(mass, fake_hass)
+    _ai_covers_on(provider, monkeypatch)
     api = _provider_module(provider, "imageapi")
 
     def keys(entries) -> dict:  # noqa: ANN001
@@ -444,6 +480,7 @@ async def test_the_ai_options_are_hidden_without_an_engine_and_the_api_may_be_mi
     with pytest.raises(RuntimeError):
         await api.generate(mass, "x", "p")
     monkeypatch.undo()
+    _ai_covers_on(provider, monkeypatch)
     engine = MagicMock()
     engine.uid = "p--e"
     engine.name = "E"
@@ -466,6 +503,7 @@ async def test_the_engine_gets_the_area_as_title_and_a_context_of_mood_words(
 ) -> None:
     """The prompt has the area as the title only; no entity, name or number of the fake house."""
     provider, _ = await _setup(mass, fake_hass)
+    _ai_covers_on(provider, monkeypatch)
     api = _provider_module(provider, "imageapi")
     prompts: list[str] = []
     fail = [False]
@@ -542,6 +580,7 @@ async def test_redraw_covers_clears_the_covers_counts_a_redraw_and_asks_for_a_sy
 ) -> None:
     """The button throws away only the covers, numbers the paths anew, keeps the old ones readable and syncs."""
     provider, _ = await _setup(mass, fake_hass)
+    _ai_covers_on(provider, monkeypatch)
     entry = next(e for e in await provider.get_config_entries() if e.key == CONF_REDRAW_COVERS)
     assert entry.type == ConfigEntryType.ACTION
     assert entry.action == CONF_REDRAW_COVERS
@@ -624,10 +663,11 @@ async def _paths_are_new_and_the_sync_follows(
 
 
 async def test_an_unknown_action_is_refused_and_the_generation_survives_a_reload(
-    mass: MusicAssistant, fake_hass: MagicMock
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Only the redraw button is handled, and the number is read back from the storage."""
     provider, _ = await _setup(mass, fake_hass)
+    _ai_covers_on(provider, monkeypatch)
     with pytest.raises(ActionUnavailable):
         await provider.handle_config_action("nothing")
     path = Path(provider.storage_root) / "cover_generation.json"

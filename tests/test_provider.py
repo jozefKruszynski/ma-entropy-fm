@@ -99,7 +99,6 @@ async def test_settings_have_the_expected_entries(
         "audio_cache_mb",
         "prerender",
         "covers",
-        "redraw_covers",
         "keep_rooms",
         "library_days",
         "rooms",

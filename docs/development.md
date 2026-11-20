@@ -36,8 +36,11 @@ from the demo on their own.
 | `entropy_fm/levels.py` | The gain staging: design levels, measured trims, the loudness estimate of a score. |
 | `entropy_fm/render.py`, `limiter.py` | The render loop, the buses, the room, the leveler, the limiter. |
 | `entropy_fm/quality.py`, `autotune.py` | The three tiers, and the benchmark that Auto uses (it renders the dearest style that is offered). |
-| `entropy_fm/covers.py`, `maart.py`, `imageapi.py` | Album covers. |
-| `scripts/` | `soundscapes.py`, `bench.py`, `measure_drivers.py`, `render_drivers.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, the demo house. |
+| `entropy_fm/covers.py`, `maart.py`, `imageapi.py` | Album covers: drawn locally, and the AI covers (an image engine, the presets of Music Assistant, a rate limiter) that stay hidden while `AI_COVERS_ENABLED` in `const.py` is `False`. |
+| `entropy_fm/roomart.py` | The images of the artists (rooms), drawn from the week of each room. |
+| `entropy_fm/titles.py` | Titles of the tracks, the history and drive text of each style, the line about the day, the review of an album, in English and Dutch. |
+| `entropy_fm/references.py` | Measures each sensor against its own previous days, leaves out the dead ones, finds the showers. |
+| `scripts/` | `soundscapes.py`, `bench.py`, `measure_drivers.py`, `render_drivers.py`, `loudness_report.py`, `glide_report.py`, `voice_report.py`, `gain_staging.py`, `fetch_samples.py`, `analyze_audio.py`, `render_covers.py`, `real_house_demo.py`, `sparse_house.py` and the demo house (`demo_render.py`). |
 
 ## Run the demo
 
@@ -51,7 +54,7 @@ its phases, an oven, a hob cooked on, a Sonos, blinds, a scene of twenty lights,
 
 ```sh
 uv sync
-uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the full pieces, the voice library, soundscapes.md
+uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the full pieces, the voice library, soundscapes.md (--fast, --only excerpts parts voices full notes condensed)
 uv run python scripts/analyze_audio.py --table out/*.mp3
 uv run python scripts/loudness_report.py         # integrated LUFS, short-term, true peak, limiter
 uv run python scripts/glide_report.py out/*.mp3  # the glide tracker of the tests
@@ -76,8 +79,8 @@ be heard quickly), `entropy_fm_<style>_parts.mp3` (each layer alone for a few se
 together), full pieces of Ambient and Berlin School (Ritual and Cinematic Glitch have excerpts and parts), `entropy_fm_voice_library.mp3` (every voice
 alone for four seconds on a short phrase) and `soundscapes.md`, which says for each piece how long it
 is, what plays when, what the day chose, how the house shaped it and which voices it used.
-`analyze_audio.py` prints the levels, the DC offset, the share of energy above 6 kHz, the hiss floor
-(the level above 6 kHz in the quietest 20 percent of 50 ms frames, which is where steady hiss shows and
+`analyze_audio.py` prints the levels, the DC offset, the share of energy above 6 kHz, the noise floor
+(the level above 6 kHz in the quietest 20 percent of 50 ms frames, which is where steady noise shows and
 a hat does not), the spectral centroid and the longest quiet stretch, as a stand-in for listening.
 Nothing here can say that a piece sounds good: only a person can.
 

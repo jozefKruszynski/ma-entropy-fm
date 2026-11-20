@@ -33,6 +33,13 @@ CONF_COVER_LIMIT = "cover_ai_per_hour"
 CONF_COVER_STYLE = "cover_style"
 CONF_COVER_PROMPT = "cover_prompt"
 CONF_COVER_TITLE = "cover_title"
+# AI covers and the button "Redraw covers" are built but hidden: Music Assistant caches the first cover it is
+# given for an item (the drawn one, which is shown while an AI cover is made) and never asks again, so an AI
+# cover would never show and a redraw would change nothing that can be seen. Turn this on when core Music
+# Assistant asks the provider for an item's image again when its path changes (or lets the provider push a
+# replacement); until then a stored covers setting of "ai" is read as drawn covers. The texts of the hidden
+# settings (strings.json, nl.json) were removed with them; restore them from git history when turning this on.
+AI_COVERS_ENABLED = False
 COVER_PATH_PREFIX = "cover"
 # the images of the artists (rooms): `artist|<area id>|thumb or fanart|g<number of the redraw>`
 ARTIST_PATH_PREFIX = "artist"
