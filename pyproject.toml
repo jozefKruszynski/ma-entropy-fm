@@ -1,6 +1,6 @@
 [project]
 name = "ma-entropy-fm"
-version = "0.0.0"
+version = "1.0.0"
 description = "Entropy FM, a community provider for Music Assistant that plays Home Assistant history as generative music"
 license = "Apache-2.0"
 requires-python = ">=3.14"
