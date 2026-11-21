@@ -137,6 +137,7 @@ from .covers import (
     CoverMaker,
     CoverStore,
     RateLimiter,
+    album_style,
     describe_day,
     procedural_cover,
     profile_of,
@@ -186,7 +187,15 @@ from .quality import (
 from .references import rescale
 from .render import render_pcm
 from .roles import parse_overrides
-from .roomart import RoomProfile, artist_fanart, artist_thumb, seeded_profile, week_profile
+from .roomart import (
+    SHAPES,
+    RoomProfile,
+    artist_fanart,
+    artist_thumb,
+    figure_shape,
+    seeded_profile,
+    week_profile,
+)
 from .scape import analysis_of, duration_of, scape_score
 from .score import Score
 from .styles import DEFAULT_STYLE, STYLES, Style, get_style
@@ -224,6 +233,8 @@ SUPPORTED_FEATURES = {
     ProviderFeature.ARTIST_ALBUMS,
 }
 ARTIST_KEY = "@artist|"
+# the version that tells a soundscape (the long piece) from a condensed one
+SOUNDSCAPE_VERSION = "Soundscape"
 # the target of a track: the soundscape of a day
 TRACK_TARGETS = frozenset({SCAPE_ID})
 # how many soundscapes are kept between a request for their length and the stream
@@ -536,8 +547,8 @@ class EntropyFMProvider(MusicProvider):
                 default_value=DEFAULT_LENGTH,
                 required=False,
                 options=[
-                    ConfigValueOption(FULL, "Full (10 to 22 minutes)"),
                     ConfigValueOption(CONDENSED, "Condensed (5 to 7 minutes)"),
+                    ConfigValueOption(FULL, "Soundscape (10 to 22 minutes)"),
                 ],
             ),
             ConfigEntry(
@@ -1057,7 +1068,10 @@ class EntropyFMProvider(MusicProvider):
             [
                 MediaItemImage(
                     type=image_type,
-                    path=f"{ARTIST_PATH_PREFIX}|{area_id}|{kind}|g{self._cover_generation}",
+                    path=(
+                        f"{ARTIST_PATH_PREFIX}|{area_id}|{kind}|{figure_shape(area_id)}"
+                        f"|g{self._cover_generation}"
+                    ),
                     provider=self.instance_id,
                     remotely_accessible=False,
                 )
@@ -1122,12 +1136,14 @@ class EntropyFMProvider(MusicProvider):
         """
         Return the image of a room: drawn once, kept in the cache folder of the covers.
 
-        :param parts: `artist|<area id>|thumb or fanart|g<number of the redraw>`, split at the bars.
+        :param parts: `artist|<area id>|thumb or fanart|<figure>|g<number of the redraw>`, split at the bars;
+            the form without the figure, which stored data may still hold, is accepted too.
         """
         if (
-            len(parts) != 4
+            len(parts) not in {4, 5}
             or parts[2] not in {"thumb", "fanart"}
-            or not re.fullmatch(r"g\d+", parts[3])
+            or (len(parts) == 5 and parts[3] not in SHAPES)
+            or not re.fullmatch(r"g\d+", parts[-1])
             or self._cover_mode() == COVER_OFF
         ):
             return None
@@ -1144,8 +1160,8 @@ class EntropyFMProvider(MusicProvider):
         else:
             return None
         profile = await self._room_profile(area_id, catalog)
-        # a new name or a new week is a new image; the old file ages out of the cache
-        slot = f"artist|{area_id}|{name}|{profile.digest()}|{kind}"
+        # a new name, a new week or a new figure is a new image; the old file ages out of the cache
+        slot = f"artist|{area_id}|{name}|{figure_shape(area_id)}|{profile.digest()}|{kind}"
         if kind == "fanart":
             return await self.covers.make(
                 COVER_PROCEDURAL, slot, slot, lambda: artist_fanart(area_id, profile), None
@@ -1277,7 +1293,9 @@ class EntropyFMProvider(MusicProvider):
             metadata=MediaItemMetadata(
                 genres={"Generative"},
                 description=album_review(area_name, day, facts, self._language),
-                images=self._images(area_id, day, self._offered_styles[0].key),
+                images=self._images(
+                    area_id, day, album_style(facts, [style.key for style in self._offered_styles])
+                ),
             ),
             provider_mappings={self._mapping(item_id)},
             favorite=True if item_id in self.membership.albums else None,
@@ -1285,14 +1303,14 @@ class EntropyFMProvider(MusicProvider):
 
     def _item_id(self, ref: TrackRef) -> str:
         """
-        Return the id a track is listed under: the old id for a full piece, a longer one for a condensed piece.
+        Return the id a track is listed under: the plain id for a condensed piece, a longer one for a soundscape.
 
         Music Assistant never rewrites the length of an item it has stored, so the length is in the id (and in the
         version of the track, see `_track`) and a change of *Piece length* lists other items. Either id plays the length
         that is set.
         """
         return track_id(
-            ref.area_id, ref.day, ref.target, ref.style, condensed=self._length_mode == CONDENSED
+            ref.area_id, ref.day, ref.target, ref.style, soundscape=self._length_mode == FULL
         )
 
     def _track(  # noqa: PLR0913, PLR0917
@@ -1314,8 +1332,8 @@ class EntropyFMProvider(MusicProvider):
             version = style.version if len(self._offered_styles) > 1 else ""
         # the version tells the two lengths apart for Music Assistant, which takes tracks of one album with the same title,
         # artist, version and number for one item (and then keeps its stored length)
-        if self._length_mode == CONDENSED:
-            version = f"{version}, Condensed" if version else "Condensed"
+        if self._length_mode == FULL:
+            version = f"{version}, {SOUNDSCAPE_VERSION}" if version else SOUNDSCAPE_VERSION
         return Track(
             item_id=item_id,
             provider=self.instance_id,

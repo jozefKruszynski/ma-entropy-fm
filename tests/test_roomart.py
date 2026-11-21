@@ -6,19 +6,22 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 from music_assistant_models.enums import ImageType, MediaType
 from PIL import Image
 
 from entropy_fm.const import CONF_COVERS, WHOLE_HOUSE_ID
-from entropy_fm.covers import COVER_OFF
+from entropy_fm.covers import COVER_OFF, SIZE
 from entropy_fm.roomart import (
     HOURS,
+    SHAPES,
     WIDE_HEIGHT,
     WIDE_WIDTH,
     RoomProfile,
     _figure,
     artist_fanart,
     artist_thumb,
+    figure_shape,
     room_colours,
     seeded_profile,
     week_profile,
@@ -29,7 +32,6 @@ from tests.test_library_provider import _quiet
 from tests.test_provider import _collect, _setup
 
 if TYPE_CHECKING:
-    import pytest
     from music_assistant_models.media_items import Artist
 
 
@@ -190,14 +192,16 @@ async def test_a_room_is_drawn_from_its_kept_days_and_otherwise_from_its_id(
 async def test_unknown_artist_images_are_refused(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """A room that does not exist, a wrong kind and a missing generation are not served."""
+    """A room that does not exist, a wrong kind or figure and a missing generation are not served."""
     provider, _ = await _setup(mass, fake_hass)
     gen = f"g{provider._cover_generation}"  # noqa: SLF001
     assert await provider.resolve_image(f"artist|nowhere|thumb|{gen}") is None
     assert await provider.resolve_image(f"artist|kitchen|logo|{gen}") is None
     assert await provider.resolve_image("artist|kitchen|thumb") is None
     assert await provider.resolve_image("artist|kitchen|thumb|gx") is None
+    assert await provider.resolve_image(f"artist|kitchen|thumb|blob|{gen}") is None
     assert await provider.resolve_image(f"artist|kitchen|thumb|{gen}") is not None
+    assert await provider.resolve_image(f"artist|kitchen|thumb|bars|{gen}") is not None
 
 
 async def test_with_covers_off_there_are_no_artist_images_either(
@@ -212,3 +216,30 @@ async def test_with_covers_off_there_are_no_artist_images_either(
     assert all(not artist.metadata.images for artist in artists)
     for path in before.values():
         assert await provider.resolve_image(path) is None
+
+
+def _room_of(shape: str) -> str:
+    """Return the id of a room whose figure has the shape."""
+    return next(area for area in (f"room{n}" for n in range(200)) if figure_shape(area) == shape)
+
+
+def test_the_figure_shape_is_stable_and_varies_between_rooms() -> None:
+    """Rooms do not all get the same figure, and the house is always the clock."""
+    areas = [f"room{n}" for n in range(12)]
+    assert {figure_shape(area) for area in areas} == set(SHAPES)
+    assert figure_shape(WHOLE_HOUSE_ID) == "clock"
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_shape_draws_a_valid_thumb_and_fanart(shape: str) -> None:
+    """Each shape makes a square and a wide JPEG, and a busier day makes another picture."""
+    area = _room_of(shape)
+    profile = _profile([7, 8, 18, 19, 20])
+    thumb, fanart = (
+        _picture(artist_thumb(area, "Kitchen", profile)),
+        _picture(artist_fanart(area, profile)),
+    )
+    assert thumb.format == fanart.format == "JPEG"
+    assert thumb.size == (SIZE, SIZE)
+    assert fanart.size == (WIDE_WIDTH, WIDE_HEIGHT)
+    assert artist_thumb(area, "Kitchen", profile) != artist_thumb(area, "Kitchen", _profile([3]))

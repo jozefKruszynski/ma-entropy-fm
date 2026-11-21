@@ -249,8 +249,10 @@ def album_id(area_id: str, day: date) -> str:
     return f"{area_id}|{day.isoformat()}"
 
 
-# the last part of the id of a track that is listed as a condensed piece
-CONDENSED_MARK = "condensed"
+# the last part of the id of a track that is listed as the long piece
+SOUNDSCAPE_MARK = "soundscape"
+# the last part that ids made when the condensed piece was marked still carry; they play the condensed piece now
+LEGACY_CONDENSED_MARK = "condensed"
 
 
 def track_id(
@@ -259,23 +261,23 @@ def track_id(
     target: str = SCAPE_ID,
     style: str | None = None,
     *,
-    condensed: bool = False,
+    soundscape: bool = False,
 ) -> str:
     """
     Return the item id of a track; it holds the style, so that each style is its own version.
 
-    A full piece keeps the id that tracks always had. A condensed piece adds a last part, so that it is another item
+    A condensed piece has the plain id. A soundscape (the long piece) adds a last part, so that it is another item
     to Music Assistant, which never rewrites the length of an item that it has stored.
 
     :param area_id: The area id, or the id of the whole house.
     :param day: The day.
     :param target: The entity id of a voice, or the id of the ensemble.
     :param style: The key of the style; without one the id is the old one, which plays Ambient.
-    :param condensed: Whether the track is listed as the condensed piece.
+    :param soundscape: Whether the track is listed as the long piece.
     """
     item = f"{area_id}|{day.isoformat()}|{target}"
-    if condensed:
-        return f"{item}|{style or DEFAULT_STYLE}|{CONDENSED_MARK}"
+    if soundscape:
+        return f"{item}|{style or DEFAULT_STYLE}|{SOUNDSCAPE_MARK}"
     return f"{item}|{style}" if style else item
 
 
@@ -283,7 +285,7 @@ def canonical_track_id(item_id: str) -> str:
     """
     Return the id of a track whatever its length: what hearts and pins are kept under.
 
-    :param item_id: An id made by `track_id`, full or condensed.
+    :param item_id: An id made by `track_id`, of either length.
     :raises ValueError: When it is not one.
     """
     ref = parse_track_id(item_id)
@@ -316,7 +318,12 @@ def parse_track_id(item_id: str) -> TrackRef:
     day, _, rest = rest.partition("|")
     target, _, rest = rest.partition("|")
     style, _, mark = rest.partition("|")
-    if not area_id or not day or not target or mark not in {"", CONDENSED_MARK}:
+    if (
+        not area_id
+        or not day
+        or not target
+        or mark not in {"", SOUNDSCAPE_MARK, LEGACY_CONDENSED_MARK}
+    ):
         raise ValueError(item_id)
     return TrackRef(area_id, date.fromisoformat(day), target, style or DEFAULT_STYLE)
 

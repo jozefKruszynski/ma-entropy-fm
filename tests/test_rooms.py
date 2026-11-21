@@ -168,8 +168,8 @@ async def test_the_new_settings_and_their_defaults(
     assert entries[CONF_HOUSE_SELECTED].default_value is True
     assert entries[CONF_HIDE_QUIET].default_value is True
     length = entries[CONF_LENGTH]
-    assert length.default_value == "full"
-    assert [option.value for option in length.options] == ["full", "condensed"]
+    assert length.default_value == "condensed"
+    assert [option.value for option in length.options] == ["condensed", "full"]
 
 
 async def test_no_room_ticked_is_every_room_and_a_ticked_room_is_alone(
@@ -317,24 +317,24 @@ async def test_the_pre_render_leaves_out_rooms_that_are_not_offered(
 async def test_the_audio_cache_key_holds_the_length_and_the_rooms_of_the_house(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Full and condensed never share a file, and neither do two house mixes made of other rooms."""
+    """Condensed and soundscape never share a file, and neither do two house mixes made of other rooms."""
     provider, _ = await _setup(mass, fake_hass)
     day = (await provider._now()).date() - timedelta(days=2)  # noqa: SLF001
     today = (await provider._now()).date()  # noqa: SLF001
     kitchen = TrackRef("kitchen", day, "_scape", "lofi")
     house = TrackRef(WHOLE_HOUSE_ID, day, "_scape", "lofi")
-    full = provider._audio_key(kitchen, today)  # noqa: SLF001
-    full_house = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
-    assert full is not None
-    assert full_house is not None
-
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
     short = provider._audio_key(kitchen, today)  # noqa: SLF001
     short_house = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
-    assert short not in {None, full}
-    assert short_house not in {None, full_house}
+    assert short is not None
+    assert short_house is not None
 
-    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"]})
+    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
+    full = provider._audio_key(kitchen, today)  # noqa: SLF001
+    full_house = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
+    assert full not in {None, short}
+    assert full_house not in {None, short_house}
+
+    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"], CONF_LENGTH: "condensed"})
     # a room does not change with the ticks; the whole house does
     assert provider._audio_key(kitchen, today) == short  # noqa: SLF001
     assert provider._audio_key(house, today, await provider._catalog_all()) != short_house  # noqa: SLF001
@@ -366,7 +366,7 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
         "glitch": 300,
     }
     for style in ("lofi", "ambient"):
-        item_id = f"{past.item_id}|_scape|{style}|condensed"
+        item_id = f"{past.item_id}|_scape|{style}"
         details = await provider.get_stream_details(item_id, MediaType.TRACK)
         assert details.duration == condensed_seconds(style)
         assert (await provider.get_track(item_id)).duration == details.duration
@@ -551,7 +551,7 @@ async def test_the_keep_list_only_offers_the_rooms_that_are_shown(
 async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_listing_agrees(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Condensed asks for one sync like a change of rooms; get_track, album and library tracks list its lengths."""
+    """A soundscape asks for one sync like a change of rooms; get_track, album and library tracks list its lengths."""
     provider, _ = await _setup(mass, fake_hass)
     asked: list[list[str]] = []
 
@@ -562,11 +562,11 @@ async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_li
     monkeypatch.setattr(mass.music, "start_sync", start_sync)
     assert await provider.sync_if_rooms_changed()
     assert not await provider.sync_if_rooms_changed()
-    full = [t.duration async for t in provider.get_library_tracks()]
-    assert full
-    assert all(600 <= seconds <= 1320 for seconds in full)
+    short = [t.duration async for t in provider.get_library_tracks()]
+    assert short
+    assert all(270 <= seconds <= 480 for seconds in short)
 
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
+    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
     assert await provider.sync_if_rooms_changed()
     assert not await provider.sync_if_rooms_changed()
     assert len(asked) == 2
@@ -576,20 +576,18 @@ async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_li
     ]
     listed = await provider.get_album_tracks(albums[2].item_id)
     for track in listed:
-        style = parse_track_id(track.item_id).style
-        assert track.duration == condensed_seconds(style)
+        assert 600 <= track.duration <= 1320
         assert (await provider.get_track(track.item_id)).duration == track.duration
     library = [t async for t in provider.get_library_tracks()]
     assert library
-    assert {t.duration for t in library} == {condensed_seconds(s) for s in ("ambient", "lofi")}
-    assert all(t.duration == condensed_seconds(parse_track_id(t.item_id).style) for t in library)
-    assert {t.duration for t in library} != set(full)
+    assert all(600 <= t.duration <= 1320 for t in library)
+    assert {t.duration for t in library} != set(short)
 
-    # back to full: asked again
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
+    # back to condensed: asked again
+    _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
     assert await provider.sync_if_rooms_changed()
     assert len(asked) == 3
-    assert sorted([t.duration async for t in provider.get_library_tracks()]) == sorted(full)
+    assert sorted([t.duration async for t in provider.get_library_tracks()]) == sorted(short)
 
 
 async def test_a_sync_marker_of_an_earlier_version_asks_for_one_more_sync(

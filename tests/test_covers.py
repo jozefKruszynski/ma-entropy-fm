@@ -34,12 +34,14 @@ from entropy_fm.covers import (
     CoverStore,
     DayProfile,
     RateLimiter,
+    album_style,
     describe_day,
     procedural_cover,
     profile_of,
 )
 from entropy_fm.maart import CoverLook, build_prompt
 from entropy_fm.timeline import EntityInfo, Series, VoiceKind, build_series
+from entropy_fm.titles import DayFacts
 from music_assistant.mass import MusicAssistant
 from tests.test_library_provider import _quiet
 from tests.test_provider import _setup
@@ -679,3 +681,32 @@ async def test_an_unknown_action_is_refused_and_the_generation_survives_a_reload
     assert provider._read_cover_generation() == 7  # noqa: SLF001
     path.write_text("junk")
     assert provider._read_cover_generation() == 0  # noqa: SLF001
+
+
+STYLES = list(PALETTES)
+
+
+@pytest.mark.parametrize(
+    ("facts", "style"),
+    [
+        (DayFacts(0.1, 14, "door", 3), "ambient"),
+        (DayFacts(0.9, 14, "door", 30), "glitch"),
+        (DayFacts(0.5, 23, "door", 10), "ritual"),
+        (DayFacts(0.5, 3, "door", 10), "ritual"),
+        (DayFacts(0.5, 19, "tv", 10), "lofi"),
+        (DayFacts(0.5, 11, "door", 10), "berlin_school"),
+    ],
+)
+def test_the_cover_of_an_album_follows_the_character_of_the_day(
+    facts: DayFacts, style: str
+) -> None:
+    """Quiet, busy, night, evening and daytime days each get the glyph of another style."""
+    assert album_style(facts, STYLES) == style
+
+
+def test_the_cover_of_an_album_is_always_an_offered_style() -> None:
+    """A style that is not offered is replaced by the first offered one, as is a day without facts."""
+    assert album_style(DayFacts(0.9, 14, "door", 30), ["lofi", "ambient"]) == "lofi"
+    assert album_style(DayFacts(0.1, 14, "door", 3), ["lofi", "ambient"]) == "ambient"
+    assert album_style(None, ["lofi", "ambient"]) == "lofi"
+    assert album_style(DayFacts(), ["ritual"]) == "ritual"

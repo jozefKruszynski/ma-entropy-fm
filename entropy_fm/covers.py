@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from PIL import Image
 
     from .timeline import Series
+    from .titles import DayFacts
 
 SIZE = 1024
 BINS = 96
@@ -320,6 +321,40 @@ GLYPHS = {
     "ritual": _glyph_drum,
     "glitch": _glyph_slices,
 }
+# the hours that tell a night day from an evening day from a daytime one, for the cover of an album
+NIGHT_FROM_HOUR = 22
+NIGHT_UNTIL_HOUR = 6
+EVENING_FROM_HOUR = 17
+
+
+def album_style(facts: DayFacts | None, offered: Sequence[str]) -> str:
+    """
+    Return the style whose glyph is the cover of the album of a day, by the character of the day.
+
+    A busy day is glitch, a quiet one ambient. Between the two the busiest hour decides: at night
+    ritual, in the evening lofi, in the daytime berlin_school. A style that is not offered is
+    replaced by the first offered one, which is also the answer for a day without facts.
+
+    :param facts: What the day was like, None when it is not known.
+    :param offered: The keys of the offered styles, in their order; there is at least one.
+    """
+    from .titles import BUSY_ABOVE, QUIET_BELOW  # noqa: PLC0415
+
+    if facts is None or not facts.has_data:
+        return offered[0]
+    if facts.intensity >= BUSY_ABOVE:
+        wanted = "glitch"
+    elif facts.intensity < QUIET_BELOW:
+        wanted = "ambient"
+    elif facts.busiest_hour >= NIGHT_FROM_HOUR or facts.busiest_hour < NIGHT_UNTIL_HOUR:
+        wanted = "ritual"
+    elif facts.busiest_hour >= EVENING_FROM_HOUR:
+        wanted = "lofi"
+    else:
+        wanted = "berlin_school"
+    return wanted if wanted in offered else offered[0]
+
+
 # how far each glyph reaches below its centre, in its own units
 REACH = {
     "berlin_school": 380,

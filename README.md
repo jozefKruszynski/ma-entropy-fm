@@ -19,7 +19,7 @@ the Music Assistant team. Questions and problems go to the
 |---|---|
 | Artist | A Home Assistant area, such as "Kitchen", and one more, "Whole House" |
 | Album | One day of one area: "Kitchen, Tue 17 Nov" |
-| Track | The soundscape of that day, 10 to 22 minutes (5 to 7 when *Piece length* is Condensed), with a title of its own: "Dishwasher at Dusk (Ambient)". Each style you offer is its own version, so an album has up to five tracks. |
+| Track | The soundscape of that day, 5 to 7 minutes (10 to 22 when *Piece length* is Soundscape), with a title of its own: "Dishwasher at Dusk (Ambient)". Each style you offer is its own version, so an album has up to five tracks. |
 
 **Titles and descriptions.** Every track is named from what the day was like: the busiest hour, the
 kind of thing that ran (a dishwasher, a hob, a door at night), the temperature, the weekday and how busy it
@@ -35,9 +35,8 @@ entity, and why it has it, is in the diagnostics of the provider. An album has a
 the weekday, what kind of day it was). Titles and descriptions follow the language of the server when it is Dutch,
 and are English otherwise (see *Known limitations* for when a changed title shows).
 
-A soundscape is as long as its day was busy, between 10 and 22 minutes (or, as a condensed piece,
-about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi and Cinematic
-Glitch, whatever the day), and the day is spread over it in order: the night is sparse and dark, the morning brightens, the busy part of the day is
+A piece is by default condensed: about 7 minutes in Ambient, Berlin School and Ritual and about 5 in Lo-fi and
+Cinematic Glitch, whatever the day (or, as a Soundscape, as long as its day was busy, between 10 and 22 minutes), and the day is spread over it in order: the night is sparse and dark, the morning brightens, the busy part of the day is
 denser and warmer, the evening is fuller, the late night thins out again. A soundscape of today
 needs three hours of the day to have happened. Tracks can be seeked, and the same room, day and
 style always sound the same.
@@ -119,7 +118,7 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| Piece length | Full | Full (10 to 22 minutes), Condensed (5 to 7 minutes) | Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Cinematic Glitch). The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play (a full piece is read from its day when it is listed). |
+| Piece length | Condensed | Condensed (5 to 7 minutes), Soundscape (10 to 22 minutes) | Condensed: the same house data and plan in about 7 minutes (Ambient, Berlin School, Ritual) or about 5 minutes (Lo-fi, Cinematic Glitch). Soundscape: as long as the day was busy, 10 to 22 minutes. The hours of the day pass faster, the little things of the house are thinned out and unusual moments are kept (see [docs/how-it-works.md](docs/how-it-works.md#piece-length)). Tracks show the length that they play (a Soundscape is read from its day when it is listed). |
 | Key | D | C, C#, D, D#, E, F, F#, G, G#, A, A#, B | The root note that the pitches are tuned to; the key of a day walks away from it and back. |
 | Scale | Dorian | Dorian, Natural minor (Aeolian), Mixolydian, Lydian, Major (Ionian), Minor pentatonic, Major pentatonic | The scale of the pieces. A style that does not have the scale uses its own: Berlin School is in a minor mode, Ritual keeps a Japanese pentatonic, Cinematic Glitch is in aeolian or phrygian. |
 | Activity offset | 0 | -50 to 50 | Points added to how lively the house seems. The activity brings layers in and out and sets how dense and how fast they are; it never writes notes. |
@@ -149,7 +148,7 @@ engine" that an earlier install stored is read as drawn covers.
 The settings that change the sound (piece length, key, scale, activity offset, character of the day,
 presence, roles, exclusions, quality) are part of the key of an audio cache file, and so are the
 rooms that the whole house is made of, so a changed setting plays a fresh render and never an old
-file; Full and Condensed never share a file.
+file; Condensed and Soundscape never share a file.
 
 ## Render quality, and small machines
 
@@ -257,10 +256,10 @@ Home Assistant for them.
   are shown or the piece length change.
 - **Tracks stored before the length fix keep their old length until they are synced again.** A track used to be listed
   with a nominal 15 minutes whatever its real length, and Music Assistant never rewrites a stored length. A track is now
-  listed with the length it plays (a full piece with the real length of its day, a condensed piece with its fixed one),
-  and the length is part of its id and its version ("Ambient, Condensed"), so a changed *Piece length* lists new items
+  listed with the length it plays (a Soundscape with the real length of its day, a condensed piece with its fixed one),
+  and the length is part of its id and its version ("Ambient, Soundscape"), so a changed *Piece length* lists new items
   and the next sync replaces the old ones; hearts follow, because they are kept for the day and the style. Items whose
-  ids do not change (full pieces stored before the upgrade) keep the old length until you use *Refresh metadata* on them.
+  ids do not change (condensed pieces stored before the upgrade) keep the old length until you use *Refresh metadata* on them.
   The soundscape of today is listed with the length of the day so far and can play longer later.
 - **The frontend shows no track descriptions**, and labels the description of an album "Review".
 - **AI covers are hidden** for the reason above: Music Assistant caches the first cover it receives, which is the

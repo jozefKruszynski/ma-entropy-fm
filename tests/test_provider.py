@@ -14,7 +14,8 @@ from music_assistant_models.errors import MediaNotFoundError
 from music_assistant_models.media_items import Album
 
 from entropy_fm import EntropyFMProvider
-from entropy_fm.const import MIN_SCAPE_SECONDS_OF_DAY
+from entropy_fm.const import CONF_LENGTH, MIN_SCAPE_SECONDS_OF_DAY
+from entropy_fm.plan import FULL
 from entropy_fm.styles import STYLES
 from music_assistant.mass import MusicAssistant
 from music_assistant.models.music_provider import MusicProvider
@@ -25,12 +26,19 @@ PLUGIN_WAIT_SECONDS = 2
 VIENNA = ZoneInfo("Europe/Vienna")
 
 
-async def _setup(mass: MusicAssistant, fake: MagicMock) -> tuple[EntropyFMProvider, MagicMock]:
-    """Add the provider, which finds the fake plugin."""
+async def _setup(
+    mass: MusicAssistant, fake: MagicMock, length: str | None = None
+) -> tuple[EntropyFMProvider, MagicMock]:
+    """Add the provider, which finds the fake plugin; `length` sets the piece length, else it is the default."""
     step = await mass.config.setup_provider(DOMAIN)
     assert step.result is not None
     provider = mass.get_provider(step.result["instance_id"])
     assert isinstance(provider, MusicProvider)
+    if length is not None:
+        real = provider.get_config_value
+        provider.get_config_value = lambda key, default=None: (  # type: ignore[assignment]
+            length if key == CONF_LENGTH else real(key, default)
+        )
     # the server loads the provider as its own module: it is the class of this repository by name
     return cast("EntropyFMProvider", provider), fake
 
@@ -228,7 +236,7 @@ async def test_a_full_track_is_listed_with_the_length_it_plays(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
     """A past day is listed with its real length (10 to 22 minutes), the one the stream tells."""
-    provider, _ = await _setup(mass, fake_hass)
+    provider, _ = await _setup(mass, fake_hass, FULL)
     albums = await _all_albums(provider)
     past = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
     tracks = await provider.get_album_tracks(past.item_id)
@@ -299,7 +307,7 @@ async def test_stream_is_deterministic_seekable_pcm(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A track streams one second per chunk of 16 bit stereo, and the same seek is the same audio."""
-    provider, fake = await _setup(mass, fake_hass)
+    provider, fake = await _setup(mass, fake_hass, FULL)
     # a fixed tier: the benchmark of Auto may finish between two renders and change the tier
     real = provider.get_config_value
     monkeypatch.setattr(
@@ -342,7 +350,7 @@ async def test_stream_is_deterministic_seekable_pcm(
 
 async def test_every_kind_of_track_streams(mass: MusicAssistant, fake_hass: MagicMock) -> None:
     """The soundscape of a room and of the whole house play."""
-    provider, _ = await _setup(mass, fake_hass)
+    provider, _ = await _setup(mass, fake_hass, FULL)
     albums = await _all_albums(provider)
     kitchen = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
     house = [a for a in albums if a.item_id.startswith("_house|")][-1]
@@ -394,7 +402,7 @@ async def test_the_style_in_the_id_chooses_the_sound(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
     """The same day sounds different per style; an id without a style is Ambient, as before."""
-    provider, _ = await _setup(mass, fake_hass)
+    provider, _ = await _setup(mass, fake_hass, FULL)
     albums = await _all_albums(provider)
     past = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
     base = f"{past.item_id}|_scape"
@@ -411,7 +419,7 @@ async def test_the_style_in_the_id_chooses_the_sound(
 
 async def test_every_style_streams(mass: MusicAssistant, fake_hass: MagicMock) -> None:
     """Each style plays the soundscape: whole seconds of PCM."""
-    provider, _ = await _setup(mass, fake_hass)
+    provider, _ = await _setup(mass, fake_hass, FULL)
     albums = await _all_albums(provider)
     past = [a for a in albums if a.item_id.startswith("kitchen|")][-1]
     for style in STYLES:
@@ -423,7 +431,7 @@ async def test_a_soundscape_is_as_long_as_its_day_and_streams_the_same_each_time
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The length of a soundscape comes from its day (10 to 22 minutes); its audio repeats."""
-    provider, _ = await _setup(mass, fake_hass)
+    provider, _ = await _setup(mass, fake_hass, FULL)
     real = provider.get_config_value
     monkeypatch.setattr(
         provider,

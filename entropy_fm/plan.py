@@ -47,11 +47,11 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 MIN_SECONDS = 600
 MAX_SECONDS = 1320
-# the length of a piece: the whole of the day's busyness, or a condensed one of a fixed length per style
+# the length of a piece: a condensed one of a fixed length per style, or the whole of the day's busyness (the soundscape)
 FULL = "full"
 CONDENSED = "condensed"
 LENGTHS = (FULL, CONDENSED)
-DEFAULT_LENGTH = FULL
+DEFAULT_LENGTH = CONDENSED
 # a condensed piece is as long as the style needs to say something: slow styles take 7 minutes, fast ones 5
 CONDENSED_SECONDS = {
     "ambient": 420,

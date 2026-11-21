@@ -38,7 +38,7 @@
     },
     "piece_length": {
       "label": "Piece length",
-      "description": "Full: as long as the day was busy, 10 to 22 minutes. Condensed: the same day and the same plan in a shorter piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Full and condensed pieces are cached and pre-rendered apart."
+      "description": "Condensed: the same day and the same plan in a short piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Soundscape: as long as the day was busy, 10 to 22 minutes. Condensed pieces and soundscapes are cached and pre-rendered apart."
     },
     "key": {
       "label": "Key",

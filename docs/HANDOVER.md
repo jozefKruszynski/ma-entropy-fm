@@ -105,11 +105,11 @@ series only, generic entity ids, kept out of the shipped package).
 
 - Library: the sync shows the shown rooms, the recent days and all five tracks of each day; hearts
   keep days (pins). The library button does nothing special.
-- Settings: "Rooms to show" (multi-select), "Keep every day forever", "Piece length" (Full or
-  Condensed, 5 to 7 minutes), "Pre-render past days", "Render quality" (Auto benchmarks the
+- Settings: "Rooms to show" (multi-select), "Keep every day forever", "Piece length" (Condensed,
+  5 to 7 minutes, or Soundscape), "Pre-render past days", "Render quality" (Auto benchmarks the
   heaviest offered style).
 - Track titles are generated per room, day and style; descriptions carry the style's history.
-  Condensed tracks have their own id and the version "Condensed".
+  Soundscape tracks (the long piece) have their own id (a last part `soundscape`) and the version "Soundscape".
 - Covers are drawn only; AI covers and "Redraw covers" are hidden behind `AI_COVERS_ENABLED`.
   Room images are 24-hour clock figures from the room's week.
 - Ritual: one pluck line, slit drum and woodblock (VCSL, CC0), shishi-odoshi clack, drones, washes,

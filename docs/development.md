@@ -28,7 +28,7 @@ from the demo on their own.
 | `entropy_fm/day_analysis.py`, `energy.py` | The day read as a curve of activity, five to seven stretches and salient moments. |
 | `entropy_fm/baseline.py`, `surprise.py`, `palette.py`, `variation.py` | What is usual, what is unusual, the character of the day, the dealing of material. |
 | `entropy_fm/character.py` | The character of a day (how busy, what shape, how warm, how many stretches, what stood out, a day off), the key and mode, the tempo position and the chord length it asks for, and the motif of each room. |
-| `entropy_fm/plan.py` | The length of the piece (full, or condensed per style), the arc of the day over it, the curves the house gives, the thinning of events when condensed, the deals. |
+| `entropy_fm/plan.py` | The length of the piece (condensed per style, or the full length of a Soundscape), the arc of the day over it, the curves the house gives, the thinning of events when condensed, the deals. |
 | `entropy_fm/scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_ritual.py`, `scape_glitch.py` | The five generative systems and their composed vocabulary. |
 | `entropy_fm/harmony.py` | What the styles share: voice leading, held tones, the voice a day picks by its energy and warmth, the length of a chord, the shared growling bass family, and how the motif of a room is developed from one statement to the next. |
 | `entropy_fm/glitch.py`, `glitch_drums.py`, `glitch_kits.py`, `glitch_voices.py`, `glitch_render.py` | The sounds of Cinematic Glitch (swells, stabs, growl, kit), its drum families, the edits, and its own renderer (a block pipeline with a latency of three seconds, so that an edit can read the material before it). |

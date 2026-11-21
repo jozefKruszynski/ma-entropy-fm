@@ -41,7 +41,7 @@ CONF_COVER_TITLE = "cover_title"
 # settings (strings.json, nl.json) were removed with them; restore them from git history when turning this on.
 AI_COVERS_ENABLED = False
 COVER_PATH_PREFIX = "cover"
-# the images of the artists (rooms): `artist|<area id>|thumb or fanart|g<number of the redraw>`
+# the images of the artists (rooms): `artist|<area id>|thumb or fanart|<figure>|g<number of the redraw>`
 ARTIST_PATH_PREFIX = "artist"
 
 DEFAULT_DAYS = 10

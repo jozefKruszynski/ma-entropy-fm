@@ -38,7 +38,7 @@
     },
     "piece_length": {
       "label": "Lengte van het stuk",
-      "description": "Full: zo lang als de dag druk was, 10 tot 22 minuten. Condensed: dezelfde dag en hetzelfde plan in een korter stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Full- en Condensed-stukken worden apart gecachet en vooraf gerenderd."
+      "description": "Condensed: dezelfde dag en hetzelfde plan in een kort stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Soundscape: zo lang als de dag druk was, 10 tot 22 minuten. Condensed-stukken en soundscapes worden apart gecachet en vooraf gerenderd."
     },
     "key": {
       "label": "Toonsoort",

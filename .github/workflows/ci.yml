@@ -38,11 +38,28 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
 
+  # every channel the registry checks releases on: nightly, beta and one per stable version
+  channels:
+    name: Catalog channels
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.read.outputs.list }}
+    steps:
+      - id: read
+        env:
+          CHANNELS_URL: https://raw.githubusercontent.com/music-assistant/community-catalog/main/channels.json
+        run: echo "list=$(curl -fsSL "$CHANNELS_URL" | jq -c '.channels | keys')" >> "$GITHUB_OUTPUT"
+
   # the checks every release gets in the catalog: the manifest, the requirements against a
   # channel and loading the provider in the server image of that channel
   catalog:
     name: Catalog checks
+    needs: channels
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.channels.outputs.list) }}
     uses: music-assistant/community-catalog/.github/workflows/check-provider.yml@main
     with:
       folder: entropy_fm
-      channel: nightly
+      channel: ${{ matrix.channel }}

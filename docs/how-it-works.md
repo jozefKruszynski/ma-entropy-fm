@@ -207,8 +207,8 @@ The appliance runs, the vacuum and the blinds are such special moments, never ne
 
 ## Piece length
 
-*Piece length* is *Full* (the default: 10 to 22 minutes, as long as the day was busy) or
-*Condensed*. A condensed piece is made from the same house data, the same plan (the same
+*Piece length* is *Condensed* (the default) or *Soundscape* (10 to 22 minutes, as long as the day was busy).
+A condensed piece is made from the same house data, the same plan (the same
 curves, deals, key and mode) and the same composer; only the clock is faster: the day is spread over
 about 7 minutes in the slow styles (Ambient, Berlin School, Ritual) and about 5 in the fast ones
 (Lo-fi, Cinematic Glitch). The length is fixed for a style, so the track shows the
@@ -222,12 +222,12 @@ length it plays. What keeps it from getting crowded:
   condensed, at most three drops.
 - The curves of activity, brightness, lights and power are smoothed over at least 12 seconds, so that
   a build or a fade of a layer is never faster than a few seconds; the fades at the start and the
-  end are the same as in a full piece.
+  end are the same as in a Soundscape.
 - The density of the notes is not driven by the number of events but by the activity curve, so it
-  stays about what it is in a full piece (a test checks that notes per minute stay within 30 percent).
+  stays about what it is in a Soundscape (a test checks that notes per minute stay within 30 percent).
 
 The soundscape of today still needs three hours of the day to have happened, whatever the length.
-Full and Condensed are cached and pre-rendered apart (the length is in the audio cache key).
+Condensed and Soundscape are cached and pre-rendered apart (the length is in the audio cache key).
 
 ## How entities get their sound
 
