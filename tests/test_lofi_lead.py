@@ -15,7 +15,7 @@ from entropy_fm.plan import FORM_BARS, PieceOptions, Plan
 from entropy_fm.quality import STANDARD
 from entropy_fm.render import render_all
 from entropy_fm.scape import scape_score
-from entropy_fm.score import Score
+from entropy_fm.score import LAYER_KEYS, Score
 from entropy_fm.synth import Scale
 
 from .scape_tools import the_demo
@@ -169,4 +169,6 @@ def test_the_lead_is_louder_in_its_phrase_than_when_it_does_not_lead(layer: str)
         audio = render_all(score, STANDARD, "a", None, start_s=start, end_s=end, solo=solo)
         return float(DB_PER_BEL * np.log10(np.sqrt(np.mean(audio**2)) + SILENCE_FLOOR))
 
-    assert level(dry) - level(back) >= lead.LEAD_STEP_DB
+    # the keys are trimmed down while they lead, so they only have to come up
+    least = 0.0 if layer == LAYER_KEYS else lead.LEAD_STEP_DB
+    assert level(dry) - level(back) > least

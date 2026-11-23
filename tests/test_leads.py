@@ -11,6 +11,7 @@ from .lead_tools import (
     GLITCH_PIANO_WINDOW_DB,
     LEADS,
     LEVEL_WINDOW_DB,
+    LOFI_KEYS_WINDOW_DB,
     ROOMS,
     compose_with,
     count,
@@ -22,6 +23,9 @@ from .lead_tools import (
 
 STYLES = tuple(LEADS)
 GLITCH_PIANO = ("glitch", "piano")
+LOFI_KEYS = ("lofi", "keys")
+# the leads whose level window is their own
+OWN_WINDOWS = {GLITCH_PIANO: GLITCH_PIANO_WINDOW_DB, LOFI_KEYS: LOFI_KEYS_WINDOW_DB}
 DAYS = (7, 9, 11, 13)
 # a happening of the house for each kind of sound
 KIND_OF = {lead.PERCUSSIVE: "door", lead.RHYTHMIC: "appliance", lead.SUSTAINED: "light"}
@@ -108,7 +112,7 @@ def test_nobody_leads_at_night_and_nothing_is_handed_over_then(style: str) -> No
 def test_the_lead_sits_at_most_a_few_decibels_over_the_others(style: str, layer: str) -> None:
     """In the phrases it leads, a layer is inside its level window over the loudest other melodic layer, hall included."""
     found = lead_level(style, layer)
-    low, high = GLITCH_PIANO_WINDOW_DB if (style, layer) == GLITCH_PIANO else LEVEL_WINDOW_DB
+    low, high = OWN_WINDOWS.get((style, layer), LEVEL_WINDOW_DB)
     if found is None:
         pytest.skip(f"{style} {layer} leads in none of the sampled rooms")
     assert low <= found <= high, found

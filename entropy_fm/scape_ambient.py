@@ -46,6 +46,7 @@ from .harmony import (
     develop_motif,
     motif_seed,
     motif_sites,
+    voice_lead,
 )
 from .plan import CLIMAX, PLATEAU
 from .score import (
@@ -186,7 +187,10 @@ DYAD_WEIGHTS = (0.4, 0.4, 0.2)
 DRONE_OCTAVE = 2
 DRONE_FIFTH = 4
 STRINGS_TRIAD = (0, 2, 4)
-# the strings triad is in this octave, its top tone an octave above
+# the strings triad is voice led from one centre to the next: the top tone starts an octave above, and the voices keep
+# inside two octaves from this degree of this octave
+STRINGS_LIFTS = (0, 0, 7)
+STRINGS_LOW = 0
 STRINGS_OCTAVE = 3
 SWELL_OFFSETS = (0, 2, 4, 6)
 # the swell chord is in this octave, its fourth tone an octave above
@@ -865,11 +869,12 @@ def _play_drones(piece: _Piece) -> None:
 
 
 def _play_strings(piece: _Piece) -> None:
-    """Play the strings: a triad of a string machine or a Juno pad all day, swelling in when the lights are on in the evening."""
+    """Play the strings: a voice led triad of a string machine or a Juno pad all day, swelling in when the lights are on in the evening."""
     plan = piece.plan
     rng = piece.rng
     energy = piece.energy
     second = STRINGS_START
+    triads: list[tuple[float, int, float]] = []
     while second < piece.length:
         # a quiet triad of the string machine plays all day; the lights and the evening make it warmer and fuller
         warm = max(
@@ -882,20 +887,24 @@ def _play_strings(piece: _Piece) -> None:
         if piece.form[_section_of(piece, second)] < STRINGS_GATE:
             continue
         if warm > STRINGS_MIN_WARMTH and rng.random() < 0.5 + 0.5 * warm:
-            root = _centre_at(piece, second)
-            strings = _chord_strings_voice(piece)
-            for k, offset in enumerate(STRINGS_TRIAD):
-                piece.notes.append(
-                    Note(
-                        second + STRINGS_STAGGER * k,
-                        STRINGS_HOLD,
-                        float(piece.scale.midi(root + offset, STRINGS_OCTAVE + (k == 2))),
-                        STRINGS_VELOCITY + STRINGS_VELOCITY_WARM * warm,
-                        strings,
-                        LAYER_STRINGS,
-                        piece.patch,
-                    )
+            triads.append((second, _centre_at(piece, second), warm))
+    if not triads:
+        return
+    strings = _chord_strings_voice(piece)
+    voicing = voice_lead([root for _, root, _ in triads], STRINGS_TRIAD, STRINGS_LIFTS, STRINGS_LOW)
+    for (second, _, warm), degrees in zip(triads, voicing, strict=True):
+        for k, degree in enumerate(degrees):
+            piece.notes.append(
+                Note(
+                    second + STRINGS_STAGGER * k,
+                    STRINGS_HOLD,
+                    float(piece.scale.midi(degree, STRINGS_OCTAVE)),
+                    STRINGS_VELOCITY + STRINGS_VELOCITY_WARM * warm,
+                    strings,
+                    LAYER_STRINGS,
+                    piece.patch,
                 )
+            )
 
 
 def _play_growl(piece: _Piece) -> None:

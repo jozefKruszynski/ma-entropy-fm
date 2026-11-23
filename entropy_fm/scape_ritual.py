@@ -286,6 +286,39 @@ OSTINATO: tuple[tuple[int, float, str, float, float], ...] = (
     (2, 0.25, HIT_RIM, 0.5, 0.6),
     (6, 0.25, HIT_RIM, 0.5, 0.6),
 )
+# related bars that a phrase of the ostinato may play instead: the same head and the same don on the downbeats, with
+# a doko added, a don moved to the last pulse, or a don moved off the beat
+OSTINATO_VARIANTS: tuple[tuple[tuple[int, float, str, float, float], ...], ...] = (
+    (*OSTINATO, (1, 0.25, HIT_SHIME, 0.3, 0.4), (5, 0.25, HIT_SHIME, 0.3, 0.4)),
+    (
+        (0, 0.0, HIT_ODAIKO, 0.7, 0.0),
+        (2, 0.0, HIT_ODAIKO, 0.52, 0.0),
+        (4, 0.0, HIT_ODAIKO, 0.62, 0.0),
+        (7, 0.0, HIT_ODAIKO, 0.55, 0.0),
+        (1, 0.0, HIT_SHIME, 0.4, 0.0),
+        (3, 0.0, HIT_SHIME, 0.4, 0.0),
+        (5, 0.0, HIT_SHIME, 0.4, 0.0),
+        (6, 0.0, HIT_SHIME, 0.4, 0.0),
+        (3, 0.25, HIT_SHIME, 0.3, 0.4),
+        (2, 0.25, HIT_RIM, 0.5, 0.6),
+        (6, 0.25, HIT_RIM, 0.5, 0.6),
+    ),
+    (
+        (0, 0.0, HIT_ODAIKO, 0.7, 0.0),
+        (3, 0.0, HIT_ODAIKO, 0.54, 0.0),
+        (4, 0.0, HIT_ODAIKO, 0.62, 0.0),
+        (6, 0.0, HIT_ODAIKO, 0.52, 0.0),
+        (1, 0.0, HIT_SHIME, 0.4, 0.0),
+        (2, 0.0, HIT_SHIME, 0.4, 0.0),
+        (5, 0.0, HIT_SHIME, 0.4, 0.0),
+        (7, 0.0, HIT_SHIME, 0.4, 0.0),
+        (7, 0.25, HIT_SHIME, 0.3, 0.4),
+        (2, 0.25, HIT_RIM, 0.5, 0.6),
+        (6, 0.25, HIT_RIM, 0.5, 0.6),
+    ),
+)
+# the chance that a phrase after the first plays one of the variants of the ostinato instead of the bar itself
+OSTINATO_VARIANT_CHANCE = 0.4
 # a strong don falls on the head of every fourth bar, and the ostinato needs a section and a room this strong
 PHRASE_BARS = 4
 HEAD_LIFT = 0.22
@@ -397,6 +430,12 @@ MOTIF_MIN_HOLD = 0.7
 VELOCITY_MIN = 0.1
 MIN_CELL_PRESENCE = 0.04
 CELL_SWAP_CHANCE = 0.33
+# the chance per repeat that the rhythm of the cell leaves the cell (its hits after the downbeat move a slot later), and
+# that it returns to the cell once it has left
+CELL_RHYTHM_CHANCE = 0.15
+CELL_RHYTHM_RETURN_CHANCE = 0.4
+# the downbeat of the cell, which no rule moves or drops
+CELL_DOWNBEAT = 0
 PLUCK_TIMING_JITTER = 0.008
 FIRST_NOTE_ACCENT = 1.12
 PLUCK_BRIGHT_FLOOR = 0.92
@@ -678,7 +717,11 @@ class _Piece:
     pluck_rng: np.random.Generator = field(init=False)
     base_index: list[int] = field(init=False)
     current: list[int] = field(init=False)
+    rhythm_rng: np.random.Generator = field(init=False)
+    cell_shift: int = field(init=False)
     occupied: set[int] = field(init=False)
+    occupied_shifted: set[int] = field(init=False)
+    shifted_cells: list[float] = field(default_factory=list)
     pluck_onsets: list[float] = field(default_factory=list)
     # (end of the response, the pitch it ended on, length of the loop)
     last_cells: list[tuple[float, float, float]] = field(default_factory=list)
@@ -1016,7 +1059,10 @@ def _plan_pluck(piece: _Piece) -> None:
     piece.pluck_rng = plan.rng("loop", "pluck")
     piece.base_index = [step for _, step in piece.cell]
     piece.current = list(piece.base_index)
+    piece.rhythm_rng = plan.rng("loop", "pluck rhythm")
+    piece.cell_shift = 0
     piece.occupied = {where for where, _ in piece.cell}
+    piece.occupied_shifted = set(_cell_slots(piece, shift=1))
     piece.thin = PLUCK_DENSITY[0] + (PLUCK_DENSITY[1] - PLUCK_DENSITY[0]) * piece.drive_energy
     piece.cells = int((piece.length - PLUCK_TAIL) / piece.pluck_len)
     piece.motif_cells = {
@@ -1095,7 +1141,7 @@ def _play_cell(piece: _Piece, second: float, presence: float) -> None:
 
 
 def _state_cell(piece: _Piece, second: float, presence: float) -> None:
-    """Play the cell once; about one repeat in three moves a note by a step, never further than one from where it began."""
+    """Play the cell once; about one repeat in three moves a note by a step, never further than one from where it began, and now and then its hits after the downbeat move a slot later."""
     plan = piece.plan
     pluck_rng = piece.pluck_rng
     current = piece.current
@@ -1110,8 +1156,12 @@ def _state_cell(piece: _Piece, second: float, presence: float) -> None:
                 base_index[pick] + 1,
             )
         )
-    pitch = float(piece.pluck_base)
-    for number, ((where, _), step) in enumerate(zip(piece.cell, current, strict=True)):
+    _vary_cell_rhythm(piece)
+    pitch = end_pitch = float(piece.pluck_base)
+    slots = _cell_slots(piece, piece.cell_shift)
+    if piece.cell_shift:
+        piece.shifted_cells.append(second)
+    for number, (where, step) in enumerate(zip(slots, current, strict=True)):
         when = (
             second
             + where * slot
@@ -1126,6 +1176,8 @@ def _state_cell(piece: _Piece, second: float, presence: float) -> None:
             * float(pluck_rng.uniform(HUMANISE_LOW, HUMANISE_HIGH))
         )
         pitch = _ladder(piece, step, piece.pluck_base)
+        if where == max(slots):
+            end_pitch = pitch
         piece.notes.append(
             Note(
                 when,
@@ -1138,7 +1190,30 @@ def _state_cell(piece: _Piece, second: float, presence: float) -> None:
             )
         )
         piece.pluck_onsets.append(when)
-    piece.last_cells.append((second + (piece.cell[-1][0] + 1.0) * slot, pitch, piece.pluck_len))
+    piece.last_cells.append((second + (max(slots) + 1.0) * slot, end_pitch, piece.pluck_len))
+
+
+def _vary_cell_rhythm(piece: _Piece) -> None:
+    """Move the hits of the cell after its downbeat one slot later (the last slot wraps round to the first after the downbeat), or bring them back once they have moved."""
+    chance = CELL_RHYTHM_RETURN_CHANCE if piece.cell_shift else CELL_RHYTHM_CHANCE
+    if piece.rhythm_rng.random() < chance:
+        piece.cell_shift = 1 - piece.cell_shift
+
+
+def _cell_slots(piece: _Piece, shift: int) -> list[int]:
+    """Return the slot of each hit of the cell, with its hits after the downbeat moved by a number of slots."""
+    return [
+        where if where == CELL_DOWNBEAT else 1 + (where - 1 + shift) % (int(CELL_SLOTS) - 1)
+        for where, _ in piece.cell
+    ]
+
+
+def _occupied_at(piece: _Piece, when: float) -> set[int]:
+    """Return the slots the cell plays on at a moment, moved or not."""
+    index = bisect_right(piece.shifted_cells, when) - 1
+    if index >= 0 and when < piece.shifted_cells[index] + piece.pluck_len:
+        return piece.occupied_shifted
+    return piece.occupied
 
 
 def _set_up_wood(piece: _Piece) -> None:
@@ -1267,7 +1342,7 @@ def _lay_hit(piece: _Piece, part: _WoodPart, when: float, hit: Hit, *, resting: 
         return False
     pitch_index = _melodic_index(piece, when) if melodic else tone
     # a hit that falls where the pluck rests is the answer: a little firmer than one that fills a gap
-    answer = ANSWER_BOOST if pulse % ANSWER_CYCLE not in piece.occupied else ANSWER_PLAIN
+    answer = ANSWER_BOOST if pulse % ANSWER_CYCLE not in _occupied_at(piece, when) else ANSWER_PLAIN
     vel = (
         part.loud
         * answer
@@ -1495,9 +1570,13 @@ def _play_ostinato(piece: _Piece) -> None:
     plan = piece.plan
     slot = piece.slot
     ostinato_rng = plan.rng("ostinato")
+    phrase_rng = plan.rng("ostinato phrase")
+    figure = OSTINATO
     bar = 0
     while piece.driving and bar * piece.pluck_len < piece.length - OSTINATO_END_MARGIN:
-        for pulse, frac, drum, weight, need in OSTINATO:
+        if bar % PHRASE_BARS == 0:
+            figure = _ostinato_figure(phrase_rng, first=bar == 0)
+        for pulse, frac, drum, weight, need in figure:
             when = (bar * CELL_SLOTS + pulse + frac) * slot
             form = _form_at(piece, when)
             if _ostinato_rests(piece, when, form, need):
@@ -1511,6 +1590,15 @@ def _play_ostinato(piece: _Piece) -> None:
             piece.taiko_hits.append((when, drum, vel))
             piece.ostinato_hits += 1
         bar += 1
+
+
+def _ostinato_figure(
+    rng: np.random.Generator, *, first: bool
+) -> tuple[tuple[int, float, str, float, float], ...]:
+    """Return the bar that a phrase of the ostinato plays: the first phrase and most of the others play the bar itself."""
+    if rng.random() < OSTINATO_VARIANT_CHANCE and not first:
+        return OSTINATO_VARIANTS[int(rng.integers(0, len(OSTINATO_VARIANTS)))]
+    return OSTINATO
 
 
 def _close_busy_stretch(piece: _Piece) -> None:

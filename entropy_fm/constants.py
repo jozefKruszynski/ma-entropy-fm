@@ -10,8 +10,6 @@ CONF_DAYS = "days"
 CONF_INCLUDE_PRESENCE = "include_presence"
 CONF_EXCLUDE = "exclude"
 CONF_ROLES = "role_overrides"
-# the category of the technical settings, which the server lists apart from the rest
-CATEGORY_ADVANCED = "advanced"
 CONF_STYLES = "styles"
 CONF_DAY_CHARACTER = "day_character"
 CONF_QUALITY = "render_quality"
@@ -52,7 +50,7 @@ MAX_DAYS = 10
 DEFAULT_AUDIO_CACHE_MB = 500
 MAX_AUDIO_CACHE_MB = 20000
 # changes whenever the audible result of the engine changes; pins and cached audio carry it
-ENGINE_VERSION = 8
+ENGINE_VERSION = 12
 STORAGE_FOLDER = "entropy_fm"
 # the audio that is rendered and cached: 16 bit stereo
 AUDIO_CHANNELS = 2

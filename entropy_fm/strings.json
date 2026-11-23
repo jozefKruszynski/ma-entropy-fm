@@ -63,7 +63,7 @@
     },
     "role_overrides": {
       "label": "Role overrides",
-      "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; a label wins over this list."
+      "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; this list wins over a label."
     },
     "rooms": {
       "label": "Rooms to show",

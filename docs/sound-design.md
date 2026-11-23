@@ -11,12 +11,19 @@ with a clean sub under it), an FM growl (the index moves, never the pitch), an a
 machine, a Juno-style pad, a supersaw, tape strings, a tape choir, a glassy wavetable pad, a bowed
 pad, a drawbar organ; a singing analog lead and a flute-like lead (vibrato at most 15 cents), an FM
 electric piano, a felt piano, a soft grand piano, a sampled FM piano, a Juno pluck, a nylon
-Karplus-Strong pluck and a strumstick, a cello section for a slow line and a chant cello for the Ritual leader; a Moog-style sequencer voice, a blip and a chord stab; a slit drum and a woodblock (VCSL samples). Every
+Karplus-Strong pluck and a strumstick, a cello section for a slow line and a chant cello for the Ritual leader; a Moog-style sequencer voice, a blip and a chord stab; a slit drum and a woodblock (VCSL samples). The FM electric pianos, the supersaw, the nylon pluck, the flute lead and the chord stab are in the library, but no style plays them. Every
 oscillator is band-limited (a wavetable that holds only the partials that fit), a note never glides
 (a vibrato is at most 15 cents and the kick's thump falls below 150 Hz), and a long pad is made
-once and looped where the tone is in phase, which is what lets a 20 minute piece render on a
+once and looped where the tone is in phase, which is what lets a piece render on a
 Raspberry Pi. `scripts/voice_report.py` measures every voice: centroid, attack, harmonic profile,
 modulation and the energy that is not on a harmonic (under 2 percent for the synthesised ones).
+
+## Cost
+
+A pad is made once as a *core* (4.8 seconds with its release) and looped: the end of the sustain fades into the part that
+precedes the loop point, chosen by correlation so that the tone is in phase. A note of 20 seconds then costs a few
+milliseconds. Cores are cached (as float16), short notes and hits are cached, and a stream holds the notes that sound. The
+tiers drop layers, saws and filters; Light runs two ladder filters at most, a Freeverb and no chorus.
 
 ## Samples
 
@@ -39,16 +46,14 @@ slow trim of at most 2 dB follows, and a look-ahead peak limiter with a ceiling 
 finishes. The styles with drums have a gentle compressor in front of the limiter. The aims:
 integrated loudness -18 to -20 LUFS for Ambient, -16 to -18 for Berlin School and Lo-fi, -18 to -20 for Ritual, -14.5 to -15.5 for Cinematic Glitch; the loudest three seconds at most one LU above the integrated loudness; true peak under
 -1 dBTP; the limiter taking at most 2 dB. `scripts/loudness_report.py` measures them, and tests check
-them. The numbers of the last run are in [the notes of the demo files](development.md#run-the-demo).
+them. The numbers of the last run are in the table below.
 
 | style | piece | integrated LUFS | target | max short-term | true peak dBTP | LRA | mean GR dB | max GR dB | verdict |
 |---|---|---|---|---|---|---|---|---|---|
 | ambient | demo excerpts | -19.7 | -20 to -18 | -18.0 (+1.7) | -9.6 | 3.3 | 0.00 | 0.0 | short-term -18.0 more than 1 LU over |
 | ambient | kitchen excerpts | -20.5 | -20 to -18 | -18.3 (+2.2) | -8.0 | 3.5 | 0.00 | 0.7 | short-term -18.3 more than 1 LU over |
-| ambient | full demo piece | -19.9 | -20 to -18 | -17.7 (+2.2) | -8.3 | 3.6 | 0.00 | 0.0 | short-term -17.7 more than 1 LU over |
 | berlin_school | demo excerpts | -17.8 | -18 to -16 | -16.7 (+1.1) | -5.1 | 1.4 | 0.00 | 0.0 | short-term -16.7 more than 1 LU over |
 | berlin_school | kitchen excerpts | -17.6 | -18 to -16 | -16.2 (+1.4) | -4.6 | 2.2 | 0.00 | 0.0 | short-term -16.2 more than 1 LU over |
-| berlin_school | full demo piece | -17.6 | -18 to -16 | -15.9 (+1.7) | -3.9 | 1.5 | 0.00 | 0.0 | short-term -15.9 more than 1 LU over |
 | lofi | demo excerpts | -16.2 | -18 to -16 | -15.1 (+1.1) | -5.7 | 0.7 | 0.00 | 0.0 | short-term -15.1 more than 1 LU over |
 | lofi | kitchen excerpts | -17.8 | -18 to -16 | -15.8 (+2.0) | -4.8 | 5.8 | 0.00 | 0.0 | short-term -15.8 more than 1 LU over |
 | ritual | demo excerpts | -18.7 | -20 to -18 | -17.1 (+1.6) | -8.5 | 3.1 | 0.00 | 0.0 | short-term -17.1 more than 1 LU over |

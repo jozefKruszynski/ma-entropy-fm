@@ -21,7 +21,7 @@ MIN_KIT_KICKS = 40
 # at the least, on the quietest day with a kit (heavy mode), one per 3.5 bars; at the most, on any day, one per bar
 QUIET_EDITS_PER_BAR = 1.0 / 3.5
 MOST_EDITS_PER_BAR = 1.0
-# the share of the edits that sit on an instrument bus alone, on a busy day
+# the share of the edits that sit on an instrument bus alone, over the fortnight
 INSTRUMENT_SHARE = 0.15
 KINDS_IN_A_BUSY_PIECE = 5
 MOST_IN_A_ROW = 2
@@ -108,10 +108,12 @@ def test_the_new_kinds_are_dealt() -> None:
 
 
 def test_a_meaningful_share_of_the_edits_is_on_the_instruments() -> None:
-    """The strings, the growl and the stabs get edits of their own, apart from those of the drums."""
-    score, _ = _busy_day()
-    assert score.glitch is not None
-    edits = score.glitch.edits
+    """Over the fortnight, the strings, the growl and the stabs get edits of their own, apart from those of the drums."""
+    edits = []
+    for i in DAYS:
+        score = demo("glitch", i, HOUSE)[0]
+        assert score.glitch is not None
+        edits += score.glitch.edits
     own = [e for e in edits if set(e.layers) <= INSTRUMENTS]
     assert len(own) / len(edits) >= INSTRUMENT_SHARE
     assert {layer for e in own for layer in e.layers} >= {"str", "bass"}

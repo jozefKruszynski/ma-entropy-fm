@@ -62,7 +62,7 @@ LOFI = Style(
     version="Lo-fi",
     modes=("dorian", "mixolydian", "aeolian", "major", "lydian"),
     tempo=(70.0, 88.0),
-    description="A dusty swung boom-bap loop, electric piano chords on jazzy progressions, a round bass, vinyl.",
+    description="A dusty swung boom-bap loop, felt piano or organ chords on jazzy progressions, a round bass, vinyl.",
     genres=("Lo-fi", "Chillhop", GENERATIVE),
 )
 RITUAL = Style(

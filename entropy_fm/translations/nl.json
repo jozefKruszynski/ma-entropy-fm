@@ -63,7 +63,7 @@
     },
     "role_overrides": {
       "label": "Rolkeuze",
-      "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; een label wint van deze lijst."
+      "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; deze lijst wint van een label."
     },
     "rooms": {
       "label": "Kamers om te tonen",

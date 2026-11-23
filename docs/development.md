@@ -30,9 +30,14 @@ from the demo on their own.
 | `entropy_fm/day_analysis.py`, `energy.py` | The day read as a curve of activity, five to seven stretches and salient moments. |
 | `entropy_fm/baseline.py`, `surprise.py`, `palette.py`, `variation.py` | What is usual, what is unusual, the character of the day, the dealing of material. |
 | `entropy_fm/character.py` | The character of a day (how busy, what shape, how warm, how many stretches, what stood out, a day off), the key and mode, the tempo position and the chord length it asks for, and the motif of each room. |
-| `entropy_fm/plan.py` | The length of the piece (per style), the arc of the day over it, the curves the house gives, the thinning of events, the deals. |
+| `entropy_fm/plan.py` | The length of the piece (per style), the arc of the day over it, the curves the house gives, the thinning of events, the pick of the material that fits the day best. |
 | `entropy_fm/scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_ritual.py`, `scape_glitch.py` | The five generative systems and their composed vocabulary. |
-| `entropy_fm/harmony.py` | What the styles share: voice leading, held tones, the voice a day picks by its energy and warmth, the length of a chord, the shared growling bass family, and how the motif of a room is developed from one statement to the next. |
+| `entropy_fm/harmony.py` | What the styles share: voice leading, held tones, the voice a day picks by its energy and warmth, the length of a chord, the shared growling bass family, how the motif of a room is developed from one statement to the next, and the open-interval steps and the hall send of the piano that Ambient and Cinematic Glitch share. |
+| `entropy_fm/signature.py` | The fixed voices of each room in each style: the pools they are drawn from and the choice per room. |
+| `entropy_fm/lead.py` | Which layer leads a phrase in a room and which layer a happening of the day hands a phrase to. |
+| `entropy_fm/styles.py` | The five styles: key, title, modes, tempo range, description and genres. |
+| `entropy_fm/scape.py` | Makes the soundscape of a day: analyses the day, plans the piece and runs the generative system of the style. |
+| `entropy_fm/synth.py` | Scales, pitch and level helpers and the smooth ramp that the voices and the composers use. |
 | `entropy_fm/glitch.py`, `glitch_drums.py`, `glitch_kits.py`, `glitch_voices.py`, `glitch_render.py` | The sounds of Cinematic Glitch (swells, stabs, growl, kit), its drum families, the edits, and its own renderer (a block pipeline with a latency of three seconds, so that an edit can read the material before it). |
 | `entropy_fm/gen.py`, `score.py` | Weighted choices, Markov chains, euclid, random walks, event curves; notes, layers and the score. |
 | `entropy_fm/voices.py`, `drums.py`, `dsp.py`, `sampler.py`, `samples/` | The voice library, the percussion, the band-limited oscillators and filters, the vibrato, the sampler and its CC0 samples. |
@@ -58,7 +63,7 @@ its phases, an oven, a hob cooked on, a Sonos, blinds, a scene of twenty lights,
 
 ```sh
 uv sync
-uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the voice library, soundscapes.md (--fast, --only excerpts parts voices notes condensed)
+uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the voice library, soundscapes.md (--fast, --only excerpts parts voices notes condensed; --only condensed renders the whole pieces into out/condensed/)
 uv run python scripts/analyze_audio.py --table out/*.mp3
 uv run python scripts/loudness_report.py         # integrated LUFS, short-term, true peak, limiter
 uv run python scripts/glide_report.py out/*.mp3  # the glide tracker of the tests

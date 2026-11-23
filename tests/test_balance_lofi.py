@@ -59,7 +59,7 @@ def test_a_quiet_day_keeps_a_soft_kit_outside_the_night() -> None:
 
 
 def test_the_plucked_line_is_heard_behind_the_keys() -> None:
-    """Where the plucked line plays, it is no more than 12 dB under the electric piano."""
+    """Where the plucked line plays, it is no more than 12 dB under the keys."""
     score, _ = _made(quiet=False)
     plucks = sorted(n.t for n in score.notes if n.layer == "pluck")
     assert plucks

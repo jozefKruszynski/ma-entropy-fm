@@ -55,6 +55,8 @@ MELODIC = {
 LEVEL_WINDOW_DB = (0.0, 4.0)
 # the Glitch piano is set 6 dB down on purpose and sits this far over the strings and stabs on the median of a short piece
 GLITCH_PIANO_WINDOW_DB = (0.0, 6.0)
+# the keys are the front instrument of Lo-fi and lead further over its strings, at a level set by ear
+LOFI_KEYS_WINDOW_DB = (0.0, 10.0)
 # a short piece has few led phrases and every room and day lands somewhere else, so a lead is judged by the median of these
 LEVEL_DAYS = (7, 9, 11, 13)
 LEVEL_SAMPLES = 12

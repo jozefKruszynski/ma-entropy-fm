@@ -33,6 +33,7 @@ META = {
     "switch.tv_plug": ("living_room", "outlet", ""),
     "sensor.tv_plug_power": ("living_room", "power", "W"),
     "sensor.desk_plug_power": ("office", "power", "W"),
+    "sensor.bedroom_desk_plug_power": ("bedroom", "power", "W"),
     "sensor.total_power": ("house", "power", "W"),
     "light.kitchen": ("kitchen", "", ""),
     "light.office": ("office", "", ""),

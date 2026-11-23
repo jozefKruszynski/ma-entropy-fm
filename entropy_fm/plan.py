@@ -102,6 +102,8 @@ TRIGGER_MARGIN_END = 5.0
 APPLIANCE_LEVEL = 0.2
 BINARY_CHANGE = 0.5
 ANALOG_CHANGE = 0.02
+# values are ranked at this many decimals, so that rounding noise between platforms never reorders them
+RANK_DECIMALS = 9
 # the arc: where the five stretches of the day sit in the piece, as shares of its length
 # how much of the activity of a day that is measured against its own days is the curve itself, and how much its rank
 MEASURED_CURVE = 0.5
@@ -687,7 +689,7 @@ def _events_and_triggers(
 def _activity_curve(analysis: DayAnalysis, house: np.ndarray, smooth: int) -> np.ndarray:
     """Return the activity of the piece: the curve of the day mixed with its rank, so a day has a quiet and a lively half."""
     centres = (np.arange(len(analysis.curve)) + 0.5) * STEP
-    ranks = np.argsort(np.argsort(analysis.curve)) / max(len(analysis.curve) - 1, 1)
+    ranks = _ranks(analysis.curve)
     if analysis.measured:
         # measured against its own days the curve already says how lively this day was: the rank is a smaller part
         mixed = MEASURED_CURVE * analysis.curve**MEASURED_EXPONENT + (1.0 - MEASURED_CURVE) * ranks
@@ -777,3 +779,12 @@ def _run_curves(series: Sequence[Series], house: np.ndarray, smooth: int) -> dic
             np.asarray(smoothstep((level - threshold) / RUN_RAMP)), max(smooth // 2, 1)
         )
     return runs
+
+
+def _ranks(values: np.ndarray) -> np.ndarray:
+    """Return the rank of each value from 0 to 1, equal values sharing the mean of their ranks."""
+    values = np.round(values, RANK_DECIMALS)
+    ordered = np.sort(values)
+    low = np.searchsorted(ordered, values, side="left")
+    high = np.searchsorted(ordered, values, side="right") - 1
+    return (low + high) / 2.0 / max(len(values) - 1, 1)

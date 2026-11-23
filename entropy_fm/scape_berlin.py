@@ -372,6 +372,9 @@ TOM_FIGURES: tuple[TomFigure, ...] = (
     ("walking", 0.6, ((6, 2), (10, 1), (14, 0))),
     ("busy", 0.9, ((3, 2), (7, 1), (11, 0), (14, 1))),
 )
+# the chance that a section plays the figure next to the one of the day, when the section before it played the figure
+# of the day itself
+TOM_NEIGHBOUR_CHANCE = 0.45
 # the kit of the later Berlin School, as (name, energy it suits, toms, shaker)
 Kit = tuple[str, float, bool, bool]
 KITS: tuple[Kit, ...] = (
@@ -1101,23 +1104,46 @@ def _play_pulse(piece: _Piece) -> None:
         beat_index += 1
 
 
+def _tom_figures(piece: _Piece) -> list[tuple[tuple[int, int], ...]]:
+    """Return the figure of the toms for each section: the one of the day, or now and then the one next to it."""
+    rng = piece.plan.rng("tom sections")
+    home = next(i for i, (name, _, _) in enumerate(TOM_FIGURES) if name == piece.tom_name)
+    neighbours = [i for i in (home - 1, home + 1) if 0 <= i < len(TOM_FIGURES)]
+    figures = [piece.tom_figure]
+    for _ in piece.spans[1:]:
+        away = figures[-1] != piece.tom_figure
+        if not away and rng.random() < TOM_NEIGHBOUR_CHANCE:
+            figures.append(TOM_FIGURES[neighbours[int(rng.integers(0, len(neighbours)))]][2])
+        else:
+            figures.append(piece.tom_figure)
+    return figures
+
+
 def _play_kit_grid(piece: _Piece, drum_rng: np.random.Generator) -> None:
     """Play the toms and the shaker on the 16th grid of every bar."""
     total_bars = int(piece.length / piece.bar)
+    starts = [start for start, _, _, _ in piece.spans]
+    figures = _tom_figures(piece)
     for bar_index in range(total_bars):
+        figure = figures[max(bisect.bisect_right(starts, bar_index * piece.bar) - 1, 0)]
         for step_index in range(STEPS_PER_BAR):
             at = bar_index * piece.bar + step_index * piece.step
-            _play_toms(piece, drum_rng, at, bar_index, step_index)
+            _play_toms(piece, drum_rng, at, bar_index, step_index, figure)
             _play_shaker(piece, drum_rng, at, step_index)
 
 
 def _play_toms(
-    piece: _Piece, drum_rng: np.random.Generator, at: float, bar_index: int, step_index: int
+    piece: _Piece,
+    drum_rng: np.random.Generator,
+    at: float,
+    bar_index: int,
+    step_index: int,
+    figure: tuple[tuple[int, int], ...],
 ) -> None:
-    """Play the toms of a step: the figure of the day, and a fill in the last bar of every eight."""
+    """Play the toms of a step: the figure of the section, and a fill in the last bar of every eight."""
     level = piece.plan.at(piece.tom_gate, at)
     if level > TOM_MIN_LEVEL and drum_rng.random() < TOM_CHANCE + 0.5 * level:
-        for hit_step, pitch in piece.tom_figure:
+        for hit_step, pitch in figure:
             if hit_step == step_index:
                 vel = (
                     TOM_VELOCITY

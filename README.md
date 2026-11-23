@@ -6,7 +6,7 @@ slowly evolving piece for each room and each day, in five styles. Your house doe
 notes. It steers the texture, the density, the brightness, the space and the movement of music that
 a generative system plays. The audio is made on your server while it plays, from the history it
 reads from your own Home Assistant and from CC0 samples that ship with the provider. Nothing leaves
-your server; what it keeps is the event timeline of the days you heart and, if you
+your server; what it keeps is the event timeline of the days you heart, the history it read to play, name and draw a day (for up to 7 days) and, if you
 want it, a cache of the days that were played, and the drawn covers.
 
 Entropy FM is made and maintained by [@jozefKruszynski](https://github.com/jozefKruszynski), not by
@@ -28,7 +28,7 @@ was, in the words of its style: "Dishwasher at Dusk (Ambient)", "Sequencer for a
 The same room, day and style always give the same title; the title of today can change as the day goes on, but
 only once an hour. Titles hold kinds of things and times, never an entity id or a name, and a day without
 history, or Home Assistant being away, gives a plain title of the style. The description of a track is a
-short history of the style (Eno's tape loops, the Berlin School, lo-fi hip hop, Reich's phasing, the mood of
+short history of the style (Eno's tape loops, the Berlin School, lo-fi hip hop, the mood of
 the Akira soundtrack, cinematic neurofunk), how the house drives that style, and one line about the day ("A busy
 afternoon; a door at 03:12."). The description does not list which entity plays which part: the role of every
 entity, and why it has it, is in the diagnostics of the provider. An album has a short review of its own (the room,
@@ -43,19 +43,21 @@ style always sound the same.
 
 | Style | What you hear |
 |---|---|
-| Ambient | Tape loops of different lengths that phase against each other, a piano, no beat; each room has its own lead (the piano, the loop pads or the strings) and a door, an appliance or a light can hand a phrase to another |
+| Ambient | Tape loops of different lengths (strings, a soft choir, glass and other pads) that phase against each other, a drone, strings and a piano (the room's grand or felt) that states the room's motif in open fifths and sixths in a long hall, no beat; each room has its own lead (the piano, the loop pads or the strings) and a door, an appliance or a light can hand a phrase to another |
 | Berlin School | Interlocking sequencer lines that mutate by rule, strings, choir and a slow lead, and in the busy day a soft kick, warm toms and a light shaker under the grid; each room has its own lead (a sequencer line or the slow lead) and a door, an appliance or a light can hand a phrase to another |
 | Lo-fi | A boom-bap band that never plays the loop the same way twice, keys, a little vinyl crackle; each room has its own lead (the keys, the plucked line or the strings) and a door, an appliance or a light can hand a phrase to another |
 | Ritual | One plucked line in a Japanese scale, answered off the beat by a slit drum and a woodblock, over a breathing drone, stretched strings, a chant, a soft heartbeat and taiko; each room has its own lead (the pluck, the chant or the slit drum) and a door, an appliance or a light can hand a phrase to another |
 | Cinematic Glitch | Film-score swells and brass stabs, a growling bass and hard half-time drums, cut up by the doors, switches and appliances of the house; each room has its own lead (a cinematic trailer piano in a long hall, or the strings) and a door, an appliance or a light can hand a phrase to another, without touching the edits |
 
-Every room has its own signature sound: in each style its lead and its bass or drone are fixed voices that
-stay the same from day to day, while everything else keeps changing.
+Every room has its own signature sound: in each style a few voices are fixed and
+stay the same from day to day, while everything else keeps changing. They are the piano and the drone in Ambient; the first
+sequencer line and the slow lead in Berlin School; the keys, the plucked line and the bass in Lo-fi; the pluck, the chant
+and the drone in Ritual; the strings and the bass in Cinematic Glitch. Which layer leads is a separate choice of the room.
 
 **No motion sensors needed.** A motion or occupancy sensor is still the first sign that someone is in a room, but a
 house without them is read from what it has: the CO2 of its rooms (the level is how many people, a rise is someone
 coming in), plugs and meters, how long and how often the lights are on, and the humidity (a shower is a texture moment
-of its own). Every sensor is measured against its own previous 7 days, so a quiet room still has highs and lows,
+of its own). With *Character of the day* on (the default), every sensor is measured against its own previous 7 days, so a quiet room still has highs and lows,
 sensors that are dead or stuck are left out, and every style keeps a full base arrangement on a calm day: the house
 shapes the density, the colour and the peaks.
 
@@ -113,7 +115,7 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 |---|---|---|---|
 | Days to browse | 10 | 1 to 10 | How many of the last days of every room are browsed, searched and in the library, counted back from today. The window rolls on at midnight, and every style of every one of these days is a track in the library. The recorder of Home Assistant keeps 10 days by default. Days you hearted stay for good, however old. To hide a room, untick it in *Rooms to show*. |
 | Rooms to show | all (nothing ticked) | any of your rooms | The rooms that appear in Music Assistant: in browsing, search, the library and the pre-render. The *Whole House* soundscape is made of the same rooms. Nothing ticked shows every room, including rooms that Home Assistant gets later. A room in which nothing that would make a note or an event (a door, a motion sensor, a light, an appliance and the like) has changed over the days you can browse is not offered either; a room that has only temperature, humidity, sun or other static sensors after the role filtering counts as quiet too, and a room that is merely quiet on one day still offers that day. A room you leave out disappears from those lists; what you pinned or cached for it is kept (hidden, not deleted) and is back when you tick the room again. A room is still found by its id, so a queue that holds it keeps playing. When this changes, the provider asks Music Assistant to re-sync its own items, so that the library views follow. |
-| Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) as soon as they are over, even after Home Assistant purges its history. Hearting a room does the same. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
+| Keep every day forever | none | the rooms that are shown | Days of these rooms are saved permanently (pinned) within a few hours after they are over, even after Home Assistant purges its history. Hearting a room does the same. It does not show or hide rooms; the list only offers the rooms that are shown when some are ticked in *Rooms to show*. |
 | Styles offered | all five | any of the five styles | Which styles each day comes in, as versions of the same soundscape. The first one offered is the style that the pre-render renders first. |
 
 ### Sound
@@ -121,8 +123,8 @@ marked *advanced* only show when Music Assistant shows advanced settings.
 | Setting | Default | Values | What it does |
 |---|---|---|---|
 | Character of the day | on | on, off | Baseline, surprise, the palette of the day and the drift of the key. Off: the plain sound, and no extra history is read. Advanced. |
-| Include presence | off | on, off | Also play persons and device trackers, which tells who is home (advanced). |
-| Role overrides | empty | `entity_id=role` lines | Choose the role of an entity yourself, one line each (advanced). Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. A label in Home Assistant (`entropy_fm_<role>`) is the other way and wins over this list. |
+| Include presence | off | on, off | Also play persons, device trackers and presence binary sensors, which tells who is home (advanced). |
+| Role overrides | empty | `entity_id=role` lines | Choose the role of an entity yourself, one line each (advanced). Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. A label in Home Assistant (`entropy_fm_<role>`) is the other way, and this list wins over a label. |
 | Extra exclusions | empty | comma separated patterns | Entities to keep out, such as `sensor.bedroom_*, light.hall_*` (advanced). |
 
 ### Performance
@@ -178,7 +180,7 @@ longer hall of its own (7 seconds, dark; about 5 ms of CPU per second of audio a
 rings) that Light skips, sending the piano to the shared reverb instead. The Ambient piano uses the same hall. Its swells, stabs and
 growl notes live in a pool of the cache of notes of their own (up to 85 percent on top of the size
 in the table), and the saw stacks of the swells use up to 48 MB more; it needs about 150 MB at
-Standard for a whole day.
+Standard for a whole piece.
 
 **Auto** (the default) renders a few seconds of a small invented house in each tier when the
 provider starts and measures the CPU time one second of audio takes on this machine. It does that
@@ -187,7 +189,7 @@ Ritual, Lo-fi, Ambient), and picks the richest tier that would use less than 30 
 of one core in real time. A tier that Auto picks therefore fits every style that is offered, not
 only the cheap ones. The benchmark takes about 20 seconds once, on a background thread (it renders a short stretch of
 the invented house twice per tier and times the second pass), and its
-result is kept in the cache of the server for a month (per engine version and heaviest style).
+result is kept in the cache of the server for a month (per engine version and heaviest style). Until the benchmark has run, Auto plays at Standard.
 
 **For a small machine:** choose **Light**, or leave Auto. The notes are the same in every tier (the
 composer decides what plays; a tier only drops the second line of a sequence, the choir and the
@@ -201,7 +203,7 @@ midnight of the house (10 to 40 minutes after it, at random, so that servers do 
 together) and once about three minutes after the start. Only offered rooms are rendered (see
 *Rooms to show*). It renders the rooms in *Keep
 every day forever*, in the first style that is offered and then every style that is offered, and
-the albums and tracks you added for that day. It works on one track at a time, in a worker thread of low priority,
+the albums and tracks you hearted for that day. It works on one track at a time, in a worker thread of low priority,
 with a pause after every second of audio, and waits while any Entropy FM stream is playing. It
 stops when the provider unloads, does nothing when the cache is off, never evicts anything to make
 room (it stops at 80 percent of the cache size) and logs one line per run. A track takes a few
@@ -209,7 +211,7 @@ minutes in the background, so five styles of five rooms take hours on a Raspberr
 machine keep *Keep every day forever* short.
 
 **Many streams at once.** Each stream renders its own pieces, a block of one second at a time, so
-two rooms can play at the same time; they take turns on the processor, and each costs what the
+rooms can play at the same time, up to five at a time; they take turns on the processor, and each costs what the
 table says.
 
 ## Covers and room images
@@ -220,12 +222,14 @@ line-art glyph cropped off the top and right edges, and the title in the lower-l
 
 A cover is a 1024 pixel JPEG made on your server with Pillow, with no network at all. The gradient follows the
 style and the key and mode of the day, and the glyph is that of the style, shaped by what happened that day. The same
-area, day and style always give the same cover.
+area, day and style always give the same cover. The cover of an album takes the glyph of the style that suits the day (a busy day Cinematic Glitch, a quiet one Ambient), among the styles that are offered.
 
 Every room, and the whole house, is an artist with a drawn image of its own: a square one with the name of the room,
-and a wide one for the backdrop of the artist page. Its figure is a clock of the typical day of the room, from the
+and a wide one for the backdrop of the artist page. Its figure has one of three shapes, picked from the id of the room (the whole house is always the clock). One is a clock of the typical day of the room, from the
 last 7 days that Entropy FM already keeps: 24 spokes, one per hour, as long as the presence (motion, doors, CO2) in
-that hour, a wave round it for the lights and small rings for the appliances and the media. A room without kept
+that hour, a wave round it for the lights and small rings for the appliances and the media. Another is a chart of 24 bars, one per
+hour, with the lights hanging below them and the appliances and the media as discs in a row under them. The third is three rings
+of 24 segments, for the presence, the lights and the appliances and the media. A room without kept
 history gets a figure of the same kind from its id. Nothing is read from Home Assistant for them.
 
 ## Known limitations
@@ -239,19 +243,20 @@ history gets a figure of the same kind from its id. Nothing is read from Home As
 
 ## Privacy
 
-- Persons, device trackers, locks, alarm panels and cameras are never used, and neither is any
-  entity whose id contains `password` or `code`. The first two can be switched on with *Include
+- Persons, device trackers, presence binary sensors, locks, alarm panels and cameras are never used, and neither is any
+  entity whose id contains `password` or `code`. The first three can be switched on with *Include
   presence* (which tells who is home, so it is off); the others cannot, and neither can labels or
   role overrides lift them.
-- Only entities that are in an area play. Entities without an area do not.
+- Only entities that are in an area play, and the sun. Other entities without an area do not.
 - Hiding quiet rooms only looks at when the current state of each entity last changed, which
   Home Assistant gives with the states the provider reads anyway; it reads no history for it.
 - You can keep more out with *Extra exclusions* or the `entropy_fm_mute` label in Home Assistant.
 - The provider only reads from Home Assistant: the registries, the labels, the current states of
   the entities that can play and the history of a day when it plays it, names it or draws its cover. It
   sends nothing anywhere else, and does not write into its own folder.
-- What it keeps is only what you ask for: a pin (the event timeline of one area on one day, a few
-  kilobytes) for what you heart, in the storage folder of the server; rendered
+- What it keeps is a pin (the event timeline of one area on one day, a few
+  kilobytes) for what you heart, in the storage folder of the server; the history of Home Assistant that it read to play, name and
+  draw a day, in the cache of the server for up to 7 days, and the baselines built from it for a day; rendered
   audio of past days in the cache folder, if the cache is on; and the drawn covers and room images,
   small JPEGs that the server keeps in its own image cache. Taking the heart off an item deletes its pins; the cache is a
   normal cache folder.

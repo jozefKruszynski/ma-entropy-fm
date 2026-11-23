@@ -61,6 +61,7 @@ The module imports nothing from Music Assistant.
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import math
 from dataclasses import dataclass, field, replace
@@ -93,6 +94,7 @@ from .plan import (
     LIGHT_MAX_LAYERS,
     MIN_FORM_CELLS,
     OUTRO,
+    PICK_TOLERANCE,
     PLATEAU,
     RELEASE,
     SHORT_FORM_BARS,
@@ -289,6 +291,8 @@ LOOPS: dict[str, tuple[Loop, ...]] = {
         Loop("i bII bIII bvii", ((0, 0), (1, 1), (3, 1), (10, 0)), 0.85),
     ),
 }
+# the chance that a section plays a neighbouring loop of its mode, when the section before it played the loop of the day
+LOOP_NEIGHBOUR_CHANCE = 0.4
 # the drop: a major chord a semitone above the root on phrygian days, a tone below it on the others
 DROP_CHORDS = {"phrygian": (1, 1), "aeolian": (10, 1), "dorian": (10, 1)}
 # the bass phrases of two bars (eight beats): (beat, length in beats, semitones above the chord root)
@@ -1135,12 +1139,18 @@ def _lay_chords(piece: _Piece) -> None:
     bar = piece.bar
     place, b = 0, 0
     drop_chord = DROP_CHORDS[piece.mode_name]
+    starts = [first for first, _, _, _ in piece.sections]
+    loops = _section_loops(piece)
+    loop = piece.loop
     while b < piece.bars:
+        section_loop = loops[max(bisect.bisect_right(starts, b * bar) - 1, 0)]
+        if section_loop != loop:
+            loop, place = section_loop, 0
         if b in piece.drops:
             offset, qual = drop_chord
             span, is_drop = 2, True
         else:
-            offset, qual = piece.loop[place % len(piece.loop)]
+            offset, qual = loop[place % len(loop)]
             place += 1
             calm = b % 4 == 0 and (
                 piece.base_span == 4 or _heat_in(piece, b * bar, (b + 4) * bar) < CHORD_SPAN_HEAT
@@ -1161,6 +1171,23 @@ def _lay_chords(piece: _Piece) -> None:
             )
         )
         b += span
+
+
+def _section_loops(piece: _Piece) -> list[tuple[tuple[int, int], ...]]:
+    """Return the chord loop of each section: the one of the day, or now and then a close neighbour of its mode."""
+    family = LOOPS[piece.mode_name]
+    fits = [closeness(entry.motion, piece.energy) for entry in family]
+    home = next(i for i, entry in enumerate(family) if entry.chords == piece.loop)
+    others = sorted((i for i in range(len(family)) if i != home), key=lambda i: (-fits[i], i))
+    near = [i for i in others if fits[i] >= max(fits) - PICK_TOLERANCE] or others[:1]
+    rng = piece.plan.rng("chord loops")
+    loops = [piece.loop]
+    for _ in piece.sections[1:]:
+        if loops[-1] == piece.loop and rng.random() < LOOP_NEIGHBOUR_CHANCE:
+            loops.append(family[near[int(rng.integers(0, len(near)))]].chords)
+        else:
+            loops.append(piece.loop)
+    return loops
 
 
 def _play_swells_and_stabs(piece: _Piece) -> None:
@@ -2483,9 +2510,12 @@ def _piano_phrase(
             plan.motif(), PIANO_STATEMENTS * number + k, motif_seed(plan), longest
         )
         line = motif_notes(plan, motif)
-        last_onset = clock + sum(beats * beat * PIANO_STRETCH + beat for _, beats in line[:-1])
+        last_onset = clock + sum(_piano_stride(beats, beat) for _, beats in line[:-1])
         if last_onset >= (number + 1) * phrase:
-            break
+            if out:
+                break
+            # a phrase the piano leads is never silent: a first statement too long for it is cut short
+            line = _fitting(line, clock, (number + 1) * phrase, beat)
         for index, (midi, beats) in enumerate(line):
             upper = _fold(midi, PIANO_LOWEST, PIANO_HIGHEST)
             lower = (
@@ -2519,9 +2549,28 @@ def _piano_phrase(
                         patch_of(sig, 0),
                     )
                 )
-            clock += beats * beat * PIANO_STRETCH + beat
+            clock += _piano_stride(beats, beat)
         clock += PIANO_BREATH_BEATS * beat
     return out
+
+
+def _fitting(
+    line: list[tuple[int, float]], start: float, end: float, beat: float
+) -> list[tuple[int, float]]:
+    """Return the notes of a statement of the piano that start before the end of its phrase."""
+    kept = []
+    clock = start
+    for midi, beats in line:
+        if clock >= end:
+            break
+        kept.append((midi, beats))
+        clock += _piano_stride(beats, beat)
+    return kept
+
+
+def _piano_stride(beats: float, beat: float) -> float:
+    """Return how far the piano moves on after a note of so many beats: the note stretched, and a beat to breathe."""
+    return beats * beat * PIANO_STRETCH + beat
 
 
 def _fold(midi: int, lowest: int, highest: int) -> int:

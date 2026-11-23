@@ -81,7 +81,6 @@ from .constants import (
     CACHE_CATEGORY_AUTO,
     CACHE_CATEGORY_FACTS,
     CATALOG_TTL,
-    CATEGORY_ADVANCED,
     CHECKSUM_LENGTH,
     CONF_AUDIO_CACHE_MB,
     CONF_DAY_CHARACTER,
@@ -340,19 +339,19 @@ class EntropyFMProvider(MusicProvider):
             *await self._room_entries(),
             ConfigEntry(
                 key=CONF_QUALITY,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.STRING,
                 default_value=DEFAULT_QUALITY,
                 required=False,
                 options=[ConfigValueOption(AUTO), *(ConfigValueOption(key) for key in QUALITIES)],
+                advanced=True,
             ),
             ConfigEntry(
                 key=CONF_AUDIO_CACHE_MB,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.INTEGER,
                 default_value=DEFAULT_AUDIO_CACHE_MB,
                 range=(0, MAX_AUDIO_CACHE_MB),
                 required=False,
+                advanced=True,
             ),
             ConfigEntry(
                 key=CONF_STYLES,
@@ -364,14 +363,13 @@ class EntropyFMProvider(MusicProvider):
             ),
             ConfigEntry(
                 key=CONF_DAY_CHARACTER,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.BOOLEAN,
                 default_value=True,
                 required=False,
+                advanced=True,
             ),
             ConfigEntry(
                 key=CONF_INCLUDE_PRESENCE,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.BOOLEAN,
                 default_value=False,
                 required=False,
@@ -379,7 +377,6 @@ class EntropyFMProvider(MusicProvider):
             ),
             ConfigEntry(
                 key=CONF_ROLES,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.STRING,
                 default_value="",
                 required=False,
@@ -387,7 +384,6 @@ class EntropyFMProvider(MusicProvider):
             ),
             ConfigEntry(
                 key=CONF_EXCLUDE,
-                category=CATEGORY_ADVANCED,
                 type=ConfigEntryType.STRING,
                 default_value="",
                 required=False,

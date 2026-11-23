@@ -1,5 +1,5 @@
 """
-Lo-fi: a dusty swung boom-bap loop, electric piano on jazzy progressions, a round bass, vinyl and tape.
+Lo-fi: a dusty swung boom-bap loop, felt piano or organ on jazzy progressions, a round bass, vinyl and tape.
 
 The generative system is a band that plays a composed loop and never plays it the same way twice. The day picks
 a progression of four chords with sevenths, ninths and elevenths that agrees with the mode of the day (ii V I and
@@ -8,7 +8,7 @@ comping rhythm, a bass pattern and a drum pattern; every chord is voiced a littl
 the one before (common tones held, the other voices by step), and the band varies the loop by rule: a chord is
 sometimes swapped for a related one, the comping rhythm drifts to a neighbour, ghost notes and fills come and go,
 and a chord chop or a plucked line is played now and then. At night the drums rest and the loop becomes an ambient
-piece of electric piano and vinyl.
+piece of keys and vinyl.
 
 How the house steers it: the energy of the day picks the tempo inside 70 to 88, how long a chord lasts (four to eight
 bars on a quiet day, one or two on a busy one), the swing (a quiet day lies back, a busy one plays straighter), the
@@ -17,7 +17,7 @@ the warmth picks the rounder or the glassier strings. The keys, the bass and the
 and stay the same every day (`signature`). The shape of the day is the form: intro,
 build, peak, release and outro enter and leave on phrases of eight bars, a build ends in a fill, and the motif of the
 room is played on the plucked line in the first and the last peak or plateau. The strongest event of the day turns the next phrase into
-a breakdown (the kit and the bass leave and come back with a fill) or brings the strings in. Who leads is the room's too: the electric piano, the plucked line or the strings (picked by
+a breakdown (the kit and the bass leave and come back with a fill) or brings the strings in. Who leads is the room's too: the keys, the plucked line or the strings (picked by
 the room, the same every day). The plucked line leads with phrases of the motif and its developments that answer the
 chords, the strings with a slow legato top line over a softer bed, and the others step back; a door or motion hands the
 next phrase of a daytime build, peak or plateau to the pluck, an appliance or the hob to the keys, a light, a cover
@@ -88,7 +88,7 @@ if TYPE_CHECKING:
 
     from .plan import Plan
 
-# the sound of a chord above its root, in semitones, as an electric piano plays it
+# the sound of a chord above its root, in semitones, as the keys play it
 QUALITIES: dict[str, tuple[int, ...]] = {
     "m7": (3, 7, 10),
     "m9": (3, 7, 10, 14),
@@ -175,14 +175,26 @@ COMPS: tuple[Pattern, ...] = (
     Pattern("syncopated", ((0, 3, 1.0), (3, 3, 0.75), (8, 6, 0.9)), 0.8),
     Pattern("stabs", ((0, 2, 1.0), (6, 2, 0.7), (8, 2, 0.9), (14, 2, 0.6)), 0.95),
 )
-# bass: (start step, length in steps, 'r' root, 'f' fifth, 'o' octave)
+# bass: (start step, length in steps, 'r' root, 'f' fifth, 'o' octave, 't' third or 's' seventh of the chord)
 BASSES: tuple[Pattern, ...] = (
+    Pattern("whole note", ((0, 14, "r"),), 0.0),
     Pattern("long and short", ((0, 4, "r"), (8, 2, "r"), (11, 2, "f"), (14, 2, "r")), 0.15),
+    Pattern("root and third", ((0, 6, "r"), (8, 4, "t"), (14, 2, "f")), 0.3),
     Pattern("walking root", ((0, 6, "r"), (10, 2, "f"), (14, 2, "r")), 0.4),
+    Pattern("seventh fall", ((0, 4, "r"), (6, 2, "s"), (8, 4, "f"), (14, 2, "t")), 0.5),
     Pattern("round", ((0, 3, "r"), (3, 1, "r"), (6, 2, "f"), (10, 2, "r"), (13, 2, "o")), 0.6),
+    Pattern("arpeggio", ((0, 3, "r"), (4, 2, "t"), (8, 2, "f"), (11, 2, "s"), (14, 2, "o")), 0.7),
     Pattern("step", ((0, 2, "r"), (4, 2, "r"), (8, 2, "f"), (10, 2, "r"), (14, 1, "o")), 0.85),
+    Pattern(
+        "syncopated",
+        ((0, 2, "r"), (3, 1, "r"), (6, 2, "t"), (10, 1, "f"), (11, 2, "r"), (14, 2, "o")),
+        1.0,
+    ),
 )
 BASS_TONES = {"r": 0, "f": 7, "o": 12}
+BASS_THIRD, BASS_SEVENTH = "t", "s"
+# the minor and the major seventh above the root; every quality holds one, and its first interval is the third
+SEVENTHS = (10, 11)
 # drums on a 16-step bar: kick steps, snare steps, ghost steps (a soft snare or a rim)
 DRUMS: tuple[Pattern, ...] = (
     Pattern("half time", ((0, 10), (8,), (6, 15)), 0.0),
@@ -190,7 +202,10 @@ DRUMS: tuple[Pattern, ...] = (
     Pattern("classic", ((0, 7, 10), (4, 12), (15,)), 0.45),
     Pattern("late kick", ((0, 5, 8, 11), (4, 12), ()), 0.55),
     Pattern("shuffle", ((0, 8, 11), (4, 12), (14,)), 0.7),
+    Pattern("boom bap", ((0, 7, 10), (4, 12), (6, 14)), 0.78),
+    Pattern("dusty", ((0, 3, 10, 13), (4, 12), (7, 15)), 0.85),
     Pattern("rolling", ((0, 6, 10, 13), (4, 12), (9,)), 0.9),
+    Pattern("head nod", ((0, 2, 7, 10), (4, 12), (9, 14)), 1.0),
 )
 
 
@@ -207,7 +222,7 @@ TEMPOS = tuple(float(bpm) for bpm in range(int(LOFI.tempo[0]), int(LOFI.tempo[1]
 SWING_QUIET = 0.30
 SWING_BUSY = 0.10
 SWING_DETAIL = 0.02
-# the electric piano plays its chords between these notes
+# the keys play their chords between these notes
 KEYS_LOW = 53
 KEYS_HIGH = 76
 KEYS_CENTRE = 62
@@ -227,7 +242,7 @@ KIT_FULL = 0.4
 KIT_SOFT = 0.6
 # the chord chops are a short accent, so their layer plays louder than the other layers to be heard
 CHOP_GAIN = 1.2
-# the electric piano sits a few dB behind the drums and the bass, softened by a little more room
+# the keys sit a few dB behind the drums and the bass, softened by a little more room
 KEYS_GAIN = 0.44
 KEYS_REVERB = 0.45
 # the plucked line leads from just under the drums
@@ -248,8 +263,9 @@ HAT_SIXTEENTH_FROM = 0.55
 HAT_SIXTEENTH_MOST = 0.8
 # the three layers that can lead; the room picks its own, and a happening of the day may hand a phrase to another
 LEADS = (LAYER_KEYS, LAYER_PLUCK, LAYER_STRINGS)
-# what each layer is trimmed by while it leads, so that every lead sits a little over the others and no more
-LEAD_TRIM_DB = {LAYER_KEYS: 0.0, LAYER_PLUCK: 4.7, LAYER_STRINGS: 5.6}
+# what each layer is trimmed by while it leads: the pluck and the strings sit a little over the others, the keys, the
+# front instrument, further
+LEAD_TRIM_DB = {LAYER_KEYS: -4.0, LAYER_PLUCK: -2.0, LAYER_STRINGS: 2.0}
 LEAD_BY_TRAIT = {
     lead.PERCUSSIVE: LAYER_PLUCK,
     lead.RHYTHMIC: LAYER_KEYS,
@@ -303,6 +319,8 @@ NIGHT_KIT_DUCK = 0.85
 SWAP_BASE = 0.12
 SWAP_ACTIVITY = 0.3
 COMP_DRIFT_CHANCE = 0.25
+# the chance per loop that the bass or the drums leave their pattern for a neighbour of it, or come back to it
+RHYTHM_DRIFT_CHANCE = 0.2
 MOTIF_NOTE_SHARE = 0.95
 # the lights or the evening this strong bring in the extended chords
 EXTENDED_LIGHTS = 0.5
@@ -525,9 +543,19 @@ class _Piece:
     line: _Line = field(init=False)
     current: list[Chord] = field(init=False)
     comp_now: Pattern = field(init=False)
+    bass_now: Pattern = field(init=False)
+    drum_now: Pattern = field(init=False)
     notes: list[Note] = field(default_factory=list)
     variations: dict[str, int] = field(
-        default_factory=lambda: {"swap": 0, "comp": 0, "chop": 0, "pluck": 0, "motif": 0}
+        default_factory=lambda: {
+            "swap": 0,
+            "comp": 0,
+            "chop": 0,
+            "pluck": 0,
+            "motif": 0,
+            "bass": 0,
+            "drums": 0,
+        }
     )
     chord_index: int = 0
     previous: list[int] | None = None
@@ -600,6 +628,8 @@ def _pick_loop(piece: _Piece) -> None:
     )
     piece.current = list(piece.prog.chords)
     piece.comp_now = piece.comp_pattern
+    piece.bass_now = piece.bass_pattern
+    piece.drum_now = piece.drum_pattern
 
 
 def _pick_voices_and_swing(piece: _Piece) -> None:
@@ -735,7 +765,7 @@ def _play_bars(piece: _Piece) -> None:
 
 
 def _vary_loop(piece: _Piece, second: float) -> None:
-    """Vary the loop by rule: a chord may be swapped for a related one, the comping may drift."""
+    """Vary the loop by rule: a chord may be swapped for a related one, the comping, the bass and the drums may drift."""
     rng = piece.rng
     current, chords = piece.current, piece.prog.chords
     if rng.random() < SWAP_BASE + SWAP_ACTIVITY * piece.plan.at(piece.plan.activity, second):
@@ -754,6 +784,23 @@ def _vary_loop(piece: _Piece, second: float) -> None:
         neighbours = [i for i in (at_index - 1, at_index + 1) if 0 <= i < len(COMPS)]
         piece.comp_now = COMPS[neighbours[int(rng.integers(0, len(neighbours)))]]
         piece.variations["comp"] += 1
+    if rng.random() < RHYTHM_DRIFT_CHANCE:
+        piece.bass_now = _drifted(rng, BASSES, piece.bass_now, piece.bass_pattern)
+        piece.variations["bass"] += 1
+    if rng.random() < RHYTHM_DRIFT_CHANCE:
+        piece.drum_now = _drifted(rng, DRUMS, piece.drum_now, piece.drum_pattern)
+        piece.variations["drums"] += 1
+
+
+def _drifted(
+    rng: np.random.Generator, family: tuple[Pattern, ...], now: Pattern, home: Pattern
+) -> Pattern:
+    """Return the neighbour of the pattern in the family when it is the pattern of the day, otherwise that pattern."""
+    if now != home:
+        return home
+    at_index = family.index(now)
+    neighbours = [i for i in (at_index - 1, at_index + 1) if 0 <= i < len(family)]
+    return family[neighbours[int(rng.integers(0, len(neighbours)))]]
 
 
 def _state_motif(piece: _Piece, bar_index: int, second: float) -> None:
@@ -811,7 +858,7 @@ def _play_chord(piece: _Piece, bar_index: int, second: float) -> None:
 
 
 def _play_comping(piece: _Piece, moment: _Moment) -> None:
-    """Play the electric piano on the chord; with the drums at rest it holds the chord, a quiet piece."""
+    """Play the keys on the chord; with the drums at rest it holds the chord, a quiet piece."""
     plan, rng = piece.plan, piece.rng
     second = moment.second
     playing = moment.here_drums > KIT_PLAYING
@@ -907,8 +954,8 @@ def _play_rhythm_section(piece: _Piece, moment: _Moment) -> None:
 def _play_bass(piece: _Piece, moment: _Moment, base: float, root_midi: int) -> None:
     """Play the bass of one bar: the pattern on the root of the chord."""
     plan, rng = piece.plan, piece.rng
-    for start, long, tone in piece.bass_pattern.steps:
-        offset = BASS_TONES[tone]
+    for start, long, tone in piece.bass_now.steps:
+        offset = _bass_offset(tone, moment.chord[1])
         if root_midi + offset >= BASS_CEILING:
             offset = 0
         if rng.random() < BASS_REST_CHANCE:
@@ -960,7 +1007,7 @@ def _play_drum_bar(
             )
     if level < KIT_LEAST:
         return
-    kicks, snares, ghosts = piece.drum_pattern.steps
+    kicks, snares, ghosts = piece.drum_now.steps
     _play_kicks(piece, kicks, base, level)
     _play_snares(piece, snares, base, level)
     _play_ghosts(piece, ghosts, base)
@@ -1174,7 +1221,7 @@ def _add_layers(piece: _Piece) -> None:
             keys_cut,
             KEYS_RESONANCE,
             reverb=KEYS_REVERB,
-            title="electric piano",
+            title="keys",
         ),
         LAYER_BASS: Layer(
             LAYER_BASS,
@@ -1282,7 +1329,7 @@ def _assemble(piece: _Piece) -> Score:
         ),
         f"Form in bars: {form}; the motif of the room {variations['motif']} times{broke}.",
         lead.summary(piece.default_lead, piece.leads),
-        f"Variations by rule: {variations['swap']} chord swaps, {variations['comp']} comping changes, {variations['chop']} chops, {variations['pluck']} plucked lines.",
+        f"Variations by rule: {variations['swap']} chord swaps, {variations['comp']} comping changes, {variations['bass']} bass and {variations['drums']} drum changes, {variations['chop']} chops, {variations['pluck']} plucked lines.",
     ]
     return score
 
@@ -1425,3 +1472,12 @@ def _opening_on(
         if plan.scale.midi(first + shift, 4) % SEMITONES_PER_OCTAVE in chord_tones:
             return tuple((degree + shift, beats) for degree, beats in motif)
     return motif
+
+
+def _bass_offset(tone: str, quality: str) -> int:
+    """Return how many semitones a tone of a bass pattern lies above the root of a chord of a quality."""
+    if tone == BASS_THIRD:
+        return QUALITIES[quality][0]
+    if tone == BASS_SEVENTH:
+        return next(i for i in QUALITIES[quality] if i in SEVENTHS)
+    return BASS_TONES[tone]

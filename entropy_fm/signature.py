@@ -77,7 +77,8 @@ POOLS: dict[str, dict[str, tuple[SigVoice, ...]]] = {
         ),
     },
     STYLE_LOFI: {
-        LAYER_KEYS: (SigVoice("felt_piano", None, 8.1), SigVoice("drawbar_organ", 1, 3.7)),
+        # under their level match, by ear: the felt piano by 3 dB, the organ by 9
+        LAYER_KEYS: (SigVoice("felt_piano", None, 5.1), SigVoice("drawbar_organ", 1, -5.3)),
         LAYER_PLUCK: (SigVoice("strum_pluck", None, -4.7), SigVoice("juno_pluck", None, -8.6)),
         LAYER_BASS: (SigVoice("moog_bass"), SigVoice("sub_round", 0, 0.7)),
     },
@@ -103,6 +104,8 @@ POOLS: dict[str, dict[str, tuple[SigVoice, ...]]] = {
         ),
     },
 }
+# a pool that is picked with a seed of its own, chosen by ear so that the rooms of the house split between its voices
+POOL_SEEDS: dict[tuple[str, str], int] = {(STYLE_LOFI, LAYER_KEYS): 2}
 
 
 def gain_of_db[Decibels: (float, np.ndarray)](db: Decibels) -> Decibels:
@@ -124,7 +127,13 @@ def signature(plan: Plan, layer: str, choice: str) -> SigVoice:
     :param choice: The name under which the choice is noted in `plan.choices`.
     """
     pool = POOLS[plan.style][layer]
-    chosen = pool[stable_hash("signature", plan.area_key, plan.style, layer) % len(pool)]
+    seed = POOL_SEEDS.get((plan.style, layer))
+    parts = (
+        (plan.area_key, plan.style, layer)
+        if seed is None
+        else (plan.area_key, plan.style, layer, seed)
+    )
+    chosen = pool[stable_hash("signature", *parts) % len(pool)]
     plan.choices[choice] = chosen.label
     return chosen
 

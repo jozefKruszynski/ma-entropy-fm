@@ -534,7 +534,7 @@ numpy and is original work of this project (Apache-2.0).
 - **Mellotron samples** (the `archiveorg-mellotron` set that smpldsnds converted from a Mellotron
   CD-ROM archive on archive.org): the mirror has no license statement and archive.org could not be
   reached from the build sandbox, so no license could be verified. Not bundled. The Mellotron-like
-  strings and choir are synthesised instead.
+  strings are a tape treatment of the VSCO strings, and the choir is synthesised.
 - **jRhodes3d**, and the "Electric Piano 1" of the Discord GM bank that is made from it: the sources
   disagree (CC0 and CC-BY-NC). Not bundled.
 - **Greg Sullivan's E-Pianos** (CP80, Pianet, Wurlitzer): the Discord GM bank labels them CC0, but the
