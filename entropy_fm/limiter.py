@@ -5,9 +5,9 @@ The output is delayed by the look-ahead (5 ms). The gain ramps down linearly ove
 into every peak that would pass the ceiling, so that the limiter does not distort the waveform,
 and comes back up with a smooth release. Its work is done at a twentieth of the sample rate,
 which is plenty for a gain that moves in milliseconds, and it keeps what it needs between blocks,
-so the blocks of one second join without a seam. A last tanh clip catches whatever is left over
-(inter-sample overshoot of the interpolated gain); it should almost never act, and the limiter
-counts when it does.
+so the blocks of one second join without a seam. A last hard clip to the ceiling catches whatever is
+left over (inter-sample overshoot of the interpolated gain); it should almost never act, and the
+limiter counts when it does.
 
 The module imports nothing from Music Assistant.
 """
@@ -16,10 +16,17 @@ from __future__ import annotations
 
 import numpy as np
 
+from .dsp import AMPLITUDE_DB_DIVISOR, MIN_LEVEL, SILENCE_FLOOR
+from .synth import SAMPLE_RATE
+
 LOOKAHEAD_S = 0.005
 RELEASE_S = 0.15
 # the gain is worked out every this many samples
 STRIDE = 20
+# a gain above this is no reduction at all
+UNITY_GAIN = 0.9999
+# a sample is clipped only when it is this much over the ceiling
+CLIP_TOLERANCE = 1.001
 
 
 class Limiter:
@@ -28,7 +35,7 @@ class Limiter:
     def __init__(
         self,
         ceiling_db: float,
-        sample_rate: int = 44100,
+        sample_rate: int = SAMPLE_RATE,
         lookahead: float = LOOKAHEAD_S,
         release: float = RELEASE_S,
         stride: int = STRIDE,
@@ -42,7 +49,7 @@ class Limiter:
         :param release: The time in which the gain recovers about two thirds of the way, seconds.
         :param stride: The gain is worked out every this many samples; it must divide the block.
         """
-        self.ceiling = float(10 ** (ceiling_db / 20.0))
+        self.ceiling = float(10 ** (ceiling_db / AMPLITUDE_DB_DIVISOR))
         self.stride = stride
         self.delay = max(stride, round(lookahead * sample_rate / stride) * stride)
         self.steps = self.delay // stride
@@ -61,12 +68,12 @@ class Limiter:
         """
         Limit a block and return the same number of samples, delayed by the look-ahead.
 
-        :param block: Stereo samples, shape (n, 2) with n a multiple of 20.
+        :param block: Stereo samples, shape (n, 2) with n a multiple of `STRIDE`.
         """
         count = len(block)
         full = np.concatenate([self._audio, block.astype(np.float32)])
         peak_here = float(np.abs(block).max())
-        if self._gain >= 0.9999 and peak_here < self.ceiling and not (self._need < 1.0).any():
+        if self._gain >= UNITY_GAIN and peak_here < self.ceiling and not (self._need < 1.0).any():
             # nothing reaches the ceiling and nothing is held down: the block is only delayed
             self._audio = full[count:]
             self._need = np.ones(self.steps)
@@ -77,7 +84,7 @@ class Limiter:
         stride = self.stride
         groups = peak[: count // stride * stride].reshape(-1, stride).max(axis=1)
         need = np.concatenate(
-            [self._need, np.minimum(1.0, self.ceiling / np.maximum(groups, 1e-9))]
+            [self._need, np.minimum(1.0, self.ceiling / np.maximum(groups, SILENCE_FLOOR))]
         )
         # allowed[d] = min over the look-ahead of the ramp into each peak that is ahead of d
         steps = self.steps
@@ -100,12 +107,12 @@ class Limiter:
         out = full[:count] * per_sample[:, None]
         self._audio = full[count:]
         self._need = need[outputs:]
-        hot = np.abs(out) > self.ceiling * 1.001
+        hot = np.abs(out) > self.ceiling * CLIP_TOLERANCE
         self.clipped += int(hot.sum())
         if hot.any():
             out = np.where(hot, np.sign(out) * self.ceiling, out).astype(np.float32)
         self.samples += out.size
-        reduction = -20.0 * np.log10(np.maximum(gain, 1e-6))
+        reduction = -AMPLITUDE_DB_DIVISOR * np.log10(np.maximum(gain, MIN_LEVEL))
         self.reduction_sum += float(reduction.mean())
         self.reduction_max = max(self.reduction_max, float(reduction.max()))
         self.blocks += 1

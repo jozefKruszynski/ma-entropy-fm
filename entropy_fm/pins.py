@@ -20,45 +20,55 @@ from __future__ import annotations
 import contextlib
 import gzip
 import json
+import logging
 import os
 import re
+import tempfile
+import zlib
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .const import ENGINE_VERSION
+from .constants import ENGINE_VERSION
 from .timeline import EntityInfo, VoiceKind
 
+LOGGER = logging.getLogger(__name__)
 PIN_FORMAT = 1
 INDEX_FILE = "library.json"
 PIN_FOLDER = "pins"
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+TEMP_SUFFIX = ".part"
+BROKEN_SUFFIX = ".bak"
 
 
 def safe_name(text: str) -> str:
     """
-    Return text that is safe as a file name.
+    Return text that is safe as a file name: no separators, and never a name of only dots.
 
     :param text: Any text, such as an area id.
     """
-    return SAFE.sub("_", text) or "_"
+    name = SAFE.sub("_", text)
+    return name if name.strip(".") else "_"
 
 
 def write_atomic(path: Path, data: bytes) -> None:
     """
-    Write a file so that it is either whole or not there: temporary file, then rename.
+    Write a file so that it is either whole or not there: unique temporary file, then rename.
+
+    Safe for threads and processes writing the same file at once: the last rename wins.
 
     :param path: The file.
     :param data: Its content.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f"{path.name}.{os.getpid()}.part")
+    handle, name = tempfile.mkstemp(prefix=f"{path.name}.", suffix=TEMP_SUFFIX, dir=path.parent)
+    temp = Path(name)
     try:
-        with temp.open("wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
         temp.replace(path)
     finally:
         temp.unlink(missing_ok=True)
@@ -150,7 +160,7 @@ class PinStore:
 
     def read(self, area_id: str, day: date) -> Pin | None:
         """
-        Read a pin; a file that cannot be read is deleted and counts as missing.
+        Read a pin; a corrupt file is deleted and counts as missing, one of an unknown format or that cannot be read stays.
 
         :param area_id: The area.
         :param day: The day.
@@ -160,8 +170,12 @@ class PinStore:
             return None
         try:
             return Pin.from_json(json.loads(gzip.decompress(path.read_bytes())))
-        except OSError, ValueError, KeyError, EOFError, TypeError:
+        except (gzip.BadGzipFile, zlib.error, EOFError, json.JSONDecodeError) as err:
+            LOGGER.warning("Deleted the corrupt pin of %s on %s: %s", area_id, day, err)
             path.unlink(missing_ok=True)
+            return None
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as err:
+            LOGGER.debug("Left the unreadable pin of %s on %s alone: %s", area_id, day, err)
             return None
 
     def has(self, area_id: str, day: date) -> bool:
@@ -227,8 +241,6 @@ class Membership:
     needs: dict[str, list[list[str]]] = field(default_factory=dict)
     # what the library knows of an area that Home Assistant may no longer have: name and entities
     snapshot: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # set when the file of an earlier version had the list of removed items, which is dropped at the next save
-    legacy_removed: bool = field(default=False, compare=False)
 
     def needed(self) -> set[tuple[str, str]]:
         """Return every pin that something in the library needs, as area id and ISO day."""
@@ -280,20 +292,27 @@ class Membership:
                 key: [list(pair) for pair in pairs] for key, pairs in data.get("needs", {}).items()
             },
             snapshot=dict(data.get("snapshot", {})),
-            legacy_removed="removed" in data,
         )
 
 
 def load_membership(root: str | Path) -> Membership:
     """
-    Read the membership of the library; a file that is missing or broken gives an empty one.
+    Read the membership of the library; a missing file gives an empty one, a broken one is moved aside first.
 
     :param root: The folder of the provider in the storage path.
     """
     path = Path(root) / INDEX_FILE
     try:
-        return Membership.from_json(json.loads(path.read_text()))
-    except OSError, ValueError, TypeError, AttributeError:
+        text = path.read_text()
+    except OSError:
+        return Membership()
+    try:
+        return Membership.from_json(json.loads(text))
+    except (ValueError, TypeError, AttributeError) as err:
+        broken = path.with_name(path.name + BROKEN_SUFFIX)
+        LOGGER.warning("The library file could not be read and was moved to %s: %s", broken, err)
+        with contextlib.suppress(OSError):
+            path.replace(broken)
         return Membership()
 
 

@@ -17,11 +17,10 @@ import numpy as np
 
 from .timeline import stable_hash
 
-
-def _round_order(style: str, round_index: int, count: int) -> list[int]:
-    """Return the order in which the members play in one round: a shuffle of the whole family."""
-    rng = np.random.default_rng([stable_hash(style, "round") % 2**32, round_index])
-    return [int(index) for index in rng.permutation(count)]
+# the seed of the shuffle of a round is the hash of the style folded into this range
+ROUND_SEED_MODULUS = 2**32
+# a family of this many members just alternates
+ALTERNATING_FAMILY_SIZE = 2
 
 
 def variant_of(style: str, day: date, count: int) -> int:
@@ -37,10 +36,16 @@ def variant_of(style: str, day: date, count: int) -> int:
     """
     if count <= 1:
         return 0
-    if count == 2:
-        return (day.toordinal() + stable_hash(style)) % 2
+    if count == ALTERNATING_FAMILY_SIZE:
+        return (day.toordinal() + stable_hash(style)) % ALTERNATING_FAMILY_SIZE
     round_index, place = divmod(day.toordinal(), count)
     order = _round_order(style, round_index, count)
     if round_index > 0 and order[0] == _round_order(style, round_index - 1, count)[-1]:
         order[0], order[1] = order[1], order[0]
     return order[place]
+
+
+def _round_order(style: str, round_index: int, count: int) -> list[int]:
+    """Return the order in which the members play in one round: a shuffle of the whole family."""
+    rng = np.random.default_rng([stable_hash(style, "round") % ROUND_SEED_MODULUS, round_index])
+    return [int(index) for index in rng.permutation(count)]

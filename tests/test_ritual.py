@@ -19,12 +19,12 @@ from entropy_fm.scape_ritual import (
     MIN_GAP,
     MODE_LENGTHS,
     MODES,
-    PLUCKS,
     SLIT_PATTERNS,
     STILL,
     TUNINGS,
 )
 from entropy_fm.score import Score
+from entropy_fm.signature import POOLS
 from entropy_fm.voices import NOTES, render_note
 
 from .scape_tools import demo, window
@@ -35,6 +35,7 @@ FORBIDDEN = {"glass_pad", "fm_ep", "tx_ep", "fm_growl", "reese", "juno_pluck", "
 # every voice that is plucked or struck on a string or a key: there is one of them at a time
 PLUCKED = {"strum_pluck", "nylon_ks", "felt_piano", "grand_piano", "juno_pluck", "moog_seq"}
 WOOD = {"slit", "block", "clack"}
+PLUCK_VOICES = {sig.voice for sig in POOLS["ritual"]["plucks"]}
 
 
 def _scale_of(score: Score) -> tuple[int, set[int]]:
@@ -201,7 +202,7 @@ def test_there_is_one_plucked_voice_at_a_time_and_never_two_plucks_together() ->
         score, _ = demo("ritual", index)
         voices = {n.voice for n in score.notes if n.voice in PLUCKED}
         assert len(voices) == 1, (index, voices)
-        assert voices <= {key for _, key, _ in PLUCKS}
+        assert voices <= PLUCK_VOICES
         assert {n.voice for n in score.notes if n.layer == "plucks"} == voices
         seen |= voices
         line = sorted(n.t for n in score.notes if n.layer == "plucks")
@@ -209,7 +210,7 @@ def test_there_is_one_plucked_voice_at_a_time_and_never_two_plucks_together() ->
         assert min(b - a for a, b in itertools.pairwise(line)) > 0.2, index
         # nothing plucked sounds on any other layer
         assert not [n for n in score.notes if n.voice in PLUCKED and n.layer != "plucks"]
-    assert {key for _, key, _ in PLUCKS} == {"strum_pluck", "nylon_ks", "felt_piano"}
+    assert {"strum_pluck", "felt_piano"} == PLUCK_VOICES
     assert len(CELLS) >= 6
 
 

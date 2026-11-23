@@ -9,11 +9,13 @@ import pytest
 from entropy_fm.baseline import build_baseline
 from entropy_fm.day_analysis import analyze_day
 from entropy_fm.palette import DayTraits, derive_palette
+from entropy_fm.plan import DEFAULT_OPTIONS, PieceOptions
 from entropy_fm.scape import scape_score
 from entropy_fm.styles import AMBIENT
 from entropy_fm.surprise import (
-    BOOST,
+    EPISODE_BOOST,
     FEATURE_THRESHOLD,
+    KIND_CLIMATE,
     ROUTINE_FADE,
     Surprise,
     climate_anomaly,
@@ -45,7 +47,7 @@ def test_a_door_at_the_usual_hour_is_routine_and_at_three_in_the_night_is_featur
     assert float(quiet.gain("binary_sensor.door", 8.2 * HOUR)) == pytest.approx(
         1.0 - ROUTINE_FADE, abs=0.12
     )
-    assert float(loud.gain("binary_sensor.door", 3 * HOUR)) > 1.0 + 0.8 * BOOST
+    assert float(loud.gain("binary_sensor.door", 3 * HOUR)) > 1.0 + 0.8 * EPISODE_BOOST
     # away from both, an entity that has a baseline is at full level
     assert float(quiet.gain("binary_sensor.door", 15 * HOUR)) == 1.0
 
@@ -87,7 +89,7 @@ def test_a_heatwave_is_a_climate_anomaly() -> None:
     assert climate_anomaly(normal, baseline) is None
     anomaly = climate_anomaly(hot, baseline)
     assert anomaly is not None
-    assert anomaly.kind == "climate"
+    assert anomaly.kind == KIND_CLIMATE
     assert anomaly.score > 0.5
     assert 0.0 <= anomaly.start < 86400.0
 
@@ -126,13 +128,13 @@ def test_surprise_is_deterministic() -> None:
     )
 
 
-def _score(**kwargs: object) -> object:
+def _score(options: PieceOptions = DEFAULT_OPTIONS) -> object:
     voices = [
         door("binary_sensor.door", [3 * HOUR]),
         washer("sensor.washer", [3 * HOUR + 600]),
     ]
     analysis = analyze_day(voices)
-    return scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), **kwargs)[0]  # type: ignore[arg-type]
+    return scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), options=options)[0]
 
 
 def test_a_soundscape_with_surprise_and_a_palette_is_deterministic_and_differs() -> None:
@@ -145,8 +147,9 @@ def test_a_soundscape_with_surprise_and_a_palette_is_deterministic_and_differs()
     anomalies = [(a.start, a.score, a.entity_id) for a in surprise.anomalies]
     analysis = analyze_day(voices, 86400.0, anomalies)
     plain = scape_score(voices, analyze_day(voices), "lofi", "s", Scale(2, "dorian"))[0]
-    first = scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), palette=palette)[0]
-    again = scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), palette=palette)[0]
+    options = PieceOptions(palette=palette)
+    first = scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), options=options)[0]
+    again = scape_score(voices, analysis, "lofi", "s", Scale(2, "dorian"), options=options)[0]
     assert first.notes == again.notes
     assert first.events
     assert not plain.events

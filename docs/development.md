@@ -17,18 +17,20 @@ from the demo on their own.
 
 | File | What it does |
 |---|---|
-| `entropy_fm/__init__.py` | The provider: settings, browsing, library, pins, streaming, the cache. |
+| `entropy_fm/__init__.py` | The entry point the server loads: `setup` makes the provider. |
+| `entropy_fm/provider.py` | The provider: settings, browsing, the library, favorites and pins, streaming, the audio cache, the maintenance and pre-render timers, the library sync request. |
+| `entropy_fm/constants.py` | The keys of the settings and the fixed values: cache categories, expirations, limits, delays. |
 | `entropy_fm/library.py` | Areas, days and entities to artists, albums and tracks; ids; durations; which rooms are quiet. |
 | `entropy_fm/pins.py` | The days that were hearted, kept after Home Assistant forgets them. |
 | `entropy_fm/audiocache.py` | Ogg/Opus files of rendered past days, with least-recently-used eviction. |
 | `entropy_fm/prerender.py` | Which tracks of yesterday to render ahead into the cache, and when. |
 | `entropy_fm/roles.py` | The layered classifier that gives an entity its role. |
-| `entropy_fm/hass_access.py`, `history.py` | Registries, states and history, through the core plugin or a client of our own. |
+| `entropy_fm/hass_access.py`, `history.py` | Registries, states and history, through the core plugin or a client of our own. A listing reads the history once per day for all its rooms (`HistoryStore.prefetch`). |
 | `entropy_fm/timeline.py` | History to normalised control signals. |
 | `entropy_fm/day_analysis.py`, `energy.py` | The day read as a curve of activity, five to seven stretches and salient moments. |
 | `entropy_fm/baseline.py`, `surprise.py`, `palette.py`, `variation.py` | What is usual, what is unusual, the character of the day, the dealing of material. |
 | `entropy_fm/character.py` | The character of a day (how busy, what shape, how warm, how many stretches, what stood out, a day off), the key and mode, the tempo position and the chord length it asks for, and the motif of each room. |
-| `entropy_fm/plan.py` | The length of the piece (condensed per style, or the full length of a Soundscape), the arc of the day over it, the curves the house gives, the thinning of events when condensed, the deals. |
+| `entropy_fm/plan.py` | The length of the piece (per style), the arc of the day over it, the curves the house gives, the thinning of events, the deals. |
 | `entropy_fm/scape_ambient.py`, `scape_berlin.py`, `scape_lofi.py`, `scape_ritual.py`, `scape_glitch.py` | The five generative systems and their composed vocabulary. |
 | `entropy_fm/harmony.py` | What the styles share: voice leading, held tones, the voice a day picks by its energy and warmth, the length of a chord, the shared growling bass family, and how the motif of a room is developed from one statement to the next. |
 | `entropy_fm/glitch.py`, `glitch_drums.py`, `glitch_kits.py`, `glitch_voices.py`, `glitch_render.py` | The sounds of Cinematic Glitch (swells, stabs, growl, kit), its drum families, the edits, and its own renderer (a block pipeline with a latency of three seconds, so that an edit can read the material before it). |
@@ -38,7 +40,7 @@ from the demo on their own.
 | `entropy_fm/levels.py` | The gain staging: design levels, measured trims, the loudness estimate of a score. |
 | `entropy_fm/render.py`, `limiter.py` | The render loop, the buses, the room, the leveler, the limiter. |
 | `entropy_fm/quality.py`, `autotune.py` | The three tiers, and the benchmark that Auto uses (it renders the dearest style that is offered). |
-| `entropy_fm/covers.py`, `maart.py`, `imageapi.py` | Album covers: drawn locally, and the AI covers (an image engine, the presets of Music Assistant, a rate limiter) that stay hidden while `AI_COVERS_ENABLED` in `const.py` is `False`. |
+| `entropy_fm/covers.py` | Album covers: drawn locally in the look of the covers of Music Assistant, with the title set lower left; the server keeps what they return. |
 | `entropy_fm/roomart.py` | The images of the artists (rooms), drawn from the week of each room. |
 | `entropy_fm/titles.py` | Titles of the tracks, the history and drive text of each style, the line about the day, the review of an album, in English and Dutch. |
 | `entropy_fm/references.py` | Measures each sensor against its own previous days, leaves out the dead ones, finds the showers. |
@@ -56,7 +58,7 @@ its phases, an oven, a hob cooked on, a Sonos, blinds, a scene of twenty lights,
 
 ```sh
 uv sync
-uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the full pieces, the voice library, soundscapes.md (--fast, --only excerpts parts voices full notes condensed)
+uv run python scripts/soundscapes.py out/        # the excerpts, the parts, the voice library, soundscapes.md (--fast, --only excerpts parts voices notes condensed)
 uv run python scripts/analyze_audio.py --table out/*.mp3
 uv run python scripts/loudness_report.py         # integrated LUFS, short-term, true peak, limiter
 uv run python scripts/glide_report.py out/*.mp3  # the glide tracker of the tests
@@ -79,7 +81,7 @@ numbers are made up from statistics of a real house; there is no recorded data i
 `entropy_fm_<style>_kitchen_excerpts.mp3` (three minutes: one from the night, one from the active
 daytime, one from the evening of the piece, with short cross fades, so that the arc of the day can
 be heard quickly), `entropy_fm_<style>_parts.mp3` (each layer alone for a few seconds, then all
-together), full pieces of Ambient and Berlin School (Ritual and Cinematic Glitch have excerpts and parts), `entropy_fm_voice_library.mp3` (every voice
+together), `entropy_fm_voice_library.mp3` (every voice
 alone for four seconds on a short phrase) and `soundscapes.md`, which says for each piece how long it
 is, what plays when, what the day chose, how the house shaped it and which voices it used.
 `analyze_audio.py` prints the levels, the DC offset, the share of energy above 6 kHz, the noise floor

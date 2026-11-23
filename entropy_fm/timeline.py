@@ -11,7 +11,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +20,44 @@ import numpy.typing as npt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+HOURS_PER_DAY = 24
+MINUTES_PER_DAY = 1440
+DAY_SECONDS = float(SECONDS_PER_HOUR * HOURS_PER_DAY)
+# the seeds of the random generators are hashes folded into this range
+SEED_MODULUS = 2**63
+HASH_BYTES = 8
+# a normalised value above this is on, and one at or below it is off
+ON_LEVEL = 0.5
+# the level of a value that does not move at all
+FLAT_LEVEL = 0.5
+PERCENT = 100.0
+# the percentiles that stand for the loudest and the quietest of a series, so that one outlier does not set the scale
+PEAK_PERCENTILE = 98
+LOW_PERCENTILE = 2
+MIN_RANGE = 1e-9
+# a series with this many points or fewer is never thinned
+MIN_THIN_POINTS = 3
+THIN_MIN_GAP = 20.0
+THIN_RELATIVE_CHANGE = 0.02
+# the stored history is thinned harder: a meter by time only, anything else by 10 seconds
+STORED_METER_GAP = 60.0
+STORED_GAP = 10.0
+STORED_TIME_DECIMALS = 2
+STORED_VALUE_DECIMALS = 4
+# a meter that reports twice within a second is read as if a second had passed
+MIN_METER_STEP = 1.0
+# the elevation of the sun in degrees that is the start of daylight, and how many degrees it takes to be fully light
+SUN_ELEVATION_START = 6.0
+SUN_ELEVATION_SPAN = 18.0
+# a series is as active as its points up to this many, which is what ranks its voice
+ACTIVITY_POINTS_CAP = 400
+# the series that play at most this many voices, when the kind has no limit of its own
+DEFAULT_VOICE_LIMIT = 4
+# the smallest change of the normalised value that counts as a change when no minimum is given
+MIN_NORM_CHANGE = 0.02
 
 
 def as_array(value: Any) -> npt.NDArray[np.float64]:
@@ -58,12 +96,12 @@ class VoiceKind(StrEnum):
     AIR = "air"
 
 
+# kinds that draw power
+POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 # kinds whose value is 0 or 1
 BINARY_KINDS = frozenset(
     {VoiceKind.PLUCK, VoiceKind.CHORD, VoiceKind.BLIP, VoiceKind.MEDIA, VoiceKind.COVER}
 )
-# kinds whose every change is a musical event, whatever the direction
-EVENT_KINDS = frozenset({VoiceKind.PHASE, VoiceKind.HOB, VoiceKind.COVER, VoiceKind.MEDIA})
 HOB_LEVELS = 9.0
 PHASE_CODES = 8
 # what a sensor says when it is doing nothing
@@ -173,7 +211,7 @@ def stable_hash(*parts: object) -> int:
     :param parts: The values to hash; their text is joined.
     """
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode()).digest()
-    return int.from_bytes(digest[:8], "big")
+    return int.from_bytes(digest[:HASH_BYTES], "big")
 
 
 @dataclass(frozen=True)
@@ -297,7 +335,10 @@ def category_value(state: str) -> float | None:
 
 
 def thin_numeric(
-    times: np.ndarray, values: np.ndarray, min_dt: float = 20.0, rel: float = 0.02
+    times: np.ndarray,
+    values: np.ndarray,
+    min_dt: float = THIN_MIN_GAP,
+    rel: float = THIN_RELATIVE_CHANGE,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Drop points of a numeric series that add nothing audible.
@@ -310,7 +351,7 @@ def thin_numeric(
     :param min_dt: The shortest gap between kept points, in seconds.
     :param rel: A change, as a fraction of the range, that always stays.
     """
-    if len(times) < 3:
+    if len(times) < MIN_THIN_POINTS:
         return times, values
     span = float(np.ptp(values)) or 1.0
     keep = [0]
@@ -334,12 +375,12 @@ def normalise(  # noqa: PLR0911 - one scaling per kind
     if kind in BINARY_KINDS or kind == VoiceKind.SUN:
         return np.clip(values, 0.0, 1.0)
     if kind in {VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER}:
-        peak = float(np.percentile(values, 98))
+        peak = float(np.percentile(values, PEAK_PERCENTILE))
         if peak < MIN_POWER_PEAK:
             return np.zeros_like(values)
         return np.clip(values / peak, 0.0, 1.0)
     if kind in {VoiceKind.HUMIDITY, VoiceKind.PROGRESS}:
-        return np.clip(values / 100.0, 0.0, 1.0)
+        return np.clip(values / PERCENT, 0.0, 1.0)
     if kind == VoiceKind.PHASE:
         return np.clip(values / PHASE_CODES, 0.0, 1.0)
     if kind == VoiceKind.HOB:
@@ -348,9 +389,10 @@ def normalise(  # noqa: PLR0911 - one scaling per kind
         low, high = float(values.min()), float(values.max())
         span = max(high - low, MIN_TEMPERATURE_SPAN)
         return np.clip((values - (low + high) / 2) / span + 0.5, 0.0, 1.0)
-    low, high = (float(np.percentile(values, 2)), float(np.percentile(values, 98)))
-    if high - low < 1e-9:
-        return np.full_like(values, 0.5)
+    low = float(np.percentile(values, LOW_PERCENTILE))
+    high = float(np.percentile(values, PEAK_PERCENTILE))
+    if high - low < MIN_RANGE:
+        return np.full_like(values, FLAT_LEVEL)
     return np.clip((values - low) / (high - low), 0.0, 1.0)
 
 
@@ -369,8 +411,6 @@ class Series:
     norm: np.ndarray
     device_class: str = ""
     device: str = ""
-    # event times that rate limiting and merging have taken away, see `condense`
-    suppressed: frozenset[float] = frozenset()
     # the role of the entity ("fridge", "washer", ...), which `build_series` reads from why the entity plays
     role: str = ""
     # what the entity read on the days before, when they are known (see `references.rescale`)
@@ -407,8 +447,10 @@ class Series:
     def activity(self) -> float:
         """Return how much happens in the series, to rank voices."""
         if self.kind in BINARY_KINDS:
-            return float(np.count_nonzero(np.diff(self.norm) > 0.5))
-        return float(np.ptp(self.norm)) * (1 + min(len(self.times), 400) / 400)
+            return float(np.count_nonzero(np.diff(self.norm) > ON_LEVEL))
+        return float(np.ptp(self.norm)) * (
+            1 + min(len(self.times), ACTIVITY_POINTS_CAP) / ACTIVITY_POINTS_CAP
+        )
 
     def onsets(self, start: float, end: float) -> np.ndarray:
         """
@@ -417,17 +459,10 @@ class Series:
         :param start: First second of house time.
         :param end: End of the stretch, exclusive.
         """
-        rising = np.flatnonzero((self.norm[1:] > 0.5) & (self.norm[:-1] <= 0.5)) + 1
+        rising = np.flatnonzero((self.norm[1:] > ON_LEVEL) & (self.norm[:-1] <= ON_LEVEL)) + 1
         return self._within(self.times[rising], start, end)
 
-    def _within(self, found: np.ndarray, start: float, end: float) -> np.ndarray:
-        """Return the times of a stretch that rate limiting has not taken away."""
-        found = found[(found >= start) & (found < end)]
-        if self.suppressed:
-            found = found[[float(t) not in self.suppressed for t in found]]
-        return found
-
-    def changes(self, start: float, end: float, minimum: float = 0.02) -> np.ndarray:
+    def changes(self, start: float, end: float, minimum: float = MIN_NORM_CHANGE) -> np.ndarray:
         """
         Return the times in [start, end) where the value changes by more than `minimum`.
 
@@ -452,13 +487,6 @@ class Series:
         flips = flips[above[flips]] if rising else flips[~above[flips]]
         return self._within(self.times[flips], start, end)
 
-    def _integral_at(self, time: np.ndarray) -> np.ndarray:
-        """Return the integral of the step function from 0 to each time."""
-        index = np.clip(np.searchsorted(self.times, time, side="right") - 1, 0, len(self.times) - 1)
-        result = self._integral[index] + self.norm[index] * (time - self.times[index])
-        # before the start the first value is assumed to hold
-        return np.where(time < 0, self.norm[0] * time, result)
-
     def at(self, time: np.ndarray, smooth: float = 0.0) -> np.ndarray:
         """
         Return the normalised value at the given times of house time.
@@ -471,6 +499,17 @@ class Series:
             index = np.clip(np.searchsorted(self.times, time, side="right") - 1, 0, None)
             return self.norm[index]
         return as_array((self._integral_at(time) - self._integral_at(time - smooth)) / smooth)
+
+    def _within(self, found: np.ndarray, start: float, end: float) -> np.ndarray:
+        """Return the times of a stretch."""
+        return found[(found >= start) & (found < end)]
+
+    def _integral_at(self, time: np.ndarray) -> np.ndarray:
+        """Return the integral of the step function from 0 to each time."""
+        index = np.clip(np.searchsorted(self.times, time, side="right") - 1, 0, len(self.times) - 1)
+        result = self._integral[index] + self.norm[index] * (time - self.times[index])
+        # before the start the first value is assumed to hold
+        return np.where(time < 0, self.norm[0] * time, result)
 
 
 def build_series(info: EntityInfo, times: Sequence[float], values: Sequence[float]) -> Series:
@@ -487,13 +526,13 @@ def build_series(info: EntityInfo, times: Sequence[float], values: Sequence[floa
     t, v = t[order], v[order]
     if info.cumulative and len(t) > 1:
         # a meter counts up; what plays is how fast. A reset gives a negative step: zero.
-        dt = np.maximum(np.diff(t), 1.0)
+        dt = np.maximum(np.diff(t), MIN_METER_STEP)
         rate = np.maximum(np.diff(v), 0.0) / dt
         t, v = t[1:], rate
     if len(t) == 0:
         t, v = np.array([0.0]), np.array([0.0])
     if t[0] > 0:
-        before = 0.0 if info.kind in BINARY_KINDS and v[0] > 0.5 else v[0]
+        before = 0.0 if info.kind in BINARY_KINDS and v[0] > ON_LEVEL else v[0]
         t, v = np.concatenate(([0.0], t)), np.concatenate(([before], v))
     else:
         t = t.copy()
@@ -501,10 +540,10 @@ def build_series(info: EntityInfo, times: Sequence[float], values: Sequence[floa
     if info.kind not in BINARY_KINDS and info.kind != VoiceKind.SUN:
         t, v = thin_numeric(t, v)
     if info.kind in BINARY_KINDS:
-        v = (v > 0.5).astype(np.float64)
+        v = (v > ON_LEVEL).astype(np.float64)
     elif info.entity_id == SUN_ELEVATION_ENTITY:
         # an elevation in degrees becomes daylight
-        v = np.clip((v + 6.0) / 18.0, 0.0, 1.0)
+        v = np.clip((v + SUN_ELEVATION_START) / SUN_ELEVATION_SPAN, 0.0, 1.0)
     found = ROLE_TEXT.match(info.why)
     return Series(
         info.entity_id,
@@ -531,13 +570,19 @@ def raw_to_json(
     """
     t = np.asarray(times, dtype=np.float64)
     v = np.asarray(values, dtype=np.float64)
-    if len(t) > 2:
+    if len(t) >= MIN_THIN_POINTS:
         # the rate of a meter needs its points, so a meter is thinned by time only
         meter = info.cumulative
         t, v = thin_numeric(
-            t, v, min_dt=60.0 if meter else 10.0, rel=float("inf") if meter else 0.02
+            t,
+            v,
+            min_dt=STORED_METER_GAP if meter else STORED_GAP,
+            rel=float("inf") if meter else THIN_RELATIVE_CHANGE,
         )
-    return {"t": np.round(t, 2).tolist(), "v": np.round(v, 4).tolist()}
+    return {
+        "t": np.round(t, STORED_TIME_DECIMALS).tolist(),
+        "v": np.round(v, STORED_VALUE_DECIMALS).tolist(),
+    }
 
 
 def series_from_json(info: EntityInfo, data: dict[str, Any]) -> Series:
@@ -586,7 +631,7 @@ def select_voices(
             (item for item in series if item.kind == kind),
             key=lambda item: (-item.activity, item.entity_id),
         )
-        chosen.extend(of_kind[: limits.get(kind, 4)])
+        chosen.extend(of_kind[: limits.get(kind, DEFAULT_VOICE_LIMIT)])
     return chosen
 
 
@@ -620,109 +665,3 @@ def parse_history(
             values.append(value)
         result[entity_id] = (times, values)
     return result
-
-
-# the fewest seconds of house time between two events of one entity: at most six a minute
-MIN_EVENT_GAP = 10.0
-# changes of one device, or of lights and switches together, that are this close are one gesture
-MERGE_WINDOW = 8.0
-# kinds whose events are rate limited and merged
-LIMITED_KINDS = frozenset(
-    {
-        VoiceKind.PLUCK,
-        VoiceKind.BLIP,
-        VoiceKind.CHORD,
-        VoiceKind.PHASE,
-        VoiceKind.COVER,
-        VoiceKind.MEDIA,
-    }
-)
-
-
-def _event_times(item: Series) -> np.ndarray:
-    """Return when a series has something happen: a rise for a binary one, any change else."""
-    if item.kind in {VoiceKind.PLUCK, VoiceKind.BLIP}:
-        return item.onsets(-1.0, float("inf"))
-    return item.changes(-1.0, float("inf"))
-
-
-def condense(
-    series: Sequence[Series], min_gap: float = MIN_EVENT_GAP, window: float = MERGE_WINDOW
-) -> list[Series]:
-    """
-    Rate limit the events of the series and merge the ones that happen together.
-
-    An entity gets at most one event every `min_gap` seconds. Events of the entities of one
-    device, and of all the lights and switches that have no device of their own, that are within
-    `window` seconds of each other are one gesture: only the first of them stays. A scene that
-    toggles twenty lights at once is one event. The series are returned as copies that remember
-    which of their times are suppressed; their values are not touched.
-
-    :param series: The candidates.
-    :param min_gap: The shortest time between two events of one entity.
-    :param window: The width of a merge.
-    """
-    taken: dict[str, float] = {}
-    events: list[tuple[float, str, int]] = []
-    for index, item in enumerate(series):
-        if item.kind not in LIMITED_KINDS:
-            continue
-        group = item.device or ("lights" if item.kind == VoiceKind.CHORD else item.entity_id)
-        events.extend((float(t), group, index) for t in _event_times(item))
-    suppressed: dict[int, set[float]] = {}
-    last_of_entity: dict[int, float] = {}
-    for time, group, index in sorted(events):
-        entity_last = last_of_entity.get(index, -1e9)
-        merged = time - taken.get(group, -1e9) < window and group != series[index].entity_id
-        if time - entity_last < min_gap or merged:
-            suppressed.setdefault(index, set()).add(time)
-            continue
-        taken[group] = time
-        last_of_entity[index] = time
-    return [
-        replace(item, suppressed=frozenset(suppressed.get(index, ())))
-        if index in suppressed
-        else item
-        for index, item in enumerate(series)
-    ]
-
-
-def dedupe(
-    series: Sequence[Series], devices: dict[str, str] | None = None
-) -> tuple[list[Series], list[tuple[str, str]]]:
-    """
-    Drop the sensors that say the same thing twice.
-
-    Two power sensors of one device, or two series with the same values at the same times (a plug
-    and the current power of the same machine), play once: the one with more activity stays.
-
-    :param series: The candidates.
-    :param devices: Entity id to device id, for the series that have no device of their own.
-    :return: The kept series and the pairs `(dropped, kept)`.
-    """
-    devices = devices or {}
-    kept: list[Series] = []
-    dropped: list[tuple[str, str]] = []
-    seen: dict[tuple[object, ...], Series] = {}
-    for item in sorted(series, key=lambda item: (-item.activity, item.entity_id)):
-        if item.kind in {VoiceKind.SUN, VoiceKind.PHASE, VoiceKind.HOB}:
-            kept.append(item)
-            continue
-        device = item.device or devices.get(item.entity_id, "")
-        shape = (
-            round(len(item.times), 0),
-            np.round(item.times, 0).tobytes(),
-            np.round(item.norm, 2).tobytes(),
-        )
-        keys: list[tuple[object, ...]] = [("same", item.kind, *shape)]
-        if device and item.kind in {VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER}:
-            keys.append(("device", item.kind, device))
-        twin = next((seen[key] for key in keys if key in seen), None)
-        if twin is not None and item.activity > 0:
-            dropped.append((item.entity_id, twin.entity_id))
-            continue
-        for key in keys:
-            seen[key] = item
-        kept.append(item)
-    order = {item.entity_id: index for index, item in enumerate(series)}
-    return sorted(kept, key=lambda item: order[item.entity_id]), dropped

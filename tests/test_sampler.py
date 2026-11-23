@@ -1,12 +1,14 @@
-"""Tests of the sampler: zones, velocity layers, pitch shifting, envelopes, loops, voice limits, determinism."""
+"""Tests of the sampler: zones, velocity layers, pitch shifting, envelopes, loops, one-shots, the cache."""
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from entropy_fm.sampler import MAX_SHIFT, SAMPLES_DIR, Instrument, Sampler, Trigger
+from entropy_fm.drums import SNARE_LOFI_SHOTS
+from entropy_fm.sampler import MAX_SHIFT, SAMPLES_DIR, Instrument, SampleCache
 from entropy_fm.synth import SAMPLE_RATE
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -70,36 +72,22 @@ def test_a_sustain_loop_holds_a_note_longer_than_the_sample() -> None:
     assert held.min() > 0.2 * held.max()
 
 
-def test_the_voice_limit_cuts_the_oldest_voice_and_a_choke_group_cuts_its_own() -> None:
-    """With a limit of two voices the third note cuts the first; a hat of a group cuts the open hat."""
-    sampler = Sampler.from_folder(["felt_piano", "drums"], limit=2)
-    triggers = [Trigger(0.1 * k, "felt_piano", 0.7, 60.0 + k, duration=2.0) for k in range(3)]
-    voices = sampler.schedule(triggers)
-    assert voices[0].cut is not None
-    assert voices[1].cut is None
-    assert voices[2].cut is None
-
-
-def test_the_same_triggers_give_the_same_samples_to_the_last_bit() -> None:
-    """Nothing is random: two samplers mix the same block of the same notes alike."""
-    triggers = [
-        Trigger(0.2 * k, "grand_piano", 0.3 + 0.1 * k, 55.0 + 3 * k, duration=1.0, pan=0.1 * k)
-        for k in range(6)
-    ]
-    blocks = []
-    for _ in range(2):
-        sampler = Sampler.from_folder(["grand_piano"])
-        voices = sampler.schedule(triggers)
-        blocks.append(sampler.mix(voices, 0, SAMPLE_RATE))
-    assert np.array_equal(blocks[0], blocks[1])
-    assert np.abs(blocks[0]).max() > 0.01
-
-
 def test_a_named_one_shot_plays_its_whole_sample() -> None:
     """The drum one-shots are found by name."""
     drums = Instrument.load(SAMPLES_DIR / "drums")
-    assert {"kick", "snare", "rim", "click"} <= set(drums.groups)
-    shot = drums.render(0.0, 0.8, None, name=drums.groups["snare"][0])
+    shot = drums.render(0.0, 0.8, None, name=SNARE_LOFI_SHOTS[0])
     assert 0.1 < len(shot) / SAMPLE_RATE < 1.0
     with pytest.raises(KeyError):
         drums.named("nothing")
+
+
+def test_threads_loading_the_same_samples_never_miscount_the_cache() -> None:
+    """The bytes the cache counts are the bytes it holds, however many threads decode one file."""
+    files = sorted((SAMPLES_DIR / "strings").glob("*.ogg"))[:3]
+    cache = SampleCache(limit_mb=1000)
+    jobs = 4
+    with ThreadPoolExecutor(jobs * len(files)) as pool:
+        waves = list(pool.map(cache.get, files * jobs))
+    assert len(cache._items) == len(files)  # noqa: SLF001
+    assert cache._bytes == sum(wave.nbytes for wave in {id(w): w for w in waves}.values())  # noqa: SLF001
+    assert all(cache.get(path) is waves[files.index(path)] for path in files)

@@ -17,7 +17,6 @@ from entropy_fm.library import (
     playable,
     recent_days,
     track_id,
-    track_seconds,
 )
 from entropy_fm.styles import STYLES
 from entropy_fm.timeline import VoiceKind
@@ -155,12 +154,10 @@ def test_a_day_with_a_clock_change_is_not_24_hours() -> None:
     assert autumn[1].timestamp() - autumn[0].timestamp() == 25 * 3600
 
 
-def test_durations_scale_with_compression_and_stop_at_now_for_today() -> None:
-    """A past day is a whole day of music; today only reaches what has happened."""
+def test_the_covered_seconds_of_a_day_stop_at_now_for_today() -> None:
+    """A past day is covered whole; today only up to what has happened."""
     now = datetime(2026, 11, 17, 12, 0, tzinfo=VIENNA)
-    assert track_seconds(date(2026, 11, 16), VIENNA, now, 60) == 1440
-    assert track_seconds(date(2026, 11, 16), VIENNA, now, 480) == 180
-    assert track_seconds(date(2026, 11, 17), VIENNA, now, 60) == 720
+    assert covered_seconds(date(2026, 11, 16), VIENNA, now) == 24 * 3600
     assert covered_seconds(date(2026, 11, 17), VIENNA, now.astimezone(UTC)) == 12 * 3600
     assert covered_seconds(date(2026, 11, 18), VIENNA, now) == 0
 
@@ -168,7 +165,7 @@ def test_durations_scale_with_compression_and_stop_at_now_for_today() -> None:
 def test_an_album_of_a_day_that_has_barely_begun_is_not_offered() -> None:
     """A soundscape needs a few hours of the day to have happened."""
     early = datetime(2026, 11, 17, 0, 5, tzinfo=VIENNA)
-    assert not playable(date(2026, 11, 17), VIENNA, early, 60)
-    assert playable(date(2026, 11, 16), VIENNA, early, 60)
-    assert not playable(date(2026, 11, 17), VIENNA, datetime(2026, 11, 17, 1, 0, tzinfo=VIENNA), 60)
-    assert playable(date(2026, 11, 17), VIENNA, datetime(2026, 11, 17, 3, 30, tzinfo=VIENNA), 60)
+    assert not playable(date(2026, 11, 17), VIENNA, early)
+    assert playable(date(2026, 11, 16), VIENNA, early)
+    assert not playable(date(2026, 11, 17), VIENNA, datetime(2026, 11, 17, 1, 0, tzinfo=VIENNA))
+    assert playable(date(2026, 11, 17), VIENNA, datetime(2026, 11, 17, 3, 30, tzinfo=VIENNA))

@@ -10,8 +10,8 @@ apart, even for the person who knows what happened in the house.
 
 The cause is the design, not one bug. Since the start, house data only steers *parameters* inside a
 style: density, filter brightness, reverb size, a layer more or less. The identity of a piece
-(tempo, key and mode, voices, groove, form) is chosen by `plan.deal(...)`, which rotates material in
-shuffled rounds per room and day. That gives variety, but it is random variety: it has nothing to do
+(tempo, key and mode, voices, groove, form) was chosen by a dealer that rotated material in
+shuffled rounds per room and day (now `plan.pick`, which takes the option that fits the day best and only breaks ties with the seeded `plan.rng`). That gave variety, but random variety: it has nothing to do
 with the day, and inside one style the result sounds like the same track with slightly different
 weather.
 
@@ -93,24 +93,24 @@ series only, generic entity ids, kept out of the shipped package).
   no chimes, no broadband noise beds, no continuous pitch glides above 150 Hz.
 - Loudness bands per style and the look-ahead limiter stay. CPU budgets per tier stay
   (`scripts/bench.py`; Light at most 20 ms per audio second).
-- Bump `ENGINE_VERSION` in `const.py` with every change to the sound, or cached days keep the old
+- Bump `ENGINE_VERSION` in `constants.py` with every change to the sound, or cached days keep the old
   audio. (It was forgotten from Wednesday to Friday, which hid all sound changes in Jozef's tests.)
 - Additive data rules: motion and occupancy stay the main presence signal where a house has them;
   CO2, plugs, lights and showers add to it. Dead or constant sensors are ignored.
 - Never write into Music Assistant's library or database. Asking MA to sync this provider's own
-  items is the one allowed exception (rooms or length changed).
+  items is the one allowed exception (the rooms changed).
 - The rules in `AGENTS.md` and the community catalog rules.
 
 ## Decided so far (don't redo)
 
 - Library: the sync shows the shown rooms, the recent days and all five tracks of each day; hearts
   keep days (pins). The library button does nothing special.
-- Settings: "Rooms to show" (multi-select), "Keep every day forever", "Piece length" (Condensed,
-  5 to 7 minutes, or Soundscape), "Pre-render past days", "Render quality" (Auto benchmarks the
-  heaviest offered style).
+- Settings: "Rooms to show" (multi-select), "Keep every day forever", "Render quality" (Auto
+  benchmarks the heaviest offered style). Pieces are always condensed (5 to 7 minutes), quiet rooms
+  are always hidden and the pre-render always renders what is pinned; the audio cache size 0 turns
+  the cache and the pre-render off.
 - Track titles are generated per room, day and style; descriptions carry the style's history.
-  Soundscape tracks (the long piece) have their own id (a last part `soundscape`) and the version "Soundscape".
-- Covers are drawn only; AI covers and "Redraw covers" are hidden behind `AI_COVERS_ENABLED`.
+- Covers are drawn only. The AI covers (an image engine, a rate limiter, a Redraw covers button) are parked on the branch `ai-covers`, because Music Assistant keeps the first cover it is given for an item.
   Room images are 24-hour clock figures from the room's week.
 - Ritual: one pluck line, slit drum and woodblock (VCSL, CC0), shishi-odoshi clack, drones, washes,
   chant leader, heartbeat, taiko.
@@ -119,7 +119,7 @@ series only, generic entity ids, kept out of the shipped package).
 
 - MA never refreshes a stored item from a streaming provider during a sync (names, durations,
   descriptions, images); `_library_item_needs_update` only reacts to mapping or date_added changes.
-  This breaks AI covers and makes old library tracks keep stale lengths and titles.
+  This makes old library tracks keep stale lengths and titles (and it is why AI covers are parked).
 - The frontend shows no track descriptions and labels album descriptions "Review".
 
 ## How Jozef works

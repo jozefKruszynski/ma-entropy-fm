@@ -1,9 +1,8 @@
-"""Tests of the scales, pitches and panning."""
+"""Tests of the scales and the smooth ramp."""
 
 import numpy as np
-import pytest
 
-from entropy_fm.synth import Scale, midi_to_hz, pan_gains, smoothstep
+from entropy_fm.synth import Scale, smoothstep
 
 
 def test_scale_quantises_to_the_mode() -> None:
@@ -12,7 +11,6 @@ def test_scale_quantises_to_the_mode() -> None:
     notes = [scale.midi(degree, 4) for degree in range(8)]
     assert notes == [62, 64, 65, 67, 69, 71, 72, 74]
     assert scale.midi(-1, 4) == 60
-    assert midi_to_hz(69) == pytest.approx(440.0)
 
 
 def test_the_gamelan_tunings_are_gone() -> None:
@@ -23,11 +21,8 @@ def test_the_gamelan_tunings_are_gone() -> None:
     assert "pelog" not in SCALES
 
 
-def test_pan_is_equal_power_and_smoothstep_is_a_ramp() -> None:
-    """A pan keeps the power, and the smooth ramp goes from 0 to 1."""
-    for pan in (-1.0, -0.3, 0.0, 0.8, 1.0):
-        left, right = pan_gains(pan)
-        assert left**2 + right**2 == pytest.approx(1.0)
+def test_smoothstep_is_a_ramp() -> None:
+    """The smooth ramp goes from 0 to 1."""
     assert float(smoothstep(np.array(0.0))) == 0.0
     assert float(smoothstep(np.array(1.0))) == 1.0
     assert 0.0 < float(smoothstep(np.array(0.5))) < 1.0

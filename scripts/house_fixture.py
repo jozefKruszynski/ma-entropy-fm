@@ -28,7 +28,7 @@ sys.path.insert(0, str(REPOSITORY))
 
 from entropy_fm.baseline import EntityBaseline, build_baselines, has_data  # noqa: E402
 from entropy_fm.character import DayCharacter, measure_character, raw_energy  # noqa: E402
-from entropy_fm.const import BASELINE_DAYS  # noqa: E402
+from entropy_fm.constants import BASELINE_DAYS  # noqa: E402
 from entropy_fm.palette import measure_traits  # noqa: E402
 from entropy_fm.references import rescale  # noqa: E402
 from entropy_fm.roles import classify  # noqa: E402

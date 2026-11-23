@@ -11,13 +11,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from music_assistant_models.enums import MediaType
+from music_assistant_models.errors import MediaNotFoundError
 from music_assistant_models.media_items import Album, Artist, Track
 
 from entropy_fm import EntropyFMProvider
-from entropy_fm.const import CONF_QUALITY, STORAGE_FOLDER
+from entropy_fm.constants import CONF_QUALITY, STORAGE_FOLDER
 from entropy_fm.library import Catalog, parse_track_id
 from entropy_fm.pins import load_membership
-from entropy_fm.plan import FULL
 from entropy_fm.styles import STYLES
 from music_assistant.mass import MusicAssistant
 from tests.test_provider import (  # noqa: F401
@@ -89,7 +89,7 @@ async def test_the_features_hearts_but_no_library_edit(
 
 def _clock(provider: EntropyFMProvider, monkeypatch: pytest.MonkeyPatch, shift_days: int) -> None:
     """Move the clock of the provider some days on, as midnights go by."""
-    from datetime import UTC, datetime, timedelta, tzinfo  # noqa: PLC0415
+    from datetime import UTC, datetime, tzinfo  # noqa: PLC0415
 
     real = provider._days_and_catalog  # noqa: SLF001
 
@@ -108,7 +108,7 @@ def _clock(provider: EntropyFMProvider, monkeypatch: pytest.MonkeyPatch, shift_d
 async def test_the_library_always_has_every_room_and_a_window_of_days(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """With no action: the rooms and the whole house are artists, each with the last 7 days."""
+    """With no action: the rooms and the whole house are artists, each with the days of the window."""
     provider, _ = await _setup(mass, fake_hass)
     artists = await _collect(provider.get_library_artists())
     assert [a.name for a in artists] == ["Whole House", "Kitchen", "Living Room"]
@@ -119,7 +119,7 @@ async def test_the_library_always_has_every_room_and_a_window_of_days(
         per_area.setdefault(area, []).append(day)
     assert set(per_area) == {"_house", "kitchen", "living_room"}
     for days in per_area.values():
-        assert 5 <= len(days) <= 7
+        assert 5 <= len(days) <= 10
         assert days == sorted(days, reverse=True)
     # every track of every album in the library: all five styles
     tracks = await _collect(provider.get_library_tracks())
@@ -159,10 +159,10 @@ async def test_the_window_rolls_over_at_midnight(
     assert before[-1] not in after
     assert set(before[:-1]) <= set(after)
     # the setting cannot go past the days that Home Assistant keeps
-    _quiet(provider, monkeypatch, days=3, library_days=9)
-    assert provider._library_days == 3  # noqa: SLF001
-    _quiet(provider, monkeypatch, days=10, library_days=2)
-    assert provider._library_days == 2  # noqa: SLF001
+    _quiet(provider, monkeypatch, days=99)
+    assert provider._days == 10  # noqa: SLF001
+    _quiet(provider, monkeypatch, days=2)
+    assert provider._days == 2  # noqa: SLF001
 
 
 async def test_hearting_an_album_pins_the_day_and_it_stays_after_the_window_moves_on(
@@ -170,8 +170,8 @@ async def test_hearting_an_album_pins_the_day_and_it_stays_after_the_window_move
 ) -> None:
     """The pin lives in the storage path of the server; a hearted day outlives the window and shows its heart."""
     provider, _ = await _setup(mass, fake_hass)
-    _quiet(provider, monkeypatch, library_days=2)
     album = await _album(provider, "kitchen", 5)
+    _quiet(provider, monkeypatch, days=2)
     day = album.item_id.split("|")[1]
     window = [a.item_id for a in await _collect(provider.get_library_albums())]
     assert album.item_id not in window
@@ -215,12 +215,13 @@ async def test_a_day_inside_the_window_stays_listed_when_it_is_unhearted(
     assert not provider.pins.has("kitchen", day)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
     assert track_id in [t.item_id for t in await _collect(provider.get_library_tracks())]
-    # a dislike releases too, and a heart on something that is not ours does nothing
+    # a dislike releases too, a heart on something that is not ours is refused, and on another type does nothing
     await _heart(provider, album)
     await _unheart(provider, album.item_id, MediaType.ALBUM, value=False)
     assert not provider.pins.has("kitchen", day)
-    await _heart(provider, "nonsense", MediaType.TRACK)
-    await _heart(provider, "nonsense", MediaType.ALBUM)
+    for kind in (MediaType.TRACK, MediaType.ALBUM):
+        with pytest.raises(MediaNotFoundError):
+            await _heart(provider, "nonsense", kind)
     await _heart(provider, "kitchen|2026-01-01", MediaType.PLAYLIST)
     assert provider.pins.all() == []
     assert not provider.membership.tracks
@@ -232,12 +233,13 @@ async def test_hearting_a_track_pins_its_day_and_reports_the_heart(
 ) -> None:
     """A heart on one style keeps the day; only that track shows the heart; un-hearting lets the day go."""
     provider, _ = await _setup(mass, fake_hass)
-    _quiet(provider, monkeypatch, library_days=2)
     album = await _album(provider, "kitchen", 4)
     day = date.fromisoformat(album.item_id.split("|")[1])
     item_id = album.item_id + "|_scape|lofi"
+    track = await provider.get_track(item_id)
+    _quiet(provider, monkeypatch, days=2)
     assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
-    await _heart(provider, await provider.get_track(item_id))
+    await _heart(provider, track)
     assert provider.pins.has("kitchen", day)
     assert album.item_id in [a.item_id for a in await _collect(provider.get_library_albums())]
     tracks = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
@@ -247,7 +249,10 @@ async def test_hearting_a_track_pins_its_day_and_reports_the_heart(
     await _unheart(provider, item_id, MediaType.TRACK)
     assert not provider.pins.has("kitchen", day)
     assert album.item_id not in [a.item_id for a in await _collect(provider.get_library_albums())]
-    assert (await provider.get_track(item_id)).favorite is None
+    assert all(t.favorite is None for t in await _collect(provider.get_library_tracks()))
+    # the day is outside the window and no longer pinned, so the track is gone, heart and all
+    with pytest.raises(MediaNotFoundError):
+        await provider.get_track(item_id)
 
 
 async def test_a_heart_on_the_whole_house_keeps_the_day_of_every_room(
@@ -291,49 +296,9 @@ async def test_a_heart_on_a_room_keeps_every_day_of_it(
     ]
     assert (await provider.get_artist("kitchen")).favorite is None
     # a room that is not ours cannot be hearted
-    await _heart(provider, "attic", MediaType.ARTIST)
+    with pytest.raises(MediaNotFoundError):
+        await _heart(provider, "attic", MediaType.ARTIST)
     assert "attic" not in provider.membership.followed
-
-
-async def test_hearts_of_an_earlier_library_survive_and_the_removal_list_is_dropped(
-    mass: MusicAssistant, fake_hass: MagicMock
-) -> None:
-    """The file of the earlier model: albums, tracks, pins and followed rooms are hearts now; `removed` goes."""
-    import json  # noqa: PLC0415
-
-    provider, _ = await _setup(mass, fake_hass)
-    album = await _album(provider, "kitchen", 3)
-    other = await _album(provider, "kitchen", 4)
-    track_id = other.item_id + "|_scape|ritual"
-    await provider.set_favorite(album.item_id, MediaType.ALBUM, favorite=True)
-    await provider.set_favorite(track_id, MediaType.TRACK, favorite=True)
-    path = Path(provider.storage_root) / "library.json"
-    data = json.loads(path.read_text())
-    data["followed"] = {"living_room": "2026-11-01"}
-    data["removed"] = {"kitchen|2026-11-10|_scape|ambient": "2026-11-10"}
-    path.write_text(json.dumps(data))
-    pins = provider.pins.all()
-
-    provider.membership = load_membership(provider.storage_root)
-    assert provider.membership.legacy_removed
-    await provider._migrate_library_model()  # noqa: SLF001
-    migrated = provider.membership
-    assert not migrated.legacy_removed
-    assert "removed" not in json.loads(path.read_text())
-    stored = load_membership(provider.storage_root)
-    assert not stored.legacy_removed
-    assert stored.albums == {album.item_id}
-    assert stored.tracks == {track_id}
-    assert stored.followed == {"living_room": "2026-11-01"}
-    assert provider.pins.all() == pins
-    # they are all shown as hearts
-    assert (await provider.get_album(album.item_id)).favorite is True
-    assert (await provider.get_track(track_id)).favorite is True
-    assert (await provider.get_artist("living_room")).favorite is True
-    # the second run has nothing to do
-    before = path.read_text()
-    await provider._migrate_library_model()  # noqa: SLF001
-    assert path.read_text() == before
 
 
 async def test_the_library_sync_of_the_server_lists_every_track_and_records_the_hearts(
@@ -431,7 +396,7 @@ async def test_the_library_sync_of_the_server_keeps_pinned_days(
     assert pinned.name in db_ids
     assert plain.name in db_ids
     # three days on: both are out of the window, only the pinned one is still listed
-    _quiet(provider, monkeypatch, library_days=1)
+    _quiet(provider, monkeypatch, days=1)
     _clock(provider, monkeypatch, 3)
     listed = {a.item_id for a in await _collect(provider.get_library_albums())}
     assert pinned.item_id in listed
@@ -457,7 +422,7 @@ async def test_a_pinned_day_plays_after_home_assistant_has_forgotten_it(
     album = await _album(provider, "kitchen", 7)
     item_id = f"{album.item_id}|_scape|berlin_school"
     await _heart(provider, album)
-    before = await _stream(provider, item_id, seek=300, chunks=2)
+    before = await _stream(provider, item_id, seek=200, chunks=2)
     # the recorder purges everything, the server forgets what it cached, and only 2 days are kept
     fake.hass.purged = True
     await mass.cache.clear()
@@ -465,7 +430,7 @@ async def test_a_pinned_day_plays_after_home_assistant_has_forgotten_it(
     browsable = {a.item_id for a in await provider.get_artist_albums("kitchen")}
     assert album.item_id in browsable
     assert len(browsable) <= 3
-    after = await _stream(provider, item_id, seek=300, chunks=2)
+    after = await _stream(provider, item_id, seek=200, chunks=2)
     assert after == before
     assert any(after)
     # the track and the album can be looked up too
@@ -481,7 +446,7 @@ async def test_the_engine_version_is_in_the_pin_and_a_pin_renders_with_the_curre
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
     """The pin keeps the history and the engine version of the day it was made; no audio."""
-    from entropy_fm.const import ENGINE_VERSION  # noqa: PLC0415
+    from entropy_fm.constants import ENGINE_VERSION  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
     album = await _album(provider, "kitchen", 4)
@@ -581,160 +546,36 @@ async def test_the_settings_say_the_cache_and_the_tier(
     assert Artist is not None
 
 
-async def test_voice_tracks_of_an_earlier_version_are_dropped_and_ensemble_pins_stay(
-    mass: MusicAssistant, fake_hass: MagicMock
-) -> None:
-    """A track of one entity leaves the library with its pins; an ensemble track keeps its own."""
-    provider, _ = await _setup(mass, fake_hass)
-    keep = await _album(provider, "kitchen", 3)
-    gone = await _album(provider, "kitchen", 6)
-    old_id = f"{keep.item_id}|_song|ambient"
-    keep_id = f"{keep.item_id}|_scape|ambient"
-    stale_id = f"{gone.item_id}|sensor.fridge_power|ambient"
-    # an old library holds a timeline: it is the soundscape of its day now, with the pins of its day
-    provider.membership.tracks.add(old_id)
-    await provider._remember(  # noqa: SLF001
-        old_id, [("kitchen", date.fromisoformat(keep.item_id.split("|")[1]))]
-    )
-    await provider._migrate_ensemble_tracks()  # noqa: SLF001
-    assert old_id not in provider.membership.tracks
-    # an old library: the voice track is in the membership, with the pins it needed
-    provider.membership.tracks.add(stale_id)
-    await provider._remember(  # noqa: SLF001
-        stale_id, [("kitchen", date.fromisoformat(gone.item_id.split("|")[1]))]
-    )
-    assert provider.pins.has("kitchen", date.fromisoformat(gone.item_id.split("|")[1]))
-    await provider._drop_voice_tracks()  # noqa: SLF001
-    assert stale_id not in provider.membership.tracks
-    assert not provider.pins.has("kitchen", date.fromisoformat(gone.item_id.split("|")[1]))
-    assert keep_id in provider.membership.tracks
-    assert provider.pins.has("kitchen", date.fromisoformat(keep.item_id.split("|")[1]))
-    listed = [t.item_id for t in await _collect(provider.get_library_tracks())]
-    assert keep_id in listed
-    assert not any("sensor.fridge_power" in item for item in listed)
-    await provider.set_favorite(stale_id, MediaType.TRACK, favorite=True)
-    assert stale_id not in provider.membership.tracks
+# ---------------------------------------------------------------- the ids
 
 
-# ---------------------------------------------------------------- the length is in the id
-
-
-async def test_a_soundscape_id_differs_from_the_condensed_one_and_all_parse() -> None:
-    """A condensed piece has the plain id; a soundscape adds a last part; both name the same track."""
-    from entropy_fm.library import canonical_track_id, track_id  # noqa: PLC0415
+async def test_a_track_id_holds_the_style_and_nothing_else() -> None:
+    """The id of a track is the day, the target and the style; nothing after the style is an id."""
+    from entropy_fm.library import track_id  # noqa: PLC0415
 
     day = date(2026, 11, 10)
-    short = track_id("kitchen", day, "_scape", "lofi")
-    full = track_id("kitchen", day, "_scape", "lofi", soundscape=True)
-    assert short == "kitchen|2026-11-10|_scape|lofi"
-    assert full == "kitchen|2026-11-10|_scape|lofi|soundscape"
-    assert parse_track_id(full) == parse_track_id(short)
-    assert canonical_track_id(full) == short == canonical_track_id(short)
-    # the id that condensed pieces were once marked with still parses, and plays the condensed piece
-    assert parse_track_id(short + "|condensed") == parse_track_id(short)
-    assert canonical_track_id(short + "|condensed") == short
+    assert track_id("kitchen", day, "_scape", "lofi") == "kitchen|2026-11-10|_scape|lofi"
+    assert parse_track_id("kitchen|2026-11-10|_scape|lofi").style == "lofi"
     # the id before there were styles still is the default style
     assert parse_track_id("kitchen|2026-11-10|_scape").style == "ambient"
-    with pytest.raises(ValueError):  # noqa: PT011
-        parse_track_id(full + "|more")
+    # the marks that earlier versions put after the style are not ids any more
+    for old in ("soundscape", "condensed", "more"):
+        with pytest.raises(ValueError):  # noqa: PT011
+            parse_track_id(f"kitchen|2026-11-10|_scape|lofi|{old}")
 
 
-async def test_switching_the_length_lists_other_ids_and_old_ids_still_play_the_length_set(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+async def test_after_a_sync_the_library_has_the_condensed_tracks(
+    mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """A soundscape lists new ids; the ids of the condensed pieces (queues, links) resolve and play the soundscape."""
-    from entropy_fm.plan import condensed_seconds  # noqa: PLC0415
-
-    provider, _ = await _setup(mass, fake_hass)
-    short = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
-    _quiet(provider, monkeypatch, piece_length="full", **{CONF_QUALITY: "light"})
-    full = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
-    assert len(short) == len(full)
-    assert not set(short) & set(full)
-    assert all(i.endswith("|soundscape") for i in full)
-    today = (await provider._now()).date()  # noqa: SLF001
-    old = next(
-        i
-        for i in short
-        if i.startswith("kitchen|") and i.endswith("|lofi") and parse_track_id(i).day < today
-    )
-    details = await provider.get_stream_details(old, MediaType.TRACK)
-    assert details.duration == full[old + "|soundscape"].duration
-    # the track of an old id is listed under the id of the length that is set
-    assert (await provider.get_track(old)).item_id == old + "|soundscape"
-    assert (await provider.get_track(old + "|soundscape")).duration == details.duration
-    # and the other way round: a link to a condensed track still plays after going back to condensed
-    _quiet(provider, monkeypatch, piece_length="condensed")
-    back = await provider.get_stream_details(old + "|soundscape", MediaType.TRACK)
-    assert back.duration == condensed_seconds("lofi")
-    # an id marked as condensed in earlier versions plays the condensed piece too
-    legacy = await provider.get_stream_details(old + "|condensed", MediaType.TRACK)
-    assert legacy.duration == condensed_seconds("lofi")
-    # the cache of rendered audio does not tell the ids apart, only the length that is set
-    ref = parse_track_id(old)
-    key = provider._audio_key(ref, today)  # noqa: SLF001
-    _quiet(provider, monkeypatch, piece_length="full")
-    assert provider._audio_key(ref, today) != key  # noqa: SLF001
-
-
-async def test_hearts_on_tracks_survive_a_change_of_the_length(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A heart is on the day and the style: the track of the other length shows it, and either id can take it off."""
-    provider, _ = await _setup(mass, fake_hass)
-    album = await _album(provider, "kitchen", 1)
-    day = date.fromisoformat(album.item_id.split("|")[1])
-    short_id = album.item_id + "|_scape|lofi"
-    await _heart(provider, await provider.get_track(short_id))
-    assert provider.pins.has("kitchen", day)
-
-    _quiet(provider, monkeypatch, piece_length="full")
-    full_id = short_id + "|soundscape"
-    tracks = {t.item_id: t for t in await _collect(provider.get_library_tracks())}
-    assert [i for i, t in tracks.items() if t.favorite] == [full_id]
-    assert (await provider.get_track(full_id)).favorite is True
-    # hearting the soundscape is the same heart, and un-hearting it releases the day
-    await _heart(provider, full_id, MediaType.TRACK)
-    assert provider.membership.tracks == {short_id}
-    await _unheart(provider, full_id, MediaType.TRACK)
-    assert not provider.membership.tracks
-    assert not provider.pins.has("kitchen", day)
-    assert all(t.favorite is None for t in await _collect(provider.get_library_tracks()))
-
-    # a heart given to a soundscape shows on the condensed piece after going back
-    await _heart(provider, full_id, MediaType.TRACK)
-    _quiet(provider, monkeypatch, piece_length="condensed")
-    assert (await provider.get_track(short_id)).favorite is True
-
-
-async def test_after_a_switch_and_a_sync_the_library_has_the_soundscape_tracks_only(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The server stores new items for new ids and drops the old ones: the library tracks have the new lengths."""
+    """The server stores the listed tracks, each with the condensed length of its style."""
     from entropy_fm.plan import condensed_seconds  # noqa: PLC0415
     from tests.test_rooms import _sync  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
-    # the first request writes down the length that the library is listed with
-    assert await provider.sync_if_rooms_changed()
     await _sync(mass, provider)
-    before = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
-    assert before
-    assert all(t.duration == condensed_seconds(_style_of(t)) for t in before)
-
-    _quiet(provider, monkeypatch, piece_length="full")
-    assert await provider.sync_if_rooms_changed()
-    await _sync(mass, provider)
-    after = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
-    assert all(t.version.endswith("Soundscape") for t in after)
-    assert not any(t.version.endswith("Soundscape") for t in before)
-    assert len(after) == len(before)
-    assert not any(t.duration == condensed_seconds(_style_of(t)) for t in after)
-    # the condensed tracks are gone from the albums too, which list every track the database links to them
-    album = (await mass.music.albums.library_items(provider=provider.instance_id))[0]
-    shown = await mass.music.albums.tracks(album.item_id, "library")
-    assert shown
-    assert all(t.version.endswith("Soundscape") for t in shown)
+    stored = await mass.music.tracks.library_items(provider=provider.instance_id, limit=5000)
+    assert stored
+    assert all(t.duration == condensed_seconds(_style_of(t)) for t in stored)
 
 
 def _style_of(track: Track) -> str:
@@ -742,40 +583,49 @@ def _style_of(track: Track) -> str:
     return parse_track_id(track.provider_mappings.copy().pop().item_id).style
 
 
-async def test_full_listings_say_the_length_the_stream_says_for_past_days(
+async def test_listings_say_the_length_the_stream_says_for_past_days(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
     """The library, the album, the track and the stream agree for finished days, in every style."""
-    provider, _ = await _setup(mass, fake_hass, FULL)
+    provider, _ = await _setup(mass, fake_hass)
     today = (await provider._now()).date()  # noqa: SLF001
     library = [t for t in await _collect(provider.get_library_tracks()) if _day(t) < today]
     assert library
-    seen: set[int] = set()
     for track in library[:: max(len(library) // 12, 1)]:
         details = await provider.get_stream_details(track.item_id, MediaType.TRACK)
-        assert 600 <= track.duration <= 1320
         assert track.duration == details.duration
         assert (await provider.get_track(track.item_id)).duration == details.duration
-        seen.add(track.duration)
-    # the length follows the day: it is not one number
-    assert len({t.duration for t in library}) > 1
     album = library[0].album
     assert album is not None
     listed = {t.item_id: t.duration for t in await provider.get_album_tracks(album.item_id)}
     assert all(listed[t.item_id] == t.duration for t in library if t.album == album)
-    # a day that cannot be read is listed with the nominal length
-    from entropy_fm.const import NOMINAL_SCAPE_SECONDS  # noqa: PLC0415
-
-    async def broken(*_a: Any, **_k: Any) -> Any:
-        raise RuntimeError("down")
-
-    provider._scapes.clear()  # noqa: SLF001
-    provider._seconds_kept.clear()  # noqa: SLF001
-    provider._scape_of = broken  # type: ignore[method-assign]  # noqa: SLF001
-    unread = await provider._full_seconds("kitchen", today - timedelta(days=2))  # noqa: SLF001
-    assert unread == NOMINAL_SCAPE_SECONDS
 
 
 def _day(track: Track) -> date:
     """Return the day of a track."""
     return date.fromisoformat(track.item_id.split("|")[1])
+
+
+async def test_a_heart_on_something_that_is_not_there_is_refused_before_anything_is_written(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """A malformed id, an unknown room and a room name that climbs out of the folder are not found, and no pin is made."""
+    provider, _ = await _setup(mass, fake_hass)
+    day = "2026-11-10"
+    for kind, item_id in (
+        (MediaType.ALBUM, "nonsense"),
+        (MediaType.TRACK, "nonsense"),
+        (MediaType.ALBUM, f"..|{day}"),
+        (MediaType.ALBUM, f"attic|{day}"),
+        (MediaType.TRACK, f"..|{day}|_scape|lofi"),
+        (MediaType.TRACK, f"attic|{day}|_scape|lofi"),
+        (MediaType.TRACK, f"kitchen|{day}|_scape|vaporwave"),
+        (MediaType.TRACK, f"kitchen|{day}|sensor.fridge_power|lofi"),
+    ):
+        with pytest.raises(MediaNotFoundError):
+            await provider.set_favorite(item_id, kind, favorite=True)
+    with pytest.raises(MediaNotFoundError):
+        await provider.set_favorite("nonsense", MediaType.ALBUM, favorite=None)
+    assert not provider.pins.all()
+    assert not provider.membership.albums
+    assert not provider.membership.tracks

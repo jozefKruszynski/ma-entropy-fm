@@ -4,7 +4,7 @@ Status: implemented. This replaces the song form, the eight styles and their kit
 
 The decision behind it: after a day of chasing radio-quality tracks in eight genres (and getting a mishmash of bells,
 disjointed melodies and styles that all sounded alike) the project went back to its roots, which is a soundscape.
-One long, slowly evolving piece per room and day, in five styles that can be told apart from the first bar.
+One slowly evolving piece (5 to 7 minutes) per room and day, in five styles that can be told apart from the first bar.
 
 ## Rules that every part follows
 

@@ -99,34 +99,26 @@ def verdict(style: str, numbers: dict[str, float], stats: dict[str, float]) -> l
 
 
 def main() -> None:
-    """Print the table: the excerpts of the demo day and of the real-house kitchen, and the full pieces of two styles."""
+    """Print the table: the excerpts of the demo day and of the real-house kitchen."""
     import demo_render  # noqa: PLC0415
     import real_house_demo  # noqa: PLC0415
     from soundscapes import excerpts  # noqa: PLC0415
 
-    from entropy_fm.render import render_all  # noqa: PLC0415
-
     demo = demo_render.Demo()
     tier = demo.quality.STANDARD
     wanted = [a for a in sys.argv[1:] if not a.startswith("--")] or list(demo.styles.STYLES)
-    full = "--full" in sys.argv
     print(
         "| style | piece | integrated LUFS | target | max short-term | true peak dBTP | LRA | mean GR dB | max GR dB | verdict |"
     )
     print("|---|---|---|---|---|---|---|---|---|---|")
     for style in wanted:
-        for label in ("demo excerpts", "kitchen excerpts", "full demo piece"):
-            if label == "full demo piece" and not (full and style in {"ambient", "berlin_school"}):
-                continue
+        for label in ("demo excerpts", "kitchen excerpts"):
             if label == "kitchen excerpts":
                 score, plan = real_house_demo.real_score(demo, style, tier)
             else:
                 score, plan = demo.score(demo_render.ANOMALY_DAY, ("kitchen",), style, tier)
             stats: dict[str, float] = {}
-            if label == "full demo piece":
-                audio = render_all(score, tier, "full", stats)
-            else:
-                audio = excerpts(score, plan, tier, stats=stats)
+            audio = excerpts(score, plan, tier, stats=stats)
             numbers = ebur128(audio)
             low, high = TARGETS[style]
             problems = verdict(style, numbers, stats)

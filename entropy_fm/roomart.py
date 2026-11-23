@@ -21,17 +21,44 @@ model.
 from __future__ import annotations
 
 import colorsys
-import hashlib
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .baseline import POWER_KINDS, episodes
-from .const import WHOLE_HOUSE_ID
-from .covers import SIZE, SUPERSAMPLE, Op, _arc, _background, _draw_ops, _hex, _wave_ops
-from .timeline import BINARY_KINDS, VoiceKind, stable_hash
+from .baseline import episodes
+from .constants import IMAGE_SEED_MODULUS, WHOLE_HOUSE_ID
+from .covers import (
+    ACCENT,
+    ACCENT_COLOUR,
+    BLOOM_X,
+    BLOOM_X_RANGE,
+    BLOOM_Y,
+    BLOOM_Y_RANGE,
+    BYTE_MAX,
+    GLYPH_ANGLE_RANGE,
+    GLYPH_COLOURS,
+    GRAIN,
+    HEX_BASE,
+    HEX_FIELDS,
+    JPEG_QUALITY,
+    OP_DISC,
+    OP_LINE,
+    OP_RING,
+    OPAQUE,
+    SIZE,
+    SUPERSAMPLE,
+    WHITE,
+    Op,
+    _arc,
+    _background,
+    _draw_ops,
+    _hex,
+    _wave_ops,
+    draw_title_on,
+)
+from .timeline import BINARY_KINDS, POWER_KINDS, VoiceKind, stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -55,6 +82,34 @@ LIFE_KINDS = frozenset(
 )
 # a band weaker than this (of its own strongest hour, in whole days) is left out
 QUIET = 0.04
+SECONDS_PER_HOUR = 3600
+# a series moves an hour where its normalised value changes by more than this between two points
+MOVE_THRESHOLD = 0.1
+# the band of an hour is the share of its strongest, to this power (below 1 lifts the weak hours)
+BAND_CURVE = 0.85
+# blur of a day round the clock: the weights of the hour before, the hour and the hour after
+SMOOTH_SIDE = 0.25
+SMOOTH_MIDDLE = 0.5
+# the life band shows a disc on the rim from this level on
+LIFE_SHOWN = 0.2
+# the hours of the clock in degrees, where the clock starts (0 is to the right, so the top is -90)
+HOUR_DEGREES = 15
+CLOCK_START = -90.0
+HALF_DAY = 12
+# the invented profile of a room that has no history: bumps of presence, light and life
+BUMP_WEIGHT = (0.4, 1.0)
+PRESENCE_BUMPS = (2, 4)
+PRESENCE_HOURS = (6.0, 22.0)
+PRESENCE_WIDTH = (1.3, 2.4)
+LIGHT_BUMPS = (1, 3)
+LIGHT_HOURS = (16.0, 23.0)
+LIGHT_WIDTH = (2.0, 3.5)
+MORNING_LIGHT_SHARE = 0.25
+MORNING_LIGHT_HOURS = (5.0, 8.0)
+MORNING_LIGHT_WIDTH = 1.5
+LIFE_BUMPS = (2, 5)
+LIFE_HOURS = (7.0, 22.0)
+LIFE_WIDTH = 0.8
 
 
 @dataclass(frozen=True)
@@ -67,30 +122,29 @@ class RoomProfile:
     # how many days it is made from; 0 for a figure made from the id alone
     days: int = 0
 
-    def digest(self) -> str:
-        """Return a short text that changes when the profile does, to name the image by."""
-        data = np.round(np.concatenate([self.presence, self.light, self.life]), 2)
-        return hashlib.sha256(data.tobytes()).hexdigest()[:10]
-
 
 def _hour_cover(start: float, end: float, out: np.ndarray) -> None:
     """Add to each hour of the day how much of it the stretch from start to end (seconds) covers."""
-    for hour in range(int(start // 3600), min(HOURS, int(end // 3600) + 1)):
-        lap = min(end, (hour + 1) * 3600.0) - max(start, hour * 3600.0)
+    for hour in range(int(start // SECONDS_PER_HOUR), min(HOURS, int(end // SECONDS_PER_HOUR) + 1)):
+        lap = min(end, (hour + 1) * float(SECONDS_PER_HOUR)) - max(
+            start, hour * float(SECONDS_PER_HOUR)
+        )
         if lap > 0:
-            out[hour] += lap / 3600.0
+            out[hour] += lap / SECONDS_PER_HOUR
 
 
 def _movement(series: Series, out: np.ndarray) -> None:
     """Add to each hour how much the value moved in it (a sensor that has no episodes)."""
     moved = np.abs(np.diff(series.norm))
-    for index in np.flatnonzero(moved > 0.1) + 1:
-        out[int(series.times[index] // 3600) % HOURS] += min(1.0, float(moved[index - 1]))
+    for index in np.flatnonzero(moved > MOVE_THRESHOLD) + 1:
+        out[int(series.times[index] // SECONDS_PER_HOUR) % HOURS] += min(
+            1.0, float(moved[index - 1])
+        )
 
 
 def _level(series: Series, out: np.ndarray) -> None:
     """Add to each hour how far above its lowest the sensor stood on average (CO2: how many are in)."""
-    mid = (np.arange(HOURS) + 0.5) * 3600.0
+    mid = (np.arange(HOURS) + 0.5) * float(SECONDS_PER_HOUR)
     at = np.clip(np.searchsorted(series.times, mid, side="right") - 1, 0, len(series.times) - 1)
     stood = series.norm[at]
     out += np.clip(stood - float(stood.min()), 0.0, 1.0)
@@ -98,7 +152,11 @@ def _level(series: Series, out: np.ndarray) -> None:
 
 def _smooth(values: np.ndarray) -> np.ndarray:
     """Blur a day round the clock a little, so that one hour does not stand alone."""
-    return np.asarray(0.25 * np.roll(values, 1) + 0.5 * values + 0.25 * np.roll(values, -1))
+    return np.asarray(
+        SMOOTH_SIDE * np.roll(values, 1)
+        + SMOOTH_MIDDLE * values
+        + SMOOTH_SIDE * np.roll(values, -1)
+    )
 
 
 def _band(values: np.ndarray) -> np.ndarray:
@@ -106,7 +164,7 @@ def _band(values: np.ndarray) -> np.ndarray:
     peak = float(values.max())
     if peak <= QUIET:
         return np.zeros(HOURS)
-    return np.asarray(np.clip(values / peak, 0.0, 1.0) ** 0.85)
+    return np.asarray(np.clip(values / peak, 0.0, 1.0) ** BAND_CURVE)
 
 
 def _add_series(series: Series, bands: dict[str, np.ndarray]) -> bool:
@@ -150,21 +208,23 @@ def week_profile(days: Sequence[Sequence[Series]]) -> RoomProfile | None:
 
 def seeded_profile(area_id: str) -> RoomProfile:
     """Return a figure of the same kind from the id alone, for a room that has no history kept yet."""
-    rng = np.random.default_rng(stable_hash("room-profile", area_id) % 2**32)
+    rng = np.random.default_rng(stable_hash("room-profile", area_id) % IMAGE_SEED_MODULUS)
     hours = np.arange(HOURS, dtype=np.float64)
 
     def bumps(count: int, low: float, high: float, width: float) -> np.ndarray:
         total = np.zeros(HOURS)
         for _ in range(count):
-            at, weight = rng.uniform(low, high), rng.uniform(0.4, 1.0)
-            gap = np.abs((hours - at + 12) % 24 - 12)
+            at, weight = rng.uniform(low, high), rng.uniform(*BUMP_WEIGHT)
+            gap = np.abs((hours - at + HALF_DAY) % HOURS - HALF_DAY)
             total += weight * np.exp(-((gap / width) ** 2))
         return total
 
-    presence = bumps(int(rng.integers(2, 4)), 6.0, 22.0, float(rng.uniform(1.3, 2.4)))
-    light = bumps(int(rng.integers(1, 3)), 16.0, 23.0, float(rng.uniform(2.0, 3.5)))
-    light += 0.25 * bumps(1, 5.0, 8.0, 1.5)
-    life = bumps(int(rng.integers(2, 5)), 7.0, 22.0, 0.8)
+    presence = bumps(
+        int(rng.integers(*PRESENCE_BUMPS)), *PRESENCE_HOURS, float(rng.uniform(*PRESENCE_WIDTH))
+    )
+    light = bumps(int(rng.integers(*LIGHT_BUMPS)), *LIGHT_HOURS, float(rng.uniform(*LIGHT_WIDTH)))
+    light += MORNING_LIGHT_SHARE * bumps(1, *MORNING_LIGHT_HOURS, MORNING_LIGHT_WIDTH)
+    life = bumps(int(rng.integers(*LIFE_BUMPS)), *LIFE_HOURS, LIFE_WIDTH)
     return RoomProfile(_band(presence), _band(light), _band(life), 0)
 
 
@@ -175,11 +235,43 @@ SPOKE_FROM = 150
 SPOKE_REACH = 230
 LIGHT_RADIUS = 410
 LIFE_RADIUS = 480
+# the hub: a ring and a thinner one inside it
+HUB_WIDTH = 26
+HUB_INNER_GAP = 40
+HUB_INNER_WIDTH = 7
+HUB_INNER_ALPHA = 0.8
+# a quiet hour is a dot just beyond the start of the spokes; a spoke has a floor of this extra reach
+QUIET_DOT_GAP = 18
+QUIET_DOT_RADIUS = 8
+SPOKE_FLOOR = 36
+SPOKE_WIDE_EVERY = 6
+SPOKE_WIDE_WIDTH = 30
+SPOKE_WIDTH = 20
+# the arc of the lights of an hour is trimmed by this much on each side, in degrees, and has these steps
+ARC_TRIM = 1.5
+HOUR_ARC_STEPS = 10
+LIGHT_MIN_WIDTH = 6
+LIGHT_WIDTH_RANGE = 14
+# the discs of the life band: a floor and how much the level adds
+LIFE_DISC_MIN = 8
+LIFE_DISC_RANGE = 12
+# the richer figure of the whole house: a tick inside the hub for the lights, and two rings outside
+TICK_FROM = 18
+TICK_REACH = 52
+TICK_WIDTH = 9
+TICK_ALPHA = 0.9
+OUTER_RING_RADIUS = 540
+OUTER_RING_PITCH = 46
+OUTER_RINGS = 2
+OUTER_RING_WIDTH = 5
+OUTER_RING_ALPHA = 0.7
+OUTER_RING_FADE = 0.2
+CENTRE_RADIUS = 14
 
 
 def _polar(radius: float, hour: float) -> tuple[float, float]:
     """Return the point at a radius and an hour of the clock (0 at the top, clockwise)."""
-    angle = np.radians(-90.0 + 15.0 * hour)
+    angle = np.radians(CLOCK_START + float(HOUR_DEGREES) * hour)
     return radius * float(np.cos(angle)), radius * float(np.sin(angle))
 
 
@@ -194,44 +286,66 @@ def _figure(profile: RoomProfile, *, rich: bool) -> list[Op]:
     :param profile: The typical day.
     :param rich: Whether to draw the richer figure of the whole house.
     """
-    ops: list[Op] = [("ring", 0, 0, HUB, 26, "w", 1.0), ("ring", 0, 0, HUB - 40, 7, "w", 0.8)]
+    ops: list[Op] = [
+        (OP_RING, 0, 0, HUB, HUB_WIDTH, WHITE, OPAQUE),
+        (OP_RING, 0, 0, HUB - HUB_INNER_GAP, HUB_INNER_WIDTH, WHITE, HUB_INNER_ALPHA),
+    ]
     top = int(np.argmax(profile.presence)) if float(profile.presence.max()) > 0 else -1
     for hour in range(HOURS):
         level = float(profile.presence[hour])
         if level <= QUIET:
-            x, y = _polar(SPOKE_FROM + 18, hour + 0.5)
-            ops.append(("disc", x, y, 8, "w"))
+            x, y = _polar(SPOKE_FROM + QUIET_DOT_GAP, hour + 0.5)
+            ops.append((OP_DISC, x, y, QUIET_DOT_RADIUS, WHITE))
             continue
-        reach = SPOKE_FROM + 36 + SPOKE_REACH * level
-        width = 30 if hour % 6 == 0 else 20
+        reach = SPOKE_FROM + SPOKE_FLOOR + SPOKE_REACH * level
+        width = SPOKE_WIDE_WIDTH if hour % SPOKE_WIDE_EVERY == 0 else SPOKE_WIDTH
         ops.append(
             (
-                "line",
+                OP_LINE,
                 [_polar(SPOKE_FROM, hour + 0.5), _polar(reach, hour + 0.5)],
                 width,
-                "a" if hour == top else "w",
-                1.0,
+                ACCENT if hour == top else WHITE,
+                OPAQUE,
             )
         )
     for hour in range(HOURS):
         level = float(profile.light[hour])
         if level > QUIET:
-            arc = _arc(0, 0, LIGHT_RADIUS, -90 + 15 * hour + 1.5, -90 + 15 * (hour + 1) - 1.5, 10)
-            ops.append(("line", arc, 6 + 14 * level, "w", 1.0))
+            arc = _arc(
+                0,
+                0,
+                LIGHT_RADIUS,
+                CLOCK_START + HOUR_DEGREES * hour + ARC_TRIM,
+                CLOCK_START + HOUR_DEGREES * (hour + 1) - ARC_TRIM,
+                HOUR_ARC_STEPS,
+            )
+            ops.append((OP_LINE, arc, LIGHT_MIN_WIDTH + LIGHT_WIDTH_RANGE * level, WHITE, OPAQUE))
         level = float(profile.life[hour])
-        if level > 0.2:
+        if level > LIFE_SHOWN:
             x, y = _polar(LIFE_RADIUS, hour + 0.5)
-            ops.append(("disc", x, y, 8 + 12 * level, "w"))
+            ops.append((OP_DISC, x, y, LIFE_DISC_MIN + LIFE_DISC_RANGE * level, WHITE))
     if rich:
         for hour in range(HOURS):
             level = float(profile.light[hour])
             if level > QUIET:
-                a, b = _polar(18, hour + 0.5), _polar(18 + 52 * level, hour + 0.5)
-                ops.append(("line", [a, b], 9, "w", 0.9))
+                a, b = (
+                    _polar(TICK_FROM, hour + 0.5),
+                    _polar(TICK_FROM + TICK_REACH * level, hour + 0.5),
+                )
+                ops.append((OP_LINE, [a, b], TICK_WIDTH, WHITE, TICK_ALPHA))
         ops.extend(
-            ("ring", 0, 0, 540 + 46 * index, 5, "w", 0.7 - 0.2 * index) for index in range(2)
+            (
+                OP_RING,
+                0,
+                0,
+                OUTER_RING_RADIUS + OUTER_RING_PITCH * index,
+                OUTER_RING_WIDTH,
+                WHITE,
+                OUTER_RING_ALPHA - OUTER_RING_FADE * index,
+            )
+            for index in range(OUTER_RINGS)
         )
-        ops.append(("disc", 0, 0, 14, "a"))
+        ops.append((OP_DISC, 0, 0, CENTRE_RADIUS, ACCENT))
     return ops
 
 
@@ -245,6 +359,32 @@ RING_PRESENCE = 210
 RING_LIGHT = 330
 RING_LIFE = 440
 RING_GAP = 3.0
+# the baseline of the bars reaches this far past the first and last bar; its width and alpha
+BAR_RAIL_OVERHANG = 30
+BAR_RAIL_WIDTH = 8
+BAR_RAIL_ALPHA = 0.8
+# a quiet hour is a dot this far above the baseline; a bar starts this far above it and has a floor
+BAR_DOT_RISE = 22
+BAR_DOT_RADIUS = 8
+BAR_START = 12
+BAR_MIN_HEIGHT = 40
+# the lights hang from this far below the baseline
+BAR_LIGHT_START = 28
+BAR_LIGHT_WIDTH = 10
+BAR_LIGHT_ALPHA = 0.9
+# the discs of the life row: a floor and how much the level adds
+LIFE_ROW_MIN = 8
+LIFE_ROW_RANGE = 8
+# the rings of the day: the width of each segment is a floor plus a reach times its level, the limit is the level it needs
+RING_PRESENCE_REACH = 42
+RING_PRESENCE_FLOOR = 8
+RING_LIGHT_REACH = 26
+RING_LIGHT_FLOOR = 5
+RING_LIFE_REACH = 22
+RING_LIFE_FLOOR = 5
+RING_GUIDE_WIDTH = 3
+RING_GUIDE_ALPHA = 0.5
+RING_ARC_STEPS = 10
 SHAPE_CLOCK = "clock"
 SHAPE_BARS = "bars"
 SHAPE_RINGS = "rings"
@@ -262,38 +402,49 @@ def _bars(profile: RoomProfile) -> list[Op]:
     :param profile: The typical day.
     """
     left = -BAR_PITCH * (HOURS - 1) / 2
-    ops: list[Op] = [("line", [(left - 30, BAR_BASE), (-left + 30, BAR_BASE)], 8, "w", 0.8)]
+    ops: list[Op] = [
+        (
+            OP_LINE,
+            [(left - BAR_RAIL_OVERHANG, BAR_BASE), (-left + BAR_RAIL_OVERHANG, BAR_BASE)],
+            BAR_RAIL_WIDTH,
+            WHITE,
+            BAR_RAIL_ALPHA,
+        )
+    ]
     top = int(np.argmax(profile.presence)) if float(profile.presence.max()) > 0 else -1
     for hour in range(HOURS):
         x = left + BAR_PITCH * hour
         level = float(profile.presence[hour])
         if level <= QUIET:
-            ops.append(("disc", x, BAR_BASE - 22, 8, "w"))
+            ops.append((OP_DISC, x, BAR_BASE - BAR_DOT_RISE, BAR_DOT_RADIUS, WHITE))
         else:
-            height = 40 + BAR_REACH * level
+            height = BAR_MIN_HEIGHT + BAR_REACH * level
             ops.append(
                 (
-                    "line",
-                    [(x, BAR_BASE - 12), (x, BAR_BASE - 12 - height)],
+                    OP_LINE,
+                    [(x, BAR_BASE - BAR_START), (x, BAR_BASE - BAR_START - height)],
                     BAR_WIDTH,
-                    "a" if hour == top else "w",
-                    1.0,
+                    ACCENT if hour == top else WHITE,
+                    OPAQUE,
                 )
             )
         level = float(profile.light[hour])
         if level > QUIET:
             ops.append(
                 (
-                    "line",
-                    [(x, BAR_BASE + 28), (x, BAR_BASE + 28 + LIGHT_DROP * level)],
-                    10,
-                    "w",
-                    0.9,
+                    OP_LINE,
+                    [
+                        (x, BAR_BASE + BAR_LIGHT_START),
+                        (x, BAR_BASE + BAR_LIGHT_START + LIGHT_DROP * level),
+                    ],
+                    BAR_LIGHT_WIDTH,
+                    WHITE,
+                    BAR_LIGHT_ALPHA,
                 )
             )
         level = float(profile.life[hour])
-        if level > 0.2:
-            ops.append(("disc", x, LIFE_ROW, 8 + 8 * level, "w"))
+        if level > LIFE_SHOWN:
+            ops.append((OP_DISC, x, LIFE_ROW, LIFE_ROW_MIN + LIFE_ROW_RANGE * level, WHITE))
     return ops
 
 
@@ -306,23 +457,31 @@ def _rings(profile: RoomProfile) -> list[Op]:
 
     :param profile: The typical day.
     """
-    ops: list[Op] = [("ring", 0, 0, HUB, 26, "w", 1.0), ("ring", 0, 0, HUB - 40, 7, "w", 0.8)]
+    ops: list[Op] = [
+        (OP_RING, 0, 0, HUB, HUB_WIDTH, WHITE, OPAQUE),
+        (OP_RING, 0, 0, HUB - HUB_INNER_GAP, HUB_INNER_WIDTH, WHITE, HUB_INNER_ALPHA),
+    ]
     top = int(np.argmax(profile.presence)) if float(profile.presence.max()) > 0 else -1
     for radius, band, reach, floor, limit in (
-        (RING_PRESENCE, profile.presence, 42, 8, QUIET),
-        (RING_LIGHT, profile.light, 26, 5, QUIET),
-        (RING_LIFE, profile.life, 22, 5, 0.2),
+        (RING_PRESENCE, profile.presence, RING_PRESENCE_REACH, RING_PRESENCE_FLOOR, QUIET),
+        (RING_LIGHT, profile.light, RING_LIGHT_REACH, RING_LIGHT_FLOOR, QUIET),
+        (RING_LIFE, profile.life, RING_LIFE_REACH, RING_LIFE_FLOOR, LIFE_SHOWN),
     ):
-        ops.append(("ring", 0, 0, radius, 3, "w", 0.5))
+        ops.append((OP_RING, 0, 0, radius, RING_GUIDE_WIDTH, WHITE, RING_GUIDE_ALPHA))
         for hour in range(HOURS):
             level = float(band[hour])
             if level <= limit:
                 continue
             arc = _arc(
-                0, 0, radius, -90 + 15 * hour + RING_GAP, -90 + 15 * (hour + 1) - RING_GAP, 10
+                0,
+                0,
+                radius,
+                CLOCK_START + HOUR_DEGREES * hour + RING_GAP,
+                CLOCK_START + HOUR_DEGREES * (hour + 1) - RING_GAP,
+                RING_ARC_STEPS,
             )
             accent = band is profile.presence and hour == top
-            ops.append(("line", arc, floor + reach * level, "a" if accent else "w", 1.0))
+            ops.append((OP_LINE, arc, floor + reach * level, ACCENT if accent else WHITE, OPAQUE))
     return ops
 
 
@@ -346,23 +505,52 @@ def _figure_of(area_id: str, profile: RoomProfile) -> list[Op]:
 # -- the palette and the images ------------------------------------------------------------------
 
 
+# the colour of a room: the amber hue of the house, the degrees of the hue circle, and the four shades
+HOUSE_HUE = 0.09
+HUE_DEGREES = 360
+# (hue shift, saturation, value) of the dark, middle and bright colour and the accent
+SHADES = (
+    (0.0, 0.78, 0.27),
+    (0.04, 0.62, 0.55),
+    (-0.05, 0.36, 0.93),
+    (0.5, 0.30, 1.0),
+)
+# the gradient turns up to this many degrees, and the figure up to this much either way, in the room images
+TURN_RANGE = 12
+TURN_HALF = 6
+# where the figure sits on the square image and the wide one, and its scale, each with a random part
+THUMB_X = 570
+THUMB_X_RANGE = 80
+THUMB_Y = 280
+THUMB_Y_RANGE = 50
+THUMB_SCALE = 1.05
+THUMB_SCALE_RANGE = 0.2
+FANART_X = 1330
+FANART_X_RANGE = 80
+FANART_Y = 430
+FANART_Y_SWAY = 30
+FANART_SCALE = 1.45
+FANART_SCALE_RANGE = 0.2
+
+
 def room_colours(area_id: str) -> list[str]:
     """
     Return the dark, middle and bright colour of the gradient of a room, and its accent.
 
     The hue comes from the area id alone, so a room keeps its colours; the whole house is amber.
     """
-    hue = 0.09 if area_id == WHOLE_HOUSE_ID else (stable_hash("room-hue", area_id) % 360) / 360.0
-    shades = (
-        (hue, 0.78, 0.27),
-        ((hue + 0.04) % 1.0, 0.62, 0.55),
-        ((hue - 0.05) % 1.0, 0.36, 0.93),
-        ((hue + 0.5) % 1.0, 0.30, 1.0),
+    hue = (
+        HOUSE_HUE
+        if area_id == WHOLE_HOUSE_ID
+        else (stable_hash("room-hue", area_id) % HUE_DEGREES) / HUE_DEGREES
     )
-    return [_hex(np.array([255 * c for c in colorsys.hsv_to_rgb(h, s, v)])) for h, s, v in shades]
+    return [
+        _hex(np.array([BYTE_MAX * c for c in colorsys.hsv_to_rgb((hue + shift) % 1.0, s, v)]))
+        for shift, s, v in SHADES
+    ]
 
 
-def _composite(  # noqa: PLR0913, PLR0917
+def _composite(
     colours: list[str],
     rng: np.random.Generator,
     figure: list[Op],
@@ -374,10 +562,13 @@ def _composite(  # noqa: PLR0913, PLR0917
     """Draw the gradient, the figure and the grain, as float RGB."""
     from PIL import Image  # noqa: PLC0415
 
-    angle = float(rng.random()) * 80
-    bloom = (0.55 + 0.3 * float(rng.random()), 0.12 + 0.28 * float(rng.random()))
-    canvas = _background(colours[:3], angle, bloom, height, width)
-    turn = float(rng.random()) * 12 - 6
+    angle = float(rng.random()) * GLYPH_ANGLE_RANGE
+    bloom = (
+        BLOOM_X + BLOOM_X_RANGE * float(rng.random()),
+        BLOOM_Y + BLOOM_Y_RANGE * float(rng.random()),
+    )
+    canvas = _background(colours[:GLYPH_COLOURS], angle, bloom, height, width)
+    turn = float(rng.random()) * TURN_RANGE - TURN_HALF
     white, accent = _draw_ops(figure, place, scale, turn, height * SUPERSAMPLE, width * SUPERSAMPLE)
     # the dots-to-wave of the icon, as on the covers
     dots, wave = _wave_ops()
@@ -390,13 +581,15 @@ def _composite(  # noqa: PLR0913, PLR0917
             np.asarray(white.resize((width, height), box), dtype=np.float32),
             np.asarray(small.resize((width, height), box), dtype=np.float32),
         )[..., None]
-        / 255.0
+        / BYTE_MAX
     )
-    mask_a = np.asarray(accent.resize((width, height), box), dtype=np.float32)[..., None] / 255.0
-    accent_rgb = np.array([int(colours[3][i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float32)
-    canvas = canvas * (1 - mask_w) + 255.0 * mask_w
+    mask_a = np.asarray(accent.resize((width, height), box), dtype=np.float32)[..., None] / BYTE_MAX
+    accent_rgb = np.array(
+        [int(colours[ACCENT_COLOUR][i : i + 2], HEX_BASE) for i in HEX_FIELDS], dtype=np.float32
+    )
+    canvas = canvas * (1 - mask_w) + BYTE_MAX * mask_w
     canvas = canvas * (1 - mask_a) + accent_rgb * mask_a
-    canvas += rng.normal(0.0, 2.2, (height, width, 1)).astype(np.float32)
+    canvas += rng.normal(0.0, GRAIN, (height, width, 1)).astype(np.float32)
     return np.asarray(canvas)
 
 
@@ -405,8 +598,8 @@ def _jpeg(canvas: np.ndarray) -> bytes:
     from PIL import Image  # noqa: PLC0415
 
     out = BytesIO()
-    Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGB").save(
-        out, "JPEG", optimize=True, quality=90
+    Image.fromarray(np.clip(canvas, 0, BYTE_MAX).astype(np.uint8), "RGB").save(
+        out, "JPEG", optimize=True, quality=JPEG_QUALITY
     )
     return out.getvalue()
 
@@ -422,11 +615,10 @@ def artist_thumb(area_id: str, name: str, profile: RoomProfile, *, title: bool =
     """
     from PIL import Image  # noqa: PLC0415
 
-    from .maart import draw_title_on  # noqa: PLC0415
-
-    rng = np.random.default_rng(stable_hash("room-thumb", area_id) % 2**32)
-    gx, gy = 570 + float(rng.integers(0, 80)), 280 + float(rng.integers(0, 50))
-    scale = 1.05 + 0.2 * float(rng.random())
+    rng = np.random.default_rng(stable_hash("room-thumb", area_id) % IMAGE_SEED_MODULUS)
+    gx = THUMB_X + float(rng.integers(0, THUMB_X_RANGE))
+    gy = THUMB_Y + float(rng.integers(0, THUMB_Y_RANGE))
+    scale = THUMB_SCALE + THUMB_SCALE_RANGE * float(rng.random())
     canvas = _composite(
         room_colours(area_id),
         rng,
@@ -436,11 +628,11 @@ def artist_thumb(area_id: str, name: str, profile: RoomProfile, *, title: bool =
         SIZE,
         SIZE,
     )
-    image = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGB")
+    image = Image.fromarray(np.clip(canvas, 0, BYTE_MAX).astype(np.uint8), "RGB")
     if title:
         image = draw_title_on(image, name)
     out = BytesIO()
-    image.save(out, "JPEG", optimize=True, quality=90)
+    image.save(out, "JPEG", optimize=True, quality=JPEG_QUALITY)
     return out.getvalue()
 
 
@@ -451,9 +643,10 @@ def artist_fanart(area_id: str, profile: RoomProfile) -> bytes:
     :param area_id: The id of the area; the palette and the small variations come from it.
     :param profile: The typical day of the room, see `week_profile` and `seeded_profile`.
     """
-    rng = np.random.default_rng(stable_hash("room-fanart", area_id) % 2**32)
-    gx, gy = 1330 + float(rng.integers(0, 80)), 430 + float(rng.integers(-30, 30))
-    scale = 1.45 + 0.2 * float(rng.random())
+    rng = np.random.default_rng(stable_hash("room-fanart", area_id) % IMAGE_SEED_MODULUS)
+    gx = FANART_X + float(rng.integers(0, FANART_X_RANGE))
+    gy = FANART_Y + float(rng.integers(-FANART_Y_SWAY, FANART_Y_SWAY))
+    scale = FANART_SCALE + FANART_SCALE_RANGE * float(rng.random())
     canvas = _composite(
         room_colours(area_id),
         rng,

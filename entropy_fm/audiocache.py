@@ -17,15 +17,29 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
 
+from .constants import AUDIO_CHANNELS
+from .synth import SAMPLE_RATE
+
+LOGGER = logging.getLogger(__name__)
 BITRATE = "96k"
 SUFFIX = ".opus"
 PART = ".part"
 MIN_BYTES = 200
+BYTES_PER_MB = 1_000_000
+# how many characters of a hash name an entry
+KEY_LENGTH = 40
+# how much of the end of a file is read to find its last Ogg page
+TAIL_BYTES = 65536
+# where the flags of an Ogg page are, from its start, and the flag that ends a stream
+OGG_FLAGS_OFFSET = 5
+OGG_END_OF_STREAM = 0x04
 # a file that the process of an earlier run left behind is stale after this long
 STALE_PART_SECONDS = 3600.0
 
@@ -36,7 +50,7 @@ def cache_key(*parts: object) -> str:
 
     :param parts: The values; their text is joined.
     """
-    return hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()[:40]
+    return hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()[:KEY_LENGTH]
 
 
 class AudioCache:
@@ -50,9 +64,11 @@ class AudioCache:
         :param limit_mb: The most megabytes it may hold, 0 for no cache.
         """
         self.root = Path(root)
-        self.limit = int(limit_mb) * 1_000_000
+        self.limit = int(limit_mb) * BYTES_PER_MB
         self.hits = 0
         self.misses = 0
+        # the keys that a recorder of this process is writing right now
+        self._active: set[str] = set()
 
     @property
     def enabled(self) -> bool:
@@ -81,7 +97,7 @@ class AudioCache:
         if not path.is_file():
             self.misses += 1
             return None
-        if not self._sound(path):
+        if not self.is_sound(path):
             path.unlink(missing_ok=True)
             self.misses += 1
             return None
@@ -91,8 +107,12 @@ class AudioCache:
         return path
 
     @staticmethod
-    def _sound(path: Path) -> bool:
-        """Check that a file is a whole Ogg file: it starts and ends with an Ogg page."""
+    def is_sound(path: Path) -> bool:
+        """
+        Check that a file is a whole Ogg file: it starts and ends with an Ogg page.
+
+        :param path: The file.
+        """
         try:
             size = path.stat().st_size
             if size < MIN_BYTES:
@@ -100,13 +120,25 @@ class AudioCache:
             with path.open("rb") as handle:
                 if handle.read(4) != b"OggS":
                     return False
-                handle.seek(max(size - 65536, 0))
+                handle.seek(max(size - TAIL_BYTES, 0))
                 tail = handle.read()
         except OSError:
             return False
         # the last page of a stream has the end-of-stream flag, bit 2 of the byte after the version
         last = tail.rfind(b"OggS")
-        return last >= 0 and len(tail) > last + 5 and bool(tail[last + 5] & 0x04)
+        return (
+            last >= 0
+            and len(tail) > last + OGG_FLAGS_OFFSET
+            and bool(tail[last + OGG_FLAGS_OFFSET] & OGG_END_OF_STREAM)
+        )
+
+    def release(self, key: str) -> None:
+        """
+        Say that a recorder has finished with a key, whether it kept the entry or not.
+
+        :param key: The key of the recorder.
+        """
+        self._active.discard(key)
 
     def size(self) -> int:
         """Return the bytes that the entries use."""
@@ -144,14 +176,17 @@ class AudioCache:
         if self.root.is_dir():
             shutil.rmtree(self.root, ignore_errors=True)
 
-    def recorder(self, key: str) -> Recorder | None:
+    async def recorder(self, key: str) -> Recorder | None:
         """
-        Start recording a track into the cache; None when the cache is off or has it already.
+        Start recording a track into the cache; None when the cache is off, has it already or is recording it.
 
         :param key: A key made by `cache_key`.
         """
-        if not self.enabled or self.path(key).exists():
+        if not self.enabled or await asyncio.to_thread(self.path(key).exists):
             return None
+        if key in self._active:
+            return None
+        self._active.add(key)
         return Recorder(self, key)
 
 
@@ -167,13 +202,13 @@ class Recorder:
         """
         self.cache = cache
         self.key = key
-        self.temp = cache.root / f"{key}.{os.getpid()}{PART}"
+        self.temp = cache.root / f"{key}.{os.getpid()}.{uuid.uuid4().hex}{PART}"
         self._process: asyncio.subprocess.Process | None = None
         self.failed = False
 
     async def feed(self, chunk: bytes) -> None:
         """
-        Give the encoder a chunk of 16 bit stereo PCM at 44.1 kHz.
+        Give the encoder a chunk of 16 bit stereo PCM at the sample rate of the engine.
 
         :param chunk: The bytes.
         """
@@ -187,17 +222,56 @@ class Recorder:
                 return
             process.stdin.write(chunk)
             await process.stdin.drain()
-        except OSError, RuntimeError, ConnectionError:
-            self.failed = True
+        except (OSError, RuntimeError, ConnectionError) as err:
+            self._fail(f"writing to ffmpeg failed: {err}")
             await self.abort()
+
+    async def commit(self) -> bool:
+        """Finish the encoding and move the file into place; return whether the entry exists."""
+        process = self._process
+        if self.failed or process is None or process.stdin is None:
+            await self.abort()
+            return False
+        try:
+            process.stdin.close()
+            code = await process.wait()
+        except (OSError, RuntimeError) as err:
+            self._fail(f"finishing ffmpeg failed: {err}")
+            await self.abort()
+            return False
+        final = self.cache.path(self.key)
+        if code == 0 and await asyncio.to_thread(self.cache.is_sound, self.temp):
+            try:
+                await asyncio.to_thread(self.temp.replace, final)
+            except OSError as err:
+                self._fail(f"moving the file into place failed: {err}")
+                await self.abort()
+                return False
+            self.cache.release(self.key)
+            await asyncio.to_thread(self.cache.evict)
+            return True
+        self._fail(f"ffmpeg exited with code {code}" if code else "ffmpeg wrote no usable audio")
+        await self.abort()
+        return False
+
+    async def abort(self) -> None:
+        """Stop and delete the temporary file; the entry is never made."""
+        process, self._process = self._process, None
+        if process is not None:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                process.kill()
+            with contextlib.suppress(OSError, RuntimeError):
+                await process.wait()
+        await asyncio.to_thread(self.temp.unlink, missing_ok=True)
+        self.cache.release(self.key)
 
     async def _start(self) -> None:
         """Start ffmpeg."""
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = await asyncio.to_thread(shutil.which, "ffmpeg")
         if ffmpeg is None:
-            self.failed = True
+            self._fail("ffmpeg was not found")
             return
-        self.cache.root.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self.cache.root.mkdir, parents=True, exist_ok=True)
         self._process = await asyncio.create_subprocess_exec(
             ffmpeg,
             "-v",
@@ -206,9 +280,9 @@ class Recorder:
             "-f",
             "s16le",
             "-ar",
-            "44100",
+            str(SAMPLE_RATE),
             "-ac",
-            "2",
+            str(AUDIO_CHANNELS),
             "-i",
             "pipe:0",
             "-c:a",
@@ -223,32 +297,7 @@ class Recorder:
             stderr=asyncio.subprocess.DEVNULL,
         )
 
-    async def commit(self) -> bool:
-        """Finish the encoding and move the file into place; return whether the entry exists."""
-        process = self._process
-        if self.failed or process is None or process.stdin is None:
-            await self.abort()
-            return False
-        try:
-            process.stdin.close()
-            code = await process.wait()
-        except OSError, RuntimeError:
-            await self.abort()
-            return False
-        final = self.cache.path(self.key)
-        if code == 0 and self.cache._sound(self.temp):  # noqa: SLF001
-            self.temp.replace(final)
-            await asyncio.to_thread(self.cache.evict)
-            return True
-        await self.abort()
-        return False
-
-    async def abort(self) -> None:
-        """Stop and delete the temporary file; the entry is never made."""
-        process, self._process = self._process, None
-        if process is not None:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                process.kill()
-            with contextlib.suppress(Exception):
-                await process.wait()
-        self.temp.unlink(missing_ok=True)
+    def _fail(self, reason: str) -> None:
+        """Mark the recording as failed and say why once."""
+        self.failed = True
+        LOGGER.warning("Not caching %s: %s", self.key, reason)

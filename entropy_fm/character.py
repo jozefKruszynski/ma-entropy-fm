@@ -32,8 +32,17 @@ from .palette import (
     pick_mode,
     season_warmth,
 )
-from .synth import Scale
-from .timeline import BINARY_KINDS, VoiceKind, stable_hash
+from .synth import FIFTH_SEMITONES, SEMITONES_PER_OCTAVE, Scale
+from .timeline import (
+    BINARY_KINDS,
+    DAY_SECONDS,
+    HOURS_PER_DAY,
+    ON_LEVEL,
+    SECONDS_PER_HOUR,
+    SEED_MODULUS,
+    VoiceKind,
+    stable_hash,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,8 +60,12 @@ EVENING = "evening"
 ALL_DAY = "all_day"
 PEAK = "peak"
 FLAT = "flat"
-HOURS_PER_DAY = 24.0
-SECONDS_PER_HOUR = 3600.0
+# the kinds of moment of the analysis that make the events of a day
+MOMENT_SHOWER = "shower"
+MOMENT_ANOMALY = "anomaly"
+MOMENT_COOKING = "cooking"
+MOMENT_APPLIANCE = "appliance"
+MOMENT_PHASE = "phase"
 # the share of the day at which a character falls into the low or the high third
 LOW_BELOW = 1.0 / 3.0
 HIGH_FROM = 2.0 / 3.0
@@ -100,7 +113,7 @@ ANOMALY_WEIGHT = 0.5
 APPLIANCE_WEIGHT = 0.2
 COOKING_WEIGHT = 0.15
 LATE_NIGHT_WEIGHT = 0.3
-APPLIANCE_MOMENTS = frozenset({"appliance", "cooking", "phase"})
+APPLIANCE_MOMENTS = frozenset({MOMENT_APPLIANCE, MOMENT_COOKING, MOMENT_PHASE})
 # real activity after this hour makes it a late night
 LATE_NIGHT_START = 23.5
 LATE_NIGHT_LEVEL = 0.5
@@ -121,6 +134,36 @@ TEMPO_BASE = 0.1
 # bars a chord lasts, by how busy the day was
 CHORD_BARS = {LOW: (4, 8), MEDIUM: (2, 4), HIGH: (1, 2)}
 WARM_LABEL = 0.15
+# the warmth of a mode that the palette does not know
+UNKNOWN_MODE_WARMTH = -0.5
+# the warmth of a day is measured against the season only by the weekly walk, which already moves the key
+NO_SEASON_WEIGHT = 0.0
+# monday is 0: from this weekday on it is a weekend
+FIRST_WEEKEND_DAY = 5
+# the mean of a curve under this is read as nothing, so that a flat curve has no variation
+MIN_MEAN = 1e-9
+# fewer stretches than this say nothing about how regular a day is
+MIN_REGULARITY_STRETCHES = 3
+# where a day sits among its days when they are all the same
+MIDDLE = 0.5
+# the last note of a motif is at least this long, in beats
+MIN_LAST_NOTE_BEATS = 1.0
+NO_LEAP = -1
+# the motif of a room: this many notes, of these lengths in beats, in a total of 4 or 8 beats
+MOTIF_NOTES = (3, 4, 5)
+MOTIF_BEATS = (4, 8)
+NOTE_BEATS = (0.5, 1.0, 1.5, 2.0, 3.0)
+MOTIF_ENDS = (0, 2, 4)
+# degrees of a seven note scale: an octave is seven, a fifth is four
+OCTAVE_DEGREES = 7
+LARGEST_LEAP = 4
+LEAP_SIZES = (2, 3, 4)
+LEAP_CHANCE = 0.7
+DOWN_CHANCE = 0.5
+LOWEST_DEGREE = -2
+HIGHEST_DEGREE = 9
+MOTIF_ATTEMPTS = 40
+FALLBACK_MOTIF = ((0, 1.0), (2, 1.0), (4, 2.0))
 
 
 @dataclass(frozen=True)
@@ -192,6 +235,153 @@ def level_of(energy: float) -> str:
     return HIGH if energy >= HIGH_FROM else MEDIUM
 
 
+def raw_energy(series: Sequence[Series], covered: float) -> float:
+    """
+    Return how busy a day was on the scale of the activity, before it is compared with any other day.
+
+    :param series: The series of the room on the day, rescaled as the provider does.
+    :param covered: How many seconds of the day have happened.
+    """
+    steps = max(int(min(covered, DAY_SECONDS) / STEP), 1)
+    lively = np.asarray(activity(_without_workday(series), (np.arange(steps) + 0.5) * STEP))
+    return _raw_of(lively)
+
+
+def measure_character(
+    analysis: DayAnalysis,
+    traits: DayTraits | None,
+    day: date | None,
+    series: Sequence[Series],
+    *,
+    workday: bool | None = None,
+    week: Sequence[float] = (),
+) -> DayCharacter:
+    """
+    Measure the character of a day of a room or of the house.
+
+    :param analysis: The analysis of the day; its moments are the events and it says whether the series are measured
+        against the room's own days.
+    :param traits: What the day was like (temperature against the usual, weather), when known.
+    :param day: The day; without it the season is unknown and the weekday counts as a workday.
+    :param series: The series of the room on the day, rescaled as the provider does; a workday sensor among them says
+        whether it is a day off.
+    :param workday: Whether the day is a workday, when the caller knows; it wins over the series and the weekday.
+    :param week: The `raw_energy` of the room on its previous days (up to seven), on the same scale as the series;
+        with at least `MIN_WEEK_DAYS` of them the energy is mostly where the day sits between their quietest and busiest.
+    """
+    house = _without_workday(series)
+    lively = _lively(house, analysis)
+    stretches = _stretches_of(lively)
+    late = _late_night(house, analysis.covered)
+    events = _events_of(analysis, house, late=late)
+    energy = _energy_of(lively, week, measured=analysis.measured)
+    if workday is None:
+        workday = _workday_from(series)
+    day_off = (
+        (day is not None and day.weekday() >= FIRST_WEEKEND_DAY) if workday is None else not workday
+    )
+    # warmth is the day against its season: the season itself already moves the key through the weekly walk
+    season = season_warmth(day) if day is not None else 0.0
+    return DayCharacter(
+        energy=energy,
+        level=level_of(energy),
+        shape=_shape_of(lively),
+        peak=_peak_of(lively),
+        warmth=day_warmth(traits or DayTraits(), season, season_weight=NO_SEASON_WEIGHT),
+        stretches=len(stretches),
+        regularity=_regularity_of(stretches),
+        events=events,
+        late_night=late,
+        day_off=day_off,
+    )
+
+
+def scale_of_day(style: Style, home: Scale, day: date, character: DayCharacter) -> Scale:
+    """
+    Return the key and mode of a day: the weekly walk on the circle of fifths, a fifth either way for the warmth.
+
+    The key walks a fifth a week (`palette.circle_position`); a cold day goes a fifth to the flat side and a warm one
+    a fifth to the sharp side, so that days next to each other stay within two fifths. The mode is the one of the
+    style that is nearest in brightness to what the day asks: bright for a warm, busy day, dark for a cold, quiet or
+    late one. The mode the user chose keeps a small say.
+
+    :param style: The style, which limits the modes.
+    :param home: The key and mode the user chose.
+    :param day: The day.
+    :param character: The character of the day.
+    """
+    step = 0
+    if character.warmth <= -FIFTH_WARMTH:
+        step = -1
+    elif character.warmth >= FIFTH_WARMTH:
+        step = 1
+    walk = circle_position(day) - circle_position(day - timedelta(days=1))
+    # on the day the walk moves, the day step may not go the same way again: a fifth of each makes two
+    if (walk > 0 and step > 0) or (walk < 0 and step < 0):
+        step = 0
+    root = (home.root + FIFTH_SEMITONES * (circle_position(day) + step)) % SEMITONES_PER_OCTAVE
+    brightness = (
+        BRIGHT_WARMTH * character.warmth
+        + BRIGHT_ENERGY * (2.0 * character.energy - 1.0)
+        + (BRIGHT_DAY_OFF if character.day_off else 0.0)
+        - (DARK_LATE_NIGHT if character.late_night else 0.0)
+    )
+    target = float(
+        np.clip(
+            HOME_MODE_WEIGHT * MODE_WARMTH.get(home.mode, UNKNOWN_MODE_WARMTH) + brightness,
+            -1.0,
+            1.0,
+        )
+    )
+    return Scale(root, pick_mode(style.modes, target))
+
+
+def tempo_target(style: Style, character: DayCharacter) -> float:
+    """
+    Return where in the tempo range of the style a day sits, 0 (slowest) to 1 (fastest).
+
+    :param style: The style; the range itself is `style.tempo`, which the caller maps this onto.
+    :param character: The character of the day.
+    """
+    del style
+    target = (
+        TEMPO_BASE
+        + TEMPO_ENERGY_WEIGHT * character.energy
+        + TEMPO_SHAPE_BIAS.get(character.shape, 0.0)
+        + (TEMPO_DAY_OFF if character.day_off else 0.0)
+    )
+    return float(np.clip(target, 0.0, 1.0))
+
+
+def chord_bars(character: DayCharacter) -> tuple[int, ...]:
+    """
+    Return how many bars a chord may last on a day: long on a quiet day, short on a busy one.
+
+    :param character: The character of the day.
+    """
+    return CHORD_BARS[character.level]
+
+
+@functools.cache
+def room_motif(area_key: str) -> tuple[tuple[int, float], ...]:
+    """
+    Return the motif of a room: 3 to 5 notes as (scale degree, beats), the same every time for the same room.
+
+    It stays within an octave, moves mostly by step with at most one leap of a fifth or less, ends on the root, the
+    third or the fifth of the scale, and is 4 or 8 beats long. The caller moves it into the key and mode of the day.
+
+    :param area_key: The room or the house, such as the id of an area.
+    """
+    rng = np.random.default_rng(stable_hash("room_motif", area_key) % SEED_MODULUS)
+    count = MOTIF_NOTES[int(rng.integers(0, len(MOTIF_NOTES)))]
+    beats = MOTIF_BEATS[int(rng.integers(0, len(MOTIF_BEATS)))]
+    for _ in range(MOTIF_ATTEMPTS):
+        degrees = _degrees(rng, count)
+        if degrees is not None:
+            return tuple(zip(degrees, _note_lengths(rng, count, beats), strict=True))
+    return FALLBACK_MOTIF
+
+
 def _without_workday(series: Sequence[Series]) -> list[Series]:
     """Return the series that are the house itself: a workday sensor says what kind of day it is, not what happened."""
     return [item for item in series if not item.entity_id.startswith(WORKDAY_PREFIX)]
@@ -201,13 +391,13 @@ def _workday_from(series: Sequence[Series]) -> bool | None:
     """Return what a workday sensor in the series says about the day, or None when there is none."""
     for item in series:
         if item.entity_id.startswith(WORKDAY_PREFIX):
-            return bool(item.at(np.array([NOON * SECONDS_PER_HOUR]))[0] > 0.5)
+            return bool(item.at(np.array([NOON * SECONDS_PER_HOUR]))[0] > ON_LEVEL)
     return None
 
 
 def _lively(series: Sequence[Series], analysis: DayAnalysis) -> np.ndarray:
     """Return how lively the room was in each quarter of an hour, from the series; the curve of the analysis if empty."""
-    steps = max(int(min(analysis.covered, 86400.0) / STEP), 1)
+    steps = max(int(min(analysis.covered, DAY_SECONDS) / STEP), 1)
     if not series:
         return np.asarray(analysis.curve, dtype=np.float64)
     return np.asarray(activity(series, (np.arange(steps) + 0.5) * STEP), dtype=np.float64)
@@ -219,23 +409,11 @@ def _raw_of(lively: np.ndarray) -> float:
     return ENERGY_MEAN_WEIGHT * float(lively.mean()) + ENERGY_TOP_WEIGHT * float(busiest.mean())
 
 
-def raw_energy(series: Sequence[Series], covered: float) -> float:
-    """
-    Return how busy a day was on the scale of the activity, before it is compared with any other day.
-
-    :param series: The series of the room on the day, rescaled as the provider does.
-    :param covered: How many seconds of the day have happened.
-    """
-    steps = max(int(min(covered, 86400.0) / STEP), 1)
-    lively = np.asarray(activity(_without_workday(series), (np.arange(steps) + 0.5) * STEP))
-    return _raw_of(lively)
-
-
 def _place_among(raw: float, week: Sequence[float]) -> float:
     """Return where a day sits between the quietest (0) and the busiest (1) of it and the days before it."""
     low, high = min(raw, *week), max(raw, *week)
     if high - low < MIN_WEEK_SPREAD:
-        return 0.5
+        return MIDDLE
     return (raw - low) / (high - low)
 
 
@@ -299,12 +477,12 @@ def _stretches_of(lively: np.ndarray) -> list[tuple[int, int]]:
 
 def _variation(values: np.ndarray) -> float:
     """Return the spread of some values as a share of their mean."""
-    return float(np.std(values)) / max(float(np.mean(values)), 1e-9)
+    return float(np.std(values)) / max(float(np.mean(values)), MIN_MEAN)
 
 
 def _regularity_of(stretches: Sequence[tuple[int, int]]) -> float:
     """Return 0 to 1 how evenly spaced and how alike the stretches are; undecided for fewer than three."""
-    if len(stretches) < 3:
+    if len(stretches) < MIN_REGULARITY_STRETCHES:
         return NO_REGULARITY
     starts = np.array([a for a, _ in stretches], dtype=np.float64)
     lengths = np.array([b - a + 1 for a, b in stretches], dtype=np.float64)
@@ -337,139 +515,13 @@ def _events_of(analysis: DayAnalysis, series: Sequence[Series], *, late: bool) -
     for moment in analysis.moments:
         if moment.source in steady:
             continue
-        if moment.kind == "shower":
+        if moment.kind == MOMENT_SHOWER:
             score += SHOWER_WEIGHT * moment.strength
-        elif moment.kind == "anomaly":
+        elif moment.kind == MOMENT_ANOMALY:
             score += ANOMALY_WEIGHT * moment.strength
         elif moment.kind in APPLIANCE_MOMENTS:
-            score += COOKING_WEIGHT if moment.kind == "cooking" else APPLIANCE_WEIGHT
+            score += COOKING_WEIGHT if moment.kind == MOMENT_COOKING else APPLIANCE_WEIGHT
     return float(1.0 - math.exp(-score))
-
-
-def measure_character(  # noqa: PLR0913
-    analysis: DayAnalysis,
-    traits: DayTraits | None,
-    day: date | None,
-    series: Sequence[Series],
-    *,
-    workday: bool | None = None,
-    week: Sequence[float] = (),
-) -> DayCharacter:
-    """
-    Measure the character of a day of a room or of the house.
-
-    :param analysis: The analysis of the day; its moments are the events and it says whether the series are measured
-        against the room's own days.
-    :param traits: What the day was like (temperature against the usual, weather), when known.
-    :param day: The day; without it the season is unknown and the weekday counts as a workday.
-    :param series: The series of the room on the day, rescaled as the provider does; a workday sensor among them says
-        whether it is a day off.
-    :param workday: Whether the day is a workday, when the caller knows; it wins over the series and the weekday.
-    :param week: The `raw_energy` of the room on its previous days (up to seven), on the same scale as the series;
-        with at least `MIN_WEEK_DAYS` of them the energy is mostly where the day sits between their quietest and busiest.
-    """
-    house = _without_workday(series)
-    lively = _lively(house, analysis)
-    stretches = _stretches_of(lively)
-    late = _late_night(house, analysis.covered)
-    events = _events_of(analysis, house, late=late)
-    energy = _energy_of(lively, week, measured=analysis.measured)
-    if workday is None:
-        workday = _workday_from(series)
-    day_off = (day is not None and day.weekday() >= 5) if workday is None else not workday
-    # warmth is the day against its season: the season itself already moves the key through the weekly walk
-    season = season_warmth(day) if day is not None else 0.0
-    return DayCharacter(
-        energy=energy,
-        level=level_of(energy),
-        shape=_shape_of(lively),
-        peak=_peak_of(lively),
-        warmth=day_warmth(traits or DayTraits(), season, season_weight=0.0),
-        stretches=len(stretches),
-        regularity=_regularity_of(stretches),
-        events=events,
-        late_night=late,
-        day_off=day_off,
-    )
-
-
-def scale_of_day(style: Style, home: Scale, day: date, character: DayCharacter) -> Scale:
-    """
-    Return the key and mode of a day: the weekly walk on the circle of fifths, a fifth either way for the warmth.
-
-    The key walks a fifth a week (`palette.circle_position`); a cold day goes a fifth to the flat side and a warm one
-    a fifth to the sharp side, so that days next to each other stay within two fifths. The mode is the one of the
-    style that is nearest in brightness to what the day asks: bright for a warm, busy day, dark for a cold, quiet or
-    late one. The mode the user chose keeps a small say.
-
-    :param style: The style, which limits the modes.
-    :param home: The key and mode the user chose.
-    :param day: The day.
-    :param character: The character of the day.
-    """
-    step = 0
-    if character.warmth <= -FIFTH_WARMTH:
-        step = -1
-    elif character.warmth >= FIFTH_WARMTH:
-        step = 1
-    walk = circle_position(day) - circle_position(day - timedelta(days=1))
-    # on the day the walk moves, the day step may not go the same way again: a fifth of each makes two
-    if (walk > 0 and step > 0) or (walk < 0 and step < 0):
-        step = 0
-    root = (home.root + 7 * (circle_position(day) + step)) % 12
-    brightness = (
-        BRIGHT_WARMTH * character.warmth
-        + BRIGHT_ENERGY * (2.0 * character.energy - 1.0)
-        + (BRIGHT_DAY_OFF if character.day_off else 0.0)
-        - (DARK_LATE_NIGHT if character.late_night else 0.0)
-    )
-    target = float(
-        np.clip(HOME_MODE_WEIGHT * MODE_WARMTH.get(home.mode, -0.5) + brightness, -1.0, 1.0)
-    )
-    return Scale(root, pick_mode(style.modes, target))
-
-
-def tempo_target(style: Style, character: DayCharacter) -> float:
-    """
-    Return where in the tempo range of the style a day sits, 0 (slowest) to 1 (fastest).
-
-    :param style: The style; the range itself is `style.tempo`, which the caller maps this onto.
-    :param character: The character of the day.
-    """
-    del style
-    target = (
-        TEMPO_BASE
-        + TEMPO_ENERGY_WEIGHT * character.energy
-        + TEMPO_SHAPE_BIAS.get(character.shape, 0.0)
-        + (TEMPO_DAY_OFF if character.day_off else 0.0)
-    )
-    return float(np.clip(target, 0.0, 1.0))
-
-
-def chord_bars(character: DayCharacter) -> tuple[int, ...]:
-    """
-    Return how many bars a chord may last on a day: long on a quiet day, short on a busy one.
-
-    :param character: The character of the day.
-    """
-    return CHORD_BARS[character.level]
-
-
-# the motif of a room: this many notes, of these lengths in beats, in a total of 4 or 8 beats
-MOTIF_NOTES = (3, 4, 5)
-MOTIF_BEATS = (4, 8)
-NOTE_BEATS = (0.5, 1.0, 1.5, 2.0, 3.0)
-MOTIF_ENDS = (0, 2, 4)
-# degrees of a seven note scale: an octave is seven, a fifth is four
-OCTAVE_DEGREES = 7
-LARGEST_LEAP = 4
-LEAP_SIZES = (2, 3, 4)
-LEAP_CHANCE = 0.7
-DOWN_CHANCE = 0.5
-LOWEST_DEGREE = -2
-HIGHEST_DEGREE = 9
-MOTIF_ATTEMPTS = 40
-FALLBACK_MOTIF = ((0, 1.0), (2, 1.0), (4, 2.0))
 
 
 def _note_lengths(rng: np.random.Generator, count: int, beats: int) -> tuple[float, ...]:
@@ -477,7 +529,9 @@ def _note_lengths(rng: np.random.Generator, count: int, beats: int) -> tuple[flo
     fits = [
         lengths
         for lengths in itertools.product(NOTE_BEATS, repeat=count)
-        if sum(lengths) == beats and lengths[-1] >= 1.0 and max(lengths) <= beats / 2
+        if sum(lengths) == beats
+        and lengths[-1] >= MIN_LAST_NOTE_BEATS
+        and max(lengths) <= beats / 2
     ]
     return fits[int(rng.integers(0, len(fits)))]
 
@@ -485,7 +539,7 @@ def _note_lengths(rng: np.random.Generator, count: int, beats: int) -> tuple[flo
 def _degrees(rng: np.random.Generator, count: int) -> tuple[int, ...] | None:
     """Return the degrees of a motif that ends on the root, the third or the fifth and mostly moves by step, or None."""
     end = MOTIF_ENDS[int(rng.integers(0, len(MOTIF_ENDS)))]
-    leap_at = int(rng.integers(0, count - 1)) if rng.random() < LEAP_CHANCE else -1
+    leap_at = int(rng.integers(0, count - 1)) if rng.random() < LEAP_CHANCE else NO_LEAP
     path = [end]
     for move in range(count - 2, -1, -1):
         size = LEAP_SIZES[int(rng.integers(0, len(LEAP_SIZES)))] if move == leap_at else 1
@@ -494,23 +548,3 @@ def _degrees(rng: np.random.Generator, count: int) -> tuple[int, ...] | None:
     if not inside or max(path) - min(path) > OCTAVE_DEGREES or len(set(path)) < 2:
         return None
     return tuple(path)
-
-
-@functools.cache
-def room_motif(area_key: str) -> tuple[tuple[int, float], ...]:
-    """
-    Return the motif of a room: 3 to 5 notes as (scale degree, beats), the same every time for the same room.
-
-    It stays within an octave, moves mostly by step with at most one leap of a fifth or less, ends on the root, the
-    third or the fifth of the scale, and is 4 or 8 beats long. The caller moves it into the key and mode of the day.
-
-    :param area_key: The room or the house, such as the id of an area.
-    """
-    rng = np.random.default_rng(stable_hash("room_motif", area_key) % 2**63)
-    count = MOTIF_NOTES[int(rng.integers(0, len(MOTIF_NOTES)))]
-    beats = MOTIF_BEATS[int(rng.integers(0, len(MOTIF_BEATS)))]
-    for _ in range(MOTIF_ATTEMPTS):
-        degrees = _degrees(rng, count)
-        if degrees is not None:
-            return tuple(zip(degrees, _note_lengths(rng, count, beats), strict=True))
-    return FALLBACK_MOTIF

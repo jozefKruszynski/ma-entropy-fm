@@ -19,17 +19,37 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .day_analysis import analyze_day
-from .quality import ORDER, Quality
+from .quality import MS_PER_SECOND, ORDER, Quality
 from .render import render_blocks
 from .scape import scape_score
-from .synth import Scale
-from .timeline import EntityInfo, Series, VoiceKind, build_series
+from .synth import DEFAULT_MODE, DEFAULT_ROOT, Scale
+from .timeline import DAY_SECONDS, EntityInfo, Series, VoiceKind, build_series
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-DAY = 86400.0
 BENCH_SECONDS = 6
+BENCH_SEED = "bench"
+# the benchmark begins this far into the piece, which is its busy part
+BENCH_START_SHARE = 0.4
+# the invented house: its random seed, the fridge's cycle and run (seconds) and level, its noise, and the kettle
+HOUSE_SEED = 7
+FRIDGE_CYCLE_SECONDS = 2400.0
+FRIDGE_RUN_SECONDS = 840.0
+FRIDGE_RUNNING_WATTS = 90.0
+FRIDGE_IDLE_WATTS = 2.0
+FRIDGE_NOISE_WATTS = 3.0
+# the motion sensor flips every this many seconds, between these two times of the day
+MOTION_STEP_SECONDS = 400.0
+MOTION_FROM_SECONDS = 25000
+MOTION_UNTIL_SECONDS = 30000
+CLIMATE_STEP_SECONDS = 600.0
+# the temperature swings around its mean, by this much, with this period over 2 pi in seconds; the humidity climbs by this much a second
+TEMPERATURE_MEAN = 20.0
+TEMPERATURE_SWING = 2.0
+TEMPERATURE_PERIOD = 9000.0
+HUMIDITY_START = 45.0
+HUMIDITY_RISE = 0.002
 # a piece makes notes as it goes, which the measure of a short stretch with the notes made leaves out
 NOTE_FACTOR = 1.5
 # the styles from the dearest to the cheapest, by the CPU that scripts/bench.py measures at every tier
@@ -46,9 +66,18 @@ def heaviest_style(offered: Iterable[str]) -> str:
     return next((key for key in COST_ORDER if key in wanted), COST_ORDER[0])
 
 
+# the kettle boils for 200 seconds at 2100 W, the door is open for a minute, the light is on for five thousand seconds
+KETTLE_TIMES = (0.0, 26000.0, 26200.0)
+KETTLE_WATTS = (0.0, 2100.0, 0.0)
+DOOR_TIMES = (0.0, 25500.0, 25560.0)
+DOOR_OPEN = (0.0, 1.0, 0.0)
+LIGHT_TIMES = (0.0, 25000.0, 30000.0)
+LIGHT_ON = (0.0, 1.0, 0.0)
+
+
 def mini_house() -> list[Series]:
     """Return a small invented house: a fridge, a kettle, motion, a door, lights, the climate."""
-    rng = np.random.default_rng(7)
+    rng = np.random.default_rng(HOUSE_SEED)
 
     def make(
         entity_id: str, kind: VoiceKind, times: list[float], values: list[float], cls: str = ""
@@ -57,29 +86,57 @@ def mini_house() -> list[Series]:
         return build_series(info, times, values)
 
     fridge_t, fridge_v = [], []
-    for start in np.arange(0.0, DAY, 2400.0):
-        fridge_t += [float(start), float(start) + 840.0]
-        fridge_v += [90.0 + float(rng.normal(0, 3)), 2.0]
-    moments = np.arange(0.0, DAY, 400.0)
-    flips = [float(m) for m in moments[(moments > 25000) & (moments < 30000)]]
+    for start in np.arange(0.0, DAY_SECONDS, FRIDGE_CYCLE_SECONDS):
+        fridge_t += [float(start), float(start) + FRIDGE_RUN_SECONDS]
+        fridge_v += [
+            FRIDGE_RUNNING_WATTS + float(rng.normal(0, FRIDGE_NOISE_WATTS)),
+            FRIDGE_IDLE_WATTS,
+        ]
+    moments = np.arange(0.0, DAY_SECONDS, MOTION_STEP_SECONDS)
+    flips = [
+        float(m)
+        for m in moments[(moments > MOTION_FROM_SECONDS) & (moments < MOTION_UNTIL_SECONDS)]
+    ]
     motion_t = [0.0, *flips]
     motion_v = [float(i % 2) for i in range(len(motion_t))]
-    temp_t = [float(t) for t in np.arange(0.0, DAY, 600.0)]
+    temp_t = [float(t) for t in np.arange(0.0, DAY_SECONDS, CLIMATE_STEP_SECONDS)]
     return [
         make("sensor.fridge_power", VoiceKind.DRONE, fridge_t, fridge_v),
-        make("sensor.kettle_power", VoiceKind.DRONE, [0.0, 26000.0, 26200.0], [0.0, 2100.0, 0.0]),
         make(
-            "binary_sensor.door", VoiceKind.PLUCK, [0.0, 25500.0, 25560.0], [0.0, 1.0, 0.0], "door"
+            "sensor.kettle_power",
+            VoiceKind.DRONE,
+            list(KETTLE_TIMES),
+            list(KETTLE_WATTS),
+        ),
+        make(
+            "binary_sensor.door",
+            VoiceKind.PLUCK,
+            list(DOOR_TIMES),
+            list(DOOR_OPEN),
+            "door",
         ),
         make("binary_sensor.motion", VoiceKind.PLUCK, motion_t, motion_v, "motion"),
-        make("light.ceiling", VoiceKind.CHORD, [0.0, 25000.0, 30000.0], [0.0, 1.0, 0.0]),
+        make(
+            "light.ceiling",
+            VoiceKind.CHORD,
+            list(LIGHT_TIMES),
+            list(LIGHT_ON),
+        ),
         make(
             "sensor.temperature",
             VoiceKind.TEMPERATURE,
             temp_t,
-            [20.0 + 2.0 * float(np.sin(t / 9000.0)) for t in temp_t],
+            [
+                TEMPERATURE_MEAN + TEMPERATURE_SWING * float(np.sin(t / TEMPERATURE_PERIOD))
+                for t in temp_t
+            ],
         ),
-        make("sensor.humidity", VoiceKind.HUMIDITY, temp_t, [45.0 + 0.002 * t for t in temp_t]),
+        make(
+            "sensor.humidity",
+            VoiceKind.HUMIDITY,
+            temp_t,
+            [HUMIDITY_START + HUMIDITY_RISE * t for t in temp_t],
+        ),
     ]
 
 
@@ -99,19 +156,24 @@ def measure(tier: Quality, seconds: int = BENCH_SECONDS, style: str = COST_ORDER
     """
     series = mini_house()
     score, plan = scape_score(
-        series, analyze_day(series), style, "bench", Scale(2, "dorian"), quality=tier
+        series,
+        analyze_day(series),
+        style,
+        BENCH_SEED,
+        Scale(DEFAULT_ROOT, DEFAULT_MODE),
+        quality=tier,
     )
-    first = int(plan.length * 0.4)
+    first = int(plan.length * BENCH_START_SHARE)
     spent: list[float] = []
     for _ in range(2):
         spent = []
         last = time.thread_time()
-        for _block in render_blocks(score, tier, "bench", first, end_s=first + seconds + 1):
+        for _block in render_blocks(score, tier, BENCH_SEED, first, end_s=first + seconds + 1):
             now = time.thread_time()
             spent.append(now - last)
             last = now
     counted = sorted(spent[1:] or spent)
-    return counted[len(counted) // 2] * 1000.0 * NOTE_FACTOR
+    return counted[len(counted) // 2] * MS_PER_SECOND * NOTE_FACTOR
 
 
 def benchmark(

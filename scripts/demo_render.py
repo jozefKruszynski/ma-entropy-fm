@@ -432,6 +432,7 @@ class Demo:
         from entropy_fm import (  # noqa: PLC0415
             baseline,
             palette,
+            plan,
             quality,
             scape,
             styles,
@@ -440,7 +441,7 @@ class Demo:
             timeline,
         )
 
-        self.baseline, self.palette, self.quality = baseline, palette, quality
+        self.baseline, self.palette, self.plan, self.quality = baseline, palette, plan, quality
         self.scape, self.styles, self.surprise, self.synth, self.timeline = (
             scape,
             styles,
@@ -484,7 +485,7 @@ class Demo:
         found: Any = baselines
         return [raw_energy(rescale(day, found)[0], DAY) for day in earlier]
 
-    def make(  # noqa: PLR0913, PLR0917
+    def make(
         self,
         series: list[Series],
         day: date,
@@ -492,7 +493,6 @@ class Demo:
         area_key: str,
         baselines: dict[str, EntityBaseline] | None = None,
         tier: Quality | None = None,
-        length_mode: str = "full",
         week: list[float] | None = None,
     ) -> tuple[Score, Plan]:
         """Return the score and the plan of the soundscape of some series on a day, as the provider makes them."""
@@ -515,25 +515,26 @@ class Demo:
             if a.score >= 0.5
         ]
         analysis = self.scape.analysis_of(series, DAY, anomalies)
-        extra: dict[str, Any] = {}
+        character: Any = None
         try:
             from entropy_fm.character import measure_character  # noqa: PLC0415
         except ImportError:  # an older engine has no character of the day
             pass
         else:
-            extra["character"] = measure_character(analysis, traits, day, series, week=week or ())
+            character = measure_character(analysis, traits, day, series, week=week or ())
         return self.scape.scape_score(
             series,
             analysis,
             style,
             f"{area_key}|{day.isoformat()}|_scape|{style}",
             home,
-            day=day,
-            palette=palette,
             quality=tier or self.quality.STANDARD,
-            area_key=area_key,
-            length_mode=length_mode,
-            **extra,
+            options=self.plan.PieceOptions(
+                day=day,
+                palette=palette,
+                area_key=area_key,
+                character=character,
+            ),
         )
 
     def score(
@@ -542,7 +543,6 @@ class Demo:
         areas: tuple[str, ...],
         style: str,
         tier: Quality | None = None,
-        length_mode: str = "full",
     ) -> tuple[Score, Plan]:
         """Return the score and the plan of a day of the fortnight, for some areas, in a style."""
         series = [item for area in areas for item in self.days[index][area]] + self.days[index][
@@ -556,6 +556,5 @@ class Demo:
             "+".join(areas),
             found,
             tier,
-            length_mode,
             self.week(index, areas, found),
         )

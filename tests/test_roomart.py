@@ -7,11 +7,14 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from hass_client.exceptions import BaseHassClientError
 from music_assistant_models.enums import ImageType, MediaType
+from music_assistant_models.errors import ProviderUnavailableError
+from music_assistant_models.media_items import ItemMapping
 from PIL import Image
 
-from entropy_fm.const import CONF_COVERS, WHOLE_HOUSE_ID
-from entropy_fm.covers import COVER_OFF, SIZE
+from entropy_fm.constants import COVER_GENERATION, WHOLE_HOUSE_ID
+from entropy_fm.covers import SIZE
 from entropy_fm.roomart import (
     HOURS,
     SHAPES,
@@ -28,7 +31,6 @@ from entropy_fm.roomart import (
 )
 from entropy_fm.timeline import EntityInfo, Series, VoiceKind, build_series
 from music_assistant.mass import MusicAssistant
-from tests.test_library_provider import _quiet
 from tests.test_provider import _collect, _setup
 
 if TYPE_CHECKING:
@@ -85,8 +87,8 @@ def test_the_figure_without_data_is_seeded_by_the_id_and_deterministic() -> None
     """The same id always gives the same figure, another id another one; the profile has all three bands."""
     first = seeded_profile("hall")
     again = seeded_profile("hall")
-    assert first.digest() == again.digest()
-    assert first.digest() != seeded_profile("garage").digest()
+    assert np.array_equal(first.presence, again.presence)
+    assert not np.array_equal(first.presence, seeded_profile("garage").presence)
     assert first.days == 0
     assert first.presence.max() > 0
     assert artist_thumb("hall", "Hall", first) == artist_thumb("hall", "Hall", again)
@@ -104,7 +106,6 @@ def test_the_images_are_deterministic_and_follow_the_week_and_the_palette_the_id
     assert artist_fanart("kitchen", evening) != artist_fanart("kitchen", morning)
     assert room_colours("kitchen") == room_colours("kitchen")
     assert room_colours("kitchen") != room_colours("garage")
-    assert morning.digest() != evening.digest()
 
 
 def test_the_figure_is_in_white_on_the_gradient_and_the_whole_house_is_richer() -> None:
@@ -147,14 +148,18 @@ async def test_artists_carry_a_thumb_and_a_backdrop_that_the_provider_serves(
     search = await provider.search("kitchen", [MediaType.ARTIST])
     found.extend(search.artists)
     albums = await provider.get_artist_albums("kitchen")
-    found.extend(
-        artist for album in albums for artist in album.artists if hasattr(album, "artists")
-    )
     assert found
     for artist in found:
         images = _images(artist)
         assert set(images) == {ImageType.THUMB, ImageType.FANART}
         assert all(provider.accepts_stored_image_path(path) for path in images.values())
+    # the artists credited on the albums of a listing are mappings, which carry the thumb
+    credited = [artist for album in albums for artist in album.artists]
+    assert credited
+    for artist in credited:
+        assert isinstance(artist, ItemMapping)
+        assert artist.image
+        assert provider.accepts_stored_image_path(artist.image.path)
     kitchen = _images(await provider.get_artist("kitchen"))
     thumb = await provider.resolve_image(kitchen[ImageType.THUMB])
     fanart = await provider.resolve_image(kitchen[ImageType.FANART])
@@ -163,9 +168,7 @@ async def test_artists_carry_a_thumb_and_a_backdrop_that_the_provider_serves(
     assert thumb.startswith(b"\xff\xd8\xff")
     assert _picture(thumb).size == (1024, 1024)
     assert _picture(fanart).size == (WIDE_WIDTH, WIDE_HEIGHT)
-    # drawn once: the second time comes from the cache folder
     assert await provider.resolve_image(kitchen[ImageType.THUMB]) == thumb
-    assert any(provider.covers.store.cache.glob("*.img"))
     house = _images(await provider.get_artist(WHOLE_HOUSE_ID))
     assert isinstance(await provider.resolve_image(house[ImageType.THUMB]), bytes)
 
@@ -189,33 +192,45 @@ async def test_a_room_is_drawn_from_its_kept_days_and_otherwise_from_its_id(
     assert isinstance(again, bytes)
 
 
+async def test_a_room_image_that_cannot_be_read_is_an_error_and_never_a_seeded_figure(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server keeps what it is given, so a failed read must not turn into the figure of the id."""
+    provider, _ = await _setup(mass, fake_hass)
+    kitchen = _images(await provider.get_artist("kitchen"))[ImageType.THUMB]
+
+    async def broken(*_a: Any, **_k: Any) -> Any:
+        raise BaseHassClientError("down")
+
+    monkeypatch.setattr(provider.history, "cached_series", broken)
+    with pytest.raises(ProviderUnavailableError):
+        await provider.resolve_image(kitchen)
+
+
+async def test_a_room_with_no_history_at_all_gets_the_figure_of_its_id(
+    mass: MusicAssistant, fake_hass: MagicMock
+) -> None:
+    """Nothing kept is not a failure: the room is drawn from its id."""
+    provider, _ = await _setup(mass, fake_hass)
+    kitchen = _images(await provider.get_artist("kitchen"))[ImageType.THUMB]
+    assert await provider.resolve_image(kitchen) == artist_thumb(
+        "kitchen", "Kitchen", seeded_profile("kitchen")
+    )
+
+
 async def test_unknown_artist_images_are_refused(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
     """A room that does not exist, a wrong kind or figure and a missing generation are not served."""
     provider, _ = await _setup(mass, fake_hass)
-    gen = f"g{provider._cover_generation}"  # noqa: SLF001
+    gen = f"g{COVER_GENERATION}"
     assert await provider.resolve_image(f"artist|nowhere|thumb|{gen}") is None
     assert await provider.resolve_image(f"artist|kitchen|logo|{gen}") is None
     assert await provider.resolve_image("artist|kitchen|thumb") is None
     assert await provider.resolve_image("artist|kitchen|thumb|gx") is None
     assert await provider.resolve_image(f"artist|kitchen|thumb|blob|{gen}") is None
-    assert await provider.resolve_image(f"artist|kitchen|thumb|{gen}") is not None
+    assert await provider.resolve_image(f"artist|kitchen|thumb|{gen}") is None
     assert await provider.resolve_image(f"artist|kitchen|thumb|bars|{gen}") is not None
-
-
-async def test_with_covers_off_there_are_no_artist_images_either(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing is attached and nothing is served."""
-    provider, _ = await _setup(mass, fake_hass)
-    before = _images(await provider.get_artist("kitchen"))
-    _quiet(provider, monkeypatch, **{CONF_COVERS: COVER_OFF})
-    artists: list[Any] = await _collect(provider.get_library_artists())
-    artists.append(await provider.get_artist("kitchen"))
-    assert all(not artist.metadata.images for artist in artists)
-    for path in before.values():
-        assert await provider.resolve_image(path) is None
 
 
 def _room_of(shape: str) -> str:

@@ -14,6 +14,14 @@ from dataclasses import dataclass
 
 # Auto picks the richest tier that would use under this share of one core in real time
 AUTO_BUDGET = 0.30
+MS_PER_SECOND = 1000.0
+# the reverbs of the tiers
+REVERB_FREEVERB = "freeverb"
+REVERB_ROOM = "room"
+REVERB_HALL = "hall"
+KEY_LIGHT = "light"
+KEY_STANDARD = "standard"
+KEY_RICH = "rich"
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,8 @@ class Quality:
     rich_bass: bool
     # reverb: freeverb (one cheap Freeverb), room (a convolution with a 2.5 second room) or hall (5 seconds)
     reverb: str
+    # whether a layer may ask for its own long hall (`Layer.hall`); where it may not, the send goes to the shared reverb
+    layer_hall: bool
     # whether the pads are chorused, whether the granular shimmer plays, whether tape wobble plays
     chorus: bool
     granular: bool
@@ -43,12 +53,13 @@ class Quality:
 
 
 LIGHT = Quality(
-    key="light",
+    key=KEY_LIGHT,
     title="Light",
     max_layers=4,
     unison=0.3,
     rich_bass=False,
-    reverb="freeverb",
+    reverb=REVERB_FREEVERB,
+    layer_hall=False,
     chorus=False,
     granular=False,
     wobble=False,
@@ -57,12 +68,13 @@ LIGHT = Quality(
     cache_mb=64,
 )
 STANDARD = Quality(
-    key="standard",
+    key=KEY_STANDARD,
     title="Standard",
     max_layers=6,
     unison=0.7,
     rich_bass=True,
-    reverb="room",
+    reverb=REVERB_ROOM,
+    layer_hall=True,
     chorus=True,
     granular=False,
     wobble=True,
@@ -70,12 +82,13 @@ STANDARD = Quality(
     cache_mb=128,
 )
 RICH = Quality(
-    key="rich",
+    key=KEY_RICH,
     title="Rich",
     max_layers=9,
     unison=1.0,
     rich_bass=True,
-    reverb="hall",
+    reverb=REVERB_HALL,
+    layer_hall=True,
     chorus=True,
     granular=True,
     wobble=True,
@@ -105,7 +118,7 @@ def choose_tier(cost_ms: dict[str, float], budget: float = AUTO_BUDGET) -> Quali
     :param cost_ms: The CPU time in milliseconds that one second of audio took, per tier key.
     :param budget: The share of one core that may be used in real time.
     """
-    limit = budget * 1000.0
+    limit = budget * MS_PER_SECOND
     chosen = LIGHT
     for tier in ORDER:
         cost = cost_ms.get(tier.key)

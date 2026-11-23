@@ -8,13 +8,15 @@ through a connection of its own made with a URL and a long-lived token.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from hass_client.exceptions import BaseHassClientError
 from music_assistant_models.errors import ProviderUnavailableError
 
-from .const import HISTORY_CHUNK
+from .constants import HISTORY_CHUNK
 from .library import SUN_ENTITIES, candidate_ids
 from .roles import EntityMeta
 from .timeline import parse_history
@@ -23,6 +25,18 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from hass_client import HomeAssistantClient
+
+    from music_assistant.providers.hass import HomeAssistantProvider
+
+LOGGER = logging.getLogger(__name__)
+# what a read of Home Assistant fails with when it is away or does not answer
+HASS_ERRORS = (BaseHassClientError, ProviderUnavailableError)
+# what the answer for the time zone fails with: an error, no `time_zone` in it, or a zone that is not known
+TIME_ZONE_ERRORS = (*HASS_ERRORS, KeyError, ValueError, ZoneInfoNotFoundError)
+# what the registries fail with when they do not have the shape that is read
+REGISTRY_ERRORS = (*HASS_ERRORS, KeyError)
+# how many entities are asked of the registry of the plugin in one call
+REGISTRY_BATCH = 200
 
 
 class Snapshot(NamedTuple):
@@ -40,7 +54,7 @@ class HassAccess:
     def __init__(
         self,
         client: HomeAssistantClient | None = None,
-        plugin_getter: Callable[[], Any | None] | None = None,
+        plugin_getter: Callable[[], HomeAssistantProvider | None] | None = None,
     ) -> None:
         """
         Wrap a connection.
@@ -54,8 +68,16 @@ class HassAccess:
         # one history request at a time: the server of the user is polite company
         self._lock = asyncio.Lock()
 
+    def set_client(self, client: HomeAssistantClient) -> None:
+        """
+        Use a new connection of our own, after the old one was lost.
+
+        :param client: The connection that replaces it.
+        """
+        self._client = client
+
     @property
-    def plugin(self) -> Any | None:
+    def plugin(self) -> HomeAssistantProvider | None:
         """Return the core plugin when this access goes through it."""
         if self._plugin_getter is None:
             return None
@@ -73,7 +95,7 @@ class HassAccess:
         if client is None:
             msg = "There is no connection to Home Assistant"
             raise ProviderUnavailableError(msg)
-        return cast("HomeAssistantClient", client)
+        return client
 
     async def areas(self) -> dict[str, str]:
         """Return the area registry as area id to name."""
@@ -129,8 +151,74 @@ class HassAccess:
         """
         try:
             return await self._entity_meta(entity_ids)
-        except Exception:  # noqa: BLE001 - hints are optional, whatever goes wrong
+        except REGISTRY_ERRORS:
+            LOGGER.warning(
+                "Could not read the hints of the entities from Home Assistant", exc_info=True
+            )
             return {}
+
+    async def candidate_states(
+        self, exclude_globs: Iterable[str], *, include_presence: bool
+    ) -> Snapshot:
+        """
+        Return the areas, the area of each entity, the states and the hints of those that may play.
+
+        :param exclude_globs: The user's patterns of entities to leave out.
+        :param include_presence: Whether persons and device trackers may play.
+        """
+        areas = await self.areas()
+        entity_areas = await self.entity_areas()
+        ids = candidate_ids(
+            {entity_id: area for entity_id, area in entity_areas.items() if area in areas},
+            exclude_globs,
+            include_presence=include_presence,
+        )
+        return Snapshot(
+            areas,
+            entity_areas,
+            await self.states(ids),
+            await self.entity_meta(ids),
+        )
+
+    async def time_zone(self) -> tzinfo | None:
+        """Return the time zone of the house, or None when it cannot be told."""
+        try:
+            config = cast("dict[str, Any]", await self.client.get_config())
+            return ZoneInfo(str(config["time_zone"]))
+        except TIME_ZONE_ERRORS:
+            LOGGER.warning(
+                "Could not read the time zone of Home Assistant, the one of this server is used",
+                exc_info=True,
+            )
+            return None
+
+    async def history(
+        self, entity_ids: Sequence[str], start: datetime, end: datetime, day_start_ts: float
+    ) -> dict[str, tuple[list[float], list[float]]]:
+        """
+        Return the history of entities as seconds since the start of the day and values.
+
+        :param entity_ids: The entities to read.
+        :param start: Start of the period.
+        :param end: End of the period.
+        :param day_start_ts: Epoch seconds of the start of the day, the zero of the times.
+        """
+        result: dict[str, tuple[list[float], list[float]]] = {}
+        length = (end - start).total_seconds()
+        for first in range(0, len(entity_ids), HISTORY_CHUNK):
+            chunk = list(entity_ids[first : first + HISTORY_CHUNK])
+            async with self._lock:
+                raw = await self.client.send_command(
+                    "history/history_during_period",
+                    start_time=start.astimezone(UTC).isoformat(),
+                    end_time=end.astimezone(UTC).isoformat(),
+                    entity_ids=chunk,
+                    minimal_response=True,
+                    no_attributes=True,
+                    significant_changes_only=False,
+                )
+            result.update(parse_history(cast("dict[str, Any]", raw), day_start_ts, length))
+        return result
 
     async def _entity_meta(self, entity_ids: Sequence[str]) -> dict[str, EntityMeta]:
         """Read the full registry entries, the devices and the labels."""
@@ -139,9 +227,11 @@ class HassAccess:
         wanted = set(entity_ids)
         if plugin is not None:
             entries: dict[str, Any] = {}
-            for first in range(0, len(entity_ids), 200):
+            for first in range(0, len(entity_ids), REGISTRY_BATCH):
                 entries.update(
-                    await plugin.get_entity_registry_entries(entity_ids[first : first + 200])
+                    await plugin.get_entity_registry_entries(
+                        entity_ids[first : first + REGISTRY_BATCH]
+                    )
                 )
             devices = {str(d["id"]): d for d in (await plugin.get_device_registry()).values()}
         else:
@@ -176,63 +266,4 @@ class HassAccess:
                 entity_category=str(entry.get("entity_category") or ""),
                 device_id=str(entry.get("device_id") or ""),
             )
-        return result
-
-    async def candidate_states(
-        self, exclude_globs: Iterable[str], *, include_presence: bool
-    ) -> Snapshot:
-        """
-        Return the areas, the area of each entity, the states and the hints of those that may play.
-
-        :param exclude_globs: The user's patterns of entities to leave out.
-        :param include_presence: Whether persons and device trackers may play.
-        """
-        areas = await self.areas()
-        entity_areas = await self.entity_areas()
-        ids = candidate_ids(
-            {entity_id: area for entity_id, area in entity_areas.items() if area in areas},
-            exclude_globs,
-            include_presence=include_presence,
-        )
-        return Snapshot(
-            areas,
-            entity_areas,
-            await self.states(ids),
-            await self.entity_meta(ids),
-        )
-
-    async def time_zone(self) -> tzinfo:
-        """Return the time zone of the house, or that of this server when it cannot be told."""
-        try:
-            config = cast("dict[str, Any]", await self.client.get_config())
-            return ZoneInfo(str(config["time_zone"]))
-        except Exception:  # noqa: BLE001 - any failure falls back to the clock of the server
-            return datetime.now(UTC).astimezone().tzinfo or UTC
-
-    async def history(
-        self, entity_ids: Sequence[str], start: datetime, end: datetime, day_start_ts: float
-    ) -> dict[str, tuple[list[float], list[float]]]:
-        """
-        Return the history of entities as seconds since the start of the day and values.
-
-        :param entity_ids: The entities to read.
-        :param start: Start of the period.
-        :param end: End of the period.
-        :param day_start_ts: Epoch seconds of the start of the day, the zero of the times.
-        """
-        result: dict[str, tuple[list[float], list[float]]] = {}
-        length = (end - start).total_seconds()
-        for first in range(0, len(entity_ids), HISTORY_CHUNK):
-            chunk = list(entity_ids[first : first + HISTORY_CHUNK])
-            async with self._lock:
-                raw = await self.client.send_command(
-                    "history/history_during_period",
-                    start_time=start.astimezone(UTC).isoformat(),
-                    end_time=end.astimezone(UTC).isoformat(),
-                    entity_ids=chunk,
-                    minimal_response=True,
-                    no_attributes=True,
-                    significant_changes_only=False,
-                )
-            result.update(parse_history(cast("dict[str, Any]", raw), day_start_ts, length))
         return result

@@ -12,9 +12,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .synth import Scale
-
-DEFAULT_STYLE = "ambient"
+STYLE_AMBIENT = "ambient"
+STYLE_BERLIN_SCHOOL = "berlin_school"
+STYLE_LOFI = "lofi"
+STYLE_RITUAL = "ritual"
+STYLE_GLITCH = "glitch"
+DEFAULT_STYLE = STYLE_AMBIENT
+# the tempo of a style without a pulse
+NO_TEMPO = (0.0, 0.0)
+GENERATIVE = "Generative"
 
 
 @dataclass(frozen=True)
@@ -29,63 +35,53 @@ class Style:
     # the tempo range in beats per minute, (0, 0) for a style without a pulse
     tempo: tuple[float, float]
     description: str = ""
-    genres: tuple[str, ...] = ("Generative",)
-
-    def scale_for(self, wanted: Scale) -> Scale:
-        """
-        Return the scale of a track: the one the user chose, unless the style does not allow it.
-
-        :param wanted: The key and mode from the settings.
-        """
-        if wanted.mode in self.modes:
-            return wanted
-        return Scale(wanted.root, self.modes[0])
+    genres: tuple[str, ...] = (GENERATIVE,)
 
 
 AMBIENT = Style(
-    key="ambient",
+    key=STYLE_AMBIENT,
     title="Ambient",
     version="Ambient",
     modes=("dorian", "aeolian", "mixolydian", "lydian", "major"),
-    tempo=(0.0, 0.0),
+    tempo=NO_TEMPO,
     description="Tape loops of unrelated lengths that phase against each other, a sparse felt piano, drones. No beat.",
-    genres=("Ambient", "Generative"),
+    genres=("Ambient", GENERATIVE),
 )
 BERLIN_SCHOOL = Style(
-    key="berlin_school",
+    key=STYLE_BERLIN_SCHOOL,
     title="Berlin School",
     version="Berlin School",
     modes=("aeolian", "dorian", "mixolydian", "phrygian"),
     tempo=(102.0, 116.0),
     description="Hypnotic Moog-style sequences that mutate by rule, tape strings and choir, an organ bed, a slow lead.",
-    genres=("Electronic", "Berlin School", "Generative"),
+    genres=("Electronic", "Berlin School", GENERATIVE),
 )
 LOFI = Style(
-    key="lofi",
+    key=STYLE_LOFI,
     title="Lo-fi",
     version="Lo-fi",
     modes=("dorian", "mixolydian", "aeolian", "major", "lydian"),
     tempo=(70.0, 88.0),
     description="A dusty swung boom-bap loop, electric piano chords on jazzy progressions, a round bass, vinyl.",
-    genres=("Lo-fi", "Chillhop", "Generative"),
+    genres=("Lo-fi", "Chillhop", GENERATIVE),
 )
 RITUAL = Style(
-    key="ritual",
+    key=STYLE_RITUAL,
     title="Ritual",
     version="Ritual",
     modes=("aeolian", "dorian"),
-    tempo=(0.0, 0.0),
+    tempo=NO_TEMPO,
     description="Plucked loops in a Japanese scale that phase over a breathing choir drone, stretched strings, a slow chant leader, a soft heartbeat and taiko.",
-    genres=("Ambient", "Ritual", "Generative"),
+    genres=("Ambient", "Ritual", GENERATIVE),
 )
 GLITCH = Style(
-    key="glitch",
+    key=STYLE_GLITCH,
     title="Cinematic Glitch",
     version="Cinematic Glitch",
     modes=("aeolian", "phrygian", "dorian"),
     tempo=(54.0, 72.0),
     description="Film-score swells, brass-like stabs and a growling bass over hard half-time drums, cut up by the doors, switches and appliances of the house.",
-    genres=("Electronic", "Cinematic", "Generative"),
+    genres=("Electronic", "Cinematic", GENERATIVE),
 )
 STYLES: dict[str, Style] = {
     style.key: style for style in (AMBIENT, BERLIN_SCHOOL, LOFI, RITUAL, GLITCH)

@@ -22,8 +22,19 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .day_analysis import DAY_SECONDS, QUIET_KINDS, analyze_day
-from .timeline import BINARY_KINDS, VoiceKind, stable_hash
+from .character import FIRST_WEEKEND_DAY
+from .day_analysis import QUIET_KINDS, analyze_day
+from .styles import DEFAULT_STYLE
+from .timeline import (
+    BINARY_KINDS,
+    DAY_SECONDS,
+    HOURS_PER_DAY,
+    MINUTES_PER_DAY,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
+    VoiceKind,
+    stable_hash,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,13 +51,66 @@ NIGHT_START = 23
 NIGHT_END = 5
 # a temperature above this is taken to be Fahrenheit
 FAHRENHEIT_ABOVE = 45.0
+FAHRENHEIT_OFFSET = 32.0
+FAHRENHEIT_PER_CELSIUS = 1.8
 WARM_C = 24.0
 COOL_C = 17.0
 BUSY_ABOVE = 0.67
 QUIET_BELOW = 0.34
+# the kinds of thing that a day can be about
+NOUN_DISHWASHER = "dishwasher"
+NOUN_LAUNDRY = "laundry"
+NOUN_HOB = "hob"
+NOUN_HUM = "hum"
+NOUN_LIGHT = "light"
+NOUN_MEDIA = "media"
+NOUN_BLINDS = "blinds"
+NOUN_CYCLE = "cycle"
+NOUN_SIGNAL = "signal"
+NOUN_WINDOW = "window"
+NOUN_DOOR = "door"
+NOUN_MOTION = "motion"
+CLIMATE_WARM = "warm"
+CLIMATE_COOL = "cool"
 # the weight of one event of a kind in telling what the day was about
-WEIGHTS = {"dishwasher": 15.0, "laundry": 15.0, "hob": 6.0}
-APPLIANCES = frozenset({"dishwasher", "laundry"})
+WEIGHTS = {NOUN_DISHWASHER: 15.0, NOUN_LAUNDRY: 15.0, NOUN_HOB: 6.0}
+DEFAULT_WEIGHT = 1.0
+APPLIANCES = frozenset({NOUN_DISHWASHER, NOUN_LAUNDRY})
+# what counts as an event of a kind: an appliance level that it crosses, or how much a series changes
+RUN_LEVEL = 0.2
+CYCLE_CHANGE = 0.05
+OTHER_CHANGE = 0.1
+CHANGING_NOUNS = frozenset({NOUN_HOB, NOUN_CYCLE, NOUN_MEDIA, NOUN_BLINDS})
+OPENING_NOUNS = frozenset({NOUN_DOOR, NOUN_WINDOW, NOUN_MOTION, NOUN_SIGNAL})
+# how notable an event is as the event of a day: at night an opening or a light, an appliance, a hob or an opening
+ODD_AT_NIGHT = frozenset({NOUN_DOOR, NOUN_WINDOW, NOUN_MOTION, NOUN_LIGHT})
+NOTABLE_NOUNS = frozenset({NOUN_HOB, NOUN_DOOR, NOUN_WINDOW})
+PRIORITY_ODD = 3
+PRIORITY_APPLIANCE = 2
+PRIORITY_NOTABLE = 1
+PRIORITY_NONE = 0
+DEVICE_CLASS_WINDOW = "window"
+WINDOW_WORDS = ("window", "fenster", "raam")
+MOMENT_PEAK = "peak"
+DEFAULT_BUSIEST_HOUR = 12
+KEY_DECIMALS = 2
+DAYS_PER_WEEK = 7
+MINUTES_PER_HOUR = 60
+# the parts of the day by the hour they end, and the hour before which it is night
+NIGHT_UNTIL = 4
+PART_LIMITS = (
+    (8, "dawn"),
+    (12, "morning"),
+    (14, "noon"),
+    (17, "afternoon"),
+    (20, "dusk"),
+)
+PART_NIGHT = "night"
+PART_EVENING = "evening"
+# how busy a day was: quiet, lived-in or busy
+MOOD_QUIET = 0
+MOOD_LIVED_IN = 1
+MOOD_BUSY = 2
 # titles of the inspiring records and artists' songs that must never come out of a word bank
 FORBIDDEN_TITLES = frozenset(
     {
@@ -100,7 +164,7 @@ class DayFacts:
 
     intensity: float = 0.0
     # the busiest hour of the day, 0 to 23
-    busiest_hour: int = 12
+    busiest_hour: int = DEFAULT_BUSIEST_HOUR
     # the kind of thing the day was about, such as "dishwasher" or "door"
     thing: str = ""
     # how many times that kind of thing did something
@@ -122,13 +186,13 @@ class DayFacts:
     @property
     def weekend(self) -> bool:
         """Return whether the day is a Saturday or a Sunday."""
-        return self.weekday >= 5
+        return self.weekday >= FIRST_WEEKEND_DAY
 
     @property
     def key(self) -> tuple[object, ...]:
         """Return the facts as a value that tells whether two readings of a day are the same."""
         return (
-            round(self.intensity, 2),
+            round(self.intensity, KEY_DECIMALS),
             self.busiest_hour,
             self.thing,
             self.count,
@@ -137,67 +201,6 @@ class DayFacts:
             self.climate,
             self.weekday,
         )
-
-
-def _noun_of(item: Series) -> str:
-    """Return the kind of thing a series is, in words that name no one and nothing in particular."""
-    kind = item.kind
-    simple = {
-        VoiceKind.DISHWASHER: "dishwasher",
-        VoiceKind.DRUM: "laundry",
-        VoiceKind.HOB: "hob",
-        VoiceKind.DRONE: "hum",
-        VoiceKind.CHORD: "light",
-        VoiceKind.MEDIA: "media",
-        VoiceKind.COVER: "blinds",
-        VoiceKind.PHASE: "cycle",
-        VoiceKind.BLIP: "signal",
-    }
-    if kind in simple:
-        return simple[kind]
-    if kind == VoiceKind.PLUCK:
-        text = f"{item.entity_id} {item.name}".lower()
-        if item.device_class == "window" or any(w in text for w in ("window", "fenster", "raam")):
-            return "window"
-        if item.is_opening:
-            return "door"
-        return "motion" if item.is_motion else "signal"
-    return ""
-
-
-def _event_times(item: Series, noun: str) -> np.ndarray:
-    """Return when something of a kind happened: appliance runs, hob and cycle changes, openings."""
-    if noun in APPLIANCES:
-        return item.crossings(0.0, DAY_SECONDS, 0.2, rising=True)
-    if noun in {"hob", "cycle", "media", "blinds"}:
-        return item.changes(0.0, DAY_SECONDS, 0.05)
-    if noun == "hum":
-        return np.empty(0)
-    if item.kind in BINARY_KINDS or noun in {"door", "window", "motion", "signal"}:
-        return item.onsets(0.0, DAY_SECONDS)
-    return item.changes(0.0, DAY_SECONDS, 0.1)
-
-
-def _climate(series: Sequence[Series]) -> str:
-    """Return warm or cool when the temperature of the day says so."""
-    values = [float(item.values.mean()) for item in series if item.kind == VoiceKind.TEMPERATURE]
-    if not values:
-        return ""
-    mean = sum(values) / len(values)
-    if mean > FAHRENHEIT_ABOVE:
-        mean = (mean - 32.0) / 1.8
-    if mean >= WARM_C:
-        return "warm"
-    return "cool" if mean <= COOL_C else ""
-
-
-def _priority(noun: str, hour: int) -> int:
-    """Return how notable an event is as the event of a day: 3 odd, 2 an appliance, 1 a hob or a door, 0 not."""
-    if (hour >= NIGHT_START or hour < NIGHT_END) and noun in {"door", "window", "motion", "light"}:
-        return 3
-    if noun in APPLIANCES:
-        return 2
-    return 1 if noun in {"hob", "door", "window"} else 0
 
 
 def facts_of(series: Sequence[Series], day: date, covered: float = DAY_SECONDS) -> DayFacts:
@@ -223,9 +226,9 @@ def facts_of(series: Sequence[Series], day: date, covered: float = DAY_SECONDS) 
             continue
         times = _event_times(item, noun)
         counts[noun] = counts.get(noun, 0) + len(times)
-        scores[noun] = scores.get(noun, 0.0) + len(times) * WEIGHTS.get(noun, 1.0)
+        scores[noun] = scores.get(noun, 0.0) + len(times) * WEIGHTS.get(noun, DEFAULT_WEIGHT)
         for second in times:
-            priority = _priority(noun, int(second // 3600) % 24)
+            priority = _priority(noun, int(second // SECONDS_PER_HOUR) % HOURS_PER_DAY)
             if not priority:
                 continue
             candidates.append((priority, float(second), noun))
@@ -239,9 +242,9 @@ def facts_of(series: Sequence[Series], day: date, covered: float = DAY_SECONDS) 
         top = max(priority for priority, _, _ in candidates)
         best = sorted(c for c in candidates if c[0] == top)
         _, second, event = best[len(best) // 2]
-        minute = int(second // 60) % 1440
-    peak = analysis.moments_of("peak")
-    hour = int(peak[0].time // 3600) % 24 if peak else 12
+        minute = int(second // SECONDS_PER_MINUTE) % MINUTES_PER_DAY
+    peak = analysis.moments_of(MOMENT_PEAK)
+    hour = int(peak[0].time // SECONDS_PER_HOUR) % HOURS_PER_DAY if peak else DEFAULT_BUSIEST_HOUR
     return DayFacts(
         analysis.busyness,
         hour,
@@ -255,20 +258,21 @@ def facts_of(series: Sequence[Series], day: date, covered: float = DAY_SECONDS) 
     )
 
 
+def mood_of(facts: DayFacts) -> int:
+    """Return how busy the day was: 0 quiet, 1 lived-in or 2 busy."""
+    if facts.intensity < QUIET_BELOW:
+        return MOOD_QUIET
+    return MOOD_LIVED_IN if facts.intensity < BUSY_ABOVE else MOOD_BUSY
+
+
 def part_of(hour: int) -> str:
     """Return the part of the day an hour is in: night, dawn, morning, noon, afternoon, dusk or evening."""
-    if hour >= NIGHT_START or hour < 4:
-        return "night"
-    for limit, name in (
-        (8, "dawn"),
-        (12, "morning"),
-        (14, "noon"),
-        (17, "afternoon"),
-        (20, "dusk"),
-    ):
+    if hour >= NIGHT_START or hour < NIGHT_UNTIL:
+        return PART_NIGHT
+    for limit, name in PART_LIMITS:
         if hour < limit:
             return name
-    return "evening"
+    return PART_EVENING
 
 
 # -- the words ------------------------------------------------------------------------------------
@@ -283,6 +287,9 @@ class StyleWords:
     templates: tuple[str, ...]
     # titles for a day that has nothing to tell
     plain: tuple[str, ...]
+    # what inspired the style, and how the house drives it
+    history: str
+    drive: str
 
 
 @dataclass(frozen=True)
@@ -297,6 +304,20 @@ class Words:
     weekdays: tuple[str, ...]
     climates: dict[str, str]
     styles: dict[str, StyleWords]
+    # the day line and the review: the part of the day, how busy it was, what happened, and the frames of the sentences
+    day_parts: dict[str, str]
+    day_moods: tuple[str, str, str]
+    events: dict[str, str]
+    # the weekdays as they are written inside a sentence
+    weekday_names: tuple[str, ...]
+    no_day: str
+    start_whole: str
+    start_partial: str
+    day_frame: str
+    weekend_day_frame: str
+    event_frame: str
+    review_kind: str
+    review_frame: str
 
 
 EN = Words(
@@ -350,6 +371,11 @@ EN = Words(
                 "{weekday} {noun}",
             ),
             plain=("Room Tone", "Slow Light", "Still Air", "Quiet House", "Held Breath"),
+            history="Ambient music as an idea goes back to Brian Eno, who made Music for Airports in 1978 from tape loops "
+            "of unequal length: each loop returns at its own pace, so the same few sounds meet in a new "
+            "arrangement every time and the piece never repeats itself.",
+            drive="In this house the loops follow the day: busy hours thicken the notes and brighten the pads, quiet "
+            "ones leave a few notes and a lot of air.",
         ),
         "berlin_school": StyleWords(
             adjectives=(
@@ -378,6 +404,12 @@ EN = Words(
                 "Sequencer for a Quiet House",
                 "Tape Strings",
             ),
+            history="In the 1970s electronic musicians in West Berlin, Tangerine Dream and Klaus Schulze among them, "
+            "built long pieces from analogue sequencers: patterns of repeating notes that mutate slowly under "
+            "pads and a lone lead. The drums often wait until well into the piece, as on Schulze's Moondawn, "
+            "which makes their entrance feel earned.",
+            drive="Here the rooms steer the sequencer: the more happens, the faster the pattern mutates, and "
+            "an appliance that runs can bring in the drums.",
         ),
         "lofi": StyleWords(
             adjectives=("Cosy", "Sleepy", "Warm", "Dusty", "Mellow", "Lazy"),
@@ -394,6 +426,11 @@ EN = Words(
                 "{adj} {room} {part}",
             ),
             plain=("Cosy Corner", "Dusty Tape", "Warm Blanket", "Sleepy Beats", "Mellow Hours"),
+            history="Lo-fi hip hop grew out of beat makers who liked flaws: drums swung loosely behind the beat, dusty "
+            "keys, a round bass and the crackle of old vinyl. It became music for studying, cooking and "
+            "winding down.",
+            drive="Here the house sets the dust and the swing: lamps and kettles warm the keys, "
+            "and a busy hour loosens the drums.",
         ),
         "ritual": StyleWords(
             adjectives=("Lantern", "Silent", "Veiled", "Slow", "Candlelit"),
@@ -409,6 +446,11 @@ EN = Words(
                 "Gathering {at_part}",
             ),
             plain=("Lantern Procession", "Silent Vigil", "Veiled Rite", "The Slow Offering"),
+            history="Geinoh Yamashirogumi, the collective behind the Akira soundtrack, mixed folk festival with temple "
+            "sounds, and Doll's Polyphony is the mood this style chases: pentatonic plucks, breathing drones and "
+            "the weight of taiko drums. It borrows the mood, not the notes.",
+            drive="The house breathes into the drone: movement lifts the plucks, and the taiko "
+            "answers the busiest hours.",
         ),
         "glitch": StyleWords(
             adjectives=("Fractured", "Stuttering", "Severed", "Corrupt", "Sliced", "Overclocked"),
@@ -424,8 +466,49 @@ EN = Words(
                 "{noun} {at_part}",
             ),
             plain=("Signal Lost", "Buffer Underrun", "Dropped Frames", "Fractured House"),
+            history="Cinematic glitch comes from the meeting of film scores and bass music: the half-time drums and "
+            "growling basses of neurofunk, as played by acts like KOAN Sound, with swells that sound like "
+            "trailers and edits so precise that every stutter reads as a choice.",
+            drive="The doors, switches and appliances of the house are the edits: each one cuts the "
+            "drums or the bass, and a quiet room leaves the swells alone.",
         ),
     },
+    day_parts={
+        "night": "night",
+        "dawn": "early morning",
+        "morning": "morning",
+        "noon": "midday",
+        "afternoon": "afternoon",
+        "dusk": "early evening",
+        "evening": "evening",
+    },
+    day_moods=("quiet", "steady", "busy"),
+    events={
+        "dishwasher": "a dishwasher run",
+        "laundry": "a laundry run",
+        "hob": "the hob",
+        "door": "a door",
+        "window": "a window",
+        "motion": "movement",
+        "light": "a light",
+        "media": "the music",
+        "blinds": "the blinds",
+        "cycle": "a program change",
+        "hum": "a hum",
+        "signal": "a signal",
+    },
+    weekday_names=("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    no_day="There is not much to hear of this day yet.",
+    start_whole="A",
+    start_partial="So far, a",
+    day_frame="{start} {mood} {part}{event}.",
+    weekend_day_frame="{start} {mood} weekend {part}{event}.",
+    event_frame="; {event} at {clock}",
+    review_kind=" A {mood} day, liveliest in the {part}.",
+    review_frame=(
+        "{room} on {weekday} {date}, the day as generative music.{kind} "
+        "Every piece is steered by what the house did."
+    ),
 )
 
 NL = Words(
@@ -468,6 +551,11 @@ NL = Words(
                 "{room} in Gloed",
             ),
             plain=("Kamertoon", "Traag Licht", "Stille Lucht", "Stil Huis", "Ingehouden Adem"),
+            history="Ambient als idee gaat terug op Brian Eno, die in 1978 Music for Airports maakte van tapelussen van "
+            "ongelijke lengte: elke lus keert in zijn eigen tempo terug, zodat dezelfde paar klanken telkens in "
+            "een nieuwe samenstelling samenkomen en het stuk zichzelf nooit herhaalt.",
+            drive="In dit huis volgen de lussen de dag: drukke uren maken de noten dichter en de pads helderder, "
+            "stille uren laten een paar noten en veel lucht over.",
         ),
         "berlin_school": StyleWords(
             adjectives=("Analoge", "Pulserende", "Hypnotische", "Cyclische", "Rollende"),
@@ -483,6 +571,12 @@ NL = Words(
                 "Bandstrijkers {at_part}",
             ),
             plain=("Analoge Sequentie", "Trage Oscillator", "Stille Sequencer", "Bandstrijkers"),
+            history="In de jaren zeventig bouwden elektronische muzikanten in West-Berlijn, onder wie Tangerine Dream en "
+            "Klaus Schulze, lange stukken op analoge sequencers: patronen van herhaalde noten die langzaam "
+            "muteren onder pads en één solo-lijn. De drums komen vaak pas ver in het stuk binnen, zoals op "
+            "Schulzes Moondawn, waardoor hun intrede verdiend voelt.",
+            drive="Hier sturen de kamers de sequencer: hoe meer er gebeurt, hoe sneller het patroon muteert, "
+            "en een apparaat dat draait kan de drums laten binnenkomen.",
         ),
         "lofi": StyleWords(
             adjectives=("Gezellige", "Slaperige", "Warme", "Stoffige", "Zachte"),
@@ -504,6 +598,11 @@ NL = Words(
                 "Slaperige Beats",
                 "Zachte Uren",
             ),
+            history="Lo-fi hiphop groeide uit beatmakers die van imperfectie hielden: losjes achter de tel zwingende "
+            "drums, stoffige toetsen, een ronde bas en het geknetter van oud vinyl. Het werd muziek om bij te "
+            "studeren, koken en tot rust te komen.",
+            drive="Hier bepaalt het huis het stof en de swing: lampen en waterkokers verwarmen de toetsen, "
+            "en een druk uur maakt de drums losser.",
         ),
         "ritual": StyleWords(
             adjectives=("Stille", "Gesluierde", "Trage", "Plechtige"),
@@ -519,6 +618,11 @@ NL = Words(
                 "Samenkomst {at_part}",
             ),
             plain=("Lantaarnprocessie", "Stille Wake", "Gesluierde Ritus", "De Trage Offerande"),
+            history="Geinoh Yamashirogumi, het collectief achter de Akira-soundtrack, mengde volksfeest met tempelklanken, "
+            "en Doll's Polyphony is de sfeer die deze stijl zoekt: pentatonische tokkels, ademende drones en het "
+            "gewicht van taiko-trommen. Het leent de sfeer, niet de noten.",
+            drive="Het huis ademt in de drone: beweging tilt de tokkels op en de taiko "
+            "antwoordt op de drukste uren.",
         ),
         "glitch": StyleWords(
             adjectives=("Gebroken", "Stotterende", "Afgesneden", "Corrupte", "Gehakte"),
@@ -533,52 +637,52 @@ NL = Words(
                 "{thing}: Signaal Weg",
             ),
             plain=("Signaal Weg", "Buffer Leeg", "Gedropte Frames", "Gebroken Huis"),
+            history="Cinematic glitch komt voort uit de ontmoeting van filmmuziek en basmuziek: de halftime drums en "
+            "grommende bassen van neurofunk, gespeeld door acts als KOAN Sound, met zwellen die klinken als "
+            "trailers en edits zo precies dat elke stotter een keuze lijkt.",
+            drive="De deuren, schakelaars en apparaten van het huis zijn de edits: elk snijdt in de "
+            "drums of de bas, en een stille kamer laat de zwellen met rust.",
         ),
     },
+    day_parts={
+        "night": "nacht",
+        "dawn": "vroege ochtend",
+        "morning": "ochtend",
+        "noon": "middag",
+        "afternoon": "namiddag",
+        "dusk": "vroege avond",
+        "evening": "avond",
+    },
+    day_moods=("rustige", "gewone", "drukke"),
+    events={
+        "dishwasher": "een vaatwasbeurt",
+        "laundry": "een wasbeurt",
+        "hob": "de kookplaat",
+        "door": "een deur",
+        "window": "een raam",
+        "motion": "beweging",
+        "light": "een lamp",
+        "media": "de muziek",
+        "blinds": "de jaloezieën",
+        "cycle": "een programmawissel",
+        "hum": "een gezoem",
+        "signal": "een signaal",
+    },
+    weekday_names=("maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"),
+    no_day="Van deze dag valt nog weinig te horen.",
+    start_whole="Een",
+    start_partial="Tot nu toe een",
+    day_frame="{start} {mood} {part}{event}.",
+    weekend_day_frame="{start} {mood} weekend{part}{event}.",
+    event_frame="; {event} om {clock}",
+    review_kind=" Een {mood} dag, het levendigst in de {part}.",
+    review_frame=(
+        "{room} op {weekday} {date}, de dag als generatieve muziek.{kind} "
+        "Elk stuk wordt gestuurd door wat het huis deed."
+    ),
 )
 
 BANKS = {"en": EN, "nl": NL}
-
-
-def _fields(template: str) -> set[str]:
-    """Return the names of the slots of a template."""
-    return {name for _, name, _, _ in string.Formatter().parse(template) if name}
-
-
-def _slots(
-    words: Words,
-    facts: DayFacts,
-    rng: random.Random,
-    room: str,
-    style: StyleWords,
-) -> dict[str, str]:
-    """Return the words that a title of a day can use; a slot with nothing to say is missing."""
-    slots: dict[str, str] = {
-        "adj": rng.choice(style.adjectives),
-        "noun": rng.choice(style.nouns),
-        "weekday": words.weekdays[facts.weekday % 7],
-    }
-    bare, at = rng.choice(words.parts[part_of(facts.busiest_hour)])
-    slots["part"], slots["at_part"] = bare, at
-    mood = 0 if facts.intensity < QUIET_BELOW else 1 if facts.intensity < BUSY_ABOVE else 2
-    slots["mood"] = words.moods[mood]
-    if room and len(room) <= MAX_ROOM:
-        slots["room"] = room
-    if facts.thing in words.things:
-        noun, article = rng.choice(words.things[facts.thing])
-        slots["thing"] = noun
-        slots["the_thing"] = f"{article} {noun}"
-    if facts.event in words.things:
-        slots["event_thing"] = words.things[facts.event][0][0]
-        slots["time"] = f"{facts.event_minute // 60:02d}:{facts.event_minute % 60:02d}"
-    if facts.climate in words.climates:
-        slots["climate"] = words.climates[facts.climate]
-    return slots
-
-
-def _rng(seed: str, salt: str) -> random.Random:
-    """Return a generator that is the same for the same text."""
-    return random.Random(stable_hash(salt, seed))  # noqa: S311 - not for security
 
 
 def make_title(
@@ -617,164 +721,6 @@ def make_title(
 
 # -- the text of the styles -----------------------------------------------------------------------
 
-HISTORY = {
-    "en": {
-        "ambient": (
-            "Ambient music as an idea goes back to Brian Eno, who made Music for Airports in 1978 from tape loops "
-            "of unequal length: each loop returns at its own pace, so the same few sounds meet in a new "
-            "arrangement every time and the piece never repeats itself."
-        ),
-        "berlin_school": (
-            "In the 1970s electronic musicians in West Berlin, Tangerine Dream and Klaus Schulze among them, "
-            "built long pieces from analogue sequencers: patterns of repeating notes that mutate slowly under "
-            "pads and a lone lead. The drums often wait until well into the piece, as on Schulze's Moondawn, "
-            "which makes their entrance feel earned."
-        ),
-        "lofi": (
-            "Lo-fi hip hop grew out of beat makers who liked flaws: drums swung loosely behind the beat, dusty "
-            "keys, a round bass and the crackle of old vinyl. It became music for studying, cooking and "
-            "winding down."
-        ),
-        "ritual": (
-            "Geinoh Yamashirogumi, the collective behind the Akira soundtrack, mixed folk festival with temple "
-            "sounds, and Doll's Polyphony is the mood this style chases: pentatonic plucks, breathing drones and "
-            "the weight of taiko drums. It borrows the mood, not the notes."
-        ),
-        "glitch": (
-            "Cinematic glitch comes from the meeting of film scores and bass music: the half-time drums and "
-            "growling basses of neurofunk, as played by acts like KOAN Sound, with swells that sound like "
-            "trailers and edits so precise that every stutter reads as a choice."
-        ),
-    },
-    "nl": {
-        "ambient": (
-            "Ambient als idee gaat terug op Brian Eno, die in 1978 Music for Airports maakte van tapelussen van "
-            "ongelijke lengte: elke lus keert in zijn eigen tempo terug, zodat dezelfde paar klanken telkens in "
-            "een nieuwe samenstelling samenkomen en het stuk zichzelf nooit herhaalt."
-        ),
-        "berlin_school": (
-            "In de jaren zeventig bouwden elektronische muzikanten in West-Berlijn, onder wie Tangerine Dream en "
-            "Klaus Schulze, lange stukken op analoge sequencers: patronen van herhaalde noten die langzaam "
-            "muteren onder pads en één solo-lijn. De drums komen vaak pas ver in het stuk binnen, zoals op "
-            "Schulzes Moondawn, waardoor hun intrede verdiend voelt."
-        ),
-        "lofi": (
-            "Lo-fi hiphop groeide uit beatmakers die van imperfectie hielden: losjes achter de tel zwingende "
-            "drums, stoffige toetsen, een ronde bas en het geknetter van oud vinyl. Het werd muziek om bij te "
-            "studeren, koken en tot rust te komen."
-        ),
-        "ritual": (
-            "Geinoh Yamashirogumi, het collectief achter de Akira-soundtrack, mengde volksfeest met tempelklanken, "
-            "en Doll's Polyphony is de sfeer die deze stijl zoekt: pentatonische tokkels, ademende drones en het "
-            "gewicht van taiko-trommen. Het leent de sfeer, niet de noten."
-        ),
-        "glitch": (
-            "Cinematic glitch komt voort uit de ontmoeting van filmmuziek en basmuziek: de halftime drums en "
-            "grommende bassen van neurofunk, gespeeld door acts als KOAN Sound, met zwellen die klinken als "
-            "trailers en edits zo precies dat elke stotter een keuze lijkt."
-        ),
-    },
-}
-
-DRIVES = {
-    "en": {
-        "ambient": (
-            "In this house the loops follow the day: busy hours thicken the notes and brighten the pads, quiet "
-            "ones leave a few notes and a lot of air."
-        ),
-        "berlin_school": (
-            "Here the rooms steer the sequencer: the more happens, the faster the pattern mutates, and "
-            "an appliance that runs can bring in the drums."
-        ),
-        "lofi": (
-            "Here the house sets the dust and the swing: lamps and kettles warm the keys, "
-            "and a busy hour loosens the drums."
-        ),
-        "ritual": (
-            "The house breathes into the drone: movement lifts the plucks, and the taiko "
-            "answers the busiest hours."
-        ),
-        "glitch": (
-            "The doors, switches and appliances of the house are the edits: each one cuts the "
-            "drums or the bass, and a quiet room leaves the swells alone."
-        ),
-    },
-    "nl": {
-        "ambient": (
-            "In dit huis volgen de lussen de dag: drukke uren maken de noten dichter en de pads helderder, "
-            "stille uren laten een paar noten en veel lucht over."
-        ),
-        "berlin_school": (
-            "Hier sturen de kamers de sequencer: hoe meer er gebeurt, hoe sneller het patroon muteert, "
-            "en een apparaat dat draait kan de drums laten binnenkomen."
-        ),
-        "lofi": (
-            "Hier bepaalt het huis het stof en de swing: lampen en waterkokers verwarmen de toetsen, "
-            "en een druk uur maakt de drums losser."
-        ),
-        "ritual": (
-            "Het huis ademt in de drone: beweging tilt de tokkels op en de taiko "
-            "antwoordt op de drukste uren."
-        ),
-        "glitch": (
-            "De deuren, schakelaars en apparaten van het huis zijn de edits: elk snijdt in de "
-            "drums of de bas, en een stille kamer laat de zwellen met rust."
-        ),
-    },
-}
-
-DAY_PARTS = {
-    "en": {
-        "night": "night",
-        "dawn": "early morning",
-        "morning": "morning",
-        "noon": "midday",
-        "afternoon": "afternoon",
-        "dusk": "early evening",
-        "evening": "evening",
-    },
-    "nl": {
-        "night": "nacht",
-        "dawn": "vroege ochtend",
-        "morning": "ochtend",
-        "noon": "middag",
-        "afternoon": "namiddag",
-        "dusk": "vroege avond",
-        "evening": "avond",
-    },
-}
-DAY_MOODS = {"en": ("quiet", "steady", "busy"), "nl": ("rustige", "gewone", "drukke")}
-EVENTS = {
-    "en": {
-        "dishwasher": "a dishwasher run",
-        "laundry": "a laundry run",
-        "hob": "the hob",
-        "door": "a door",
-        "window": "a window",
-        "motion": "movement",
-        "light": "a light",
-        "media": "the music",
-        "blinds": "the blinds",
-        "cycle": "a program change",
-        "hum": "a hum",
-        "signal": "a signal",
-    },
-    "nl": {
-        "dishwasher": "een vaatwasbeurt",
-        "laundry": "een wasbeurt",
-        "hob": "de kookplaat",
-        "door": "een deur",
-        "window": "een raam",
-        "motion": "beweging",
-        "light": "een lamp",
-        "media": "de muziek",
-        "blinds": "de jaloezieën",
-        "cycle": "een programmawissel",
-        "hum": "een gezoem",
-        "signal": "een signaal",
-    },
-}
-
 
 def day_line(facts: DayFacts | None, lang: str = DEFAULT_LANGUAGE) -> str:
     """
@@ -783,28 +729,21 @@ def day_line(facts: DayFacts | None, lang: str = DEFAULT_LANGUAGE) -> str:
     :param facts: What the day was like.
     :param lang: `en` or `nl`.
     """
-    lang = lang if lang in LANGUAGES else DEFAULT_LANGUAGE
+    words = BANKS.get(lang, EN)
     if facts is None or not facts.has_data:
-        return (
-            "There is not much to hear of this day yet."
-            if lang == "en"
-            else "Van deze dag valt nog weinig te horen."
-        )
-    mood = DAY_MOODS[lang][
-        0 if facts.intensity < QUIET_BELOW else 1 if facts.intensity < BUSY_ABOVE else 2
-    ]
-    part = DAY_PARTS[lang][part_of(facts.busiest_hour)]
+        return words.no_day
     event = ""
-    if facts.event in EVENTS[lang]:
-        clock = f"{facts.event_minute // 60:02d}:{facts.event_minute % 60:02d}"
-        event = f"; {EVENTS[lang][facts.event]} {'at' if lang == 'en' else 'om'} {clock}"
-    if lang == "en":
-        weekend = " weekend" if facts.weekend else ""
-        start = "So far, a" if facts.partial else "A"
-        return f"{start} {mood}{weekend} {part}{event}."
-    weekend = "weekend" if facts.weekend else ""
-    start = "Tot nu toe een" if facts.partial else "Een"
-    return f"{start} {mood} {weekend}{part}{event}."
+    if facts.event in words.events:
+        event = words.event_frame.format(
+            event=words.events[facts.event], clock=_clock_of(facts.event_minute)
+        )
+    frame = words.weekend_day_frame if facts.weekend else words.day_frame
+    return frame.format(
+        start=words.start_partial if facts.partial else words.start_whole,
+        mood=words.day_moods[mood_of(facts)],
+        part=words.day_parts[part_of(facts.busiest_hour)],
+        event=event,
+    )
 
 
 def track_description(style_key: str, facts: DayFacts | None, lang: str = DEFAULT_LANGUAGE) -> str:
@@ -815,9 +754,9 @@ def track_description(style_key: str, facts: DayFacts | None, lang: str = DEFAUL
     :param facts: What the day was like.
     :param lang: `en` or `nl`.
     """
-    lang = lang if lang in LANGUAGES else DEFAULT_LANGUAGE
-    key = style_key if style_key in HISTORY[lang] else "ambient"
-    return f"{HISTORY[lang][key]} {DRIVES[lang][key]} {day_line(facts, lang)}"
+    words = BANKS.get(lang, EN)
+    style = words.styles.get(style_key, words.styles[DEFAULT_STYLE])
+    return f"{style.history} {style.drive} {day_line(facts, lang)}"
 
 
 def album_review(room: str, day: date, facts: DayFacts | None, lang: str = DEFAULT_LANGUAGE) -> str:
@@ -829,26 +768,118 @@ def album_review(room: str, day: date, facts: DayFacts | None, lang: str = DEFAU
     :param facts: What the day was like.
     :param lang: `en` or `nl`.
     """
-    lang = lang if lang in LANGUAGES else DEFAULT_LANGUAGE
-    words = BANKS[lang]
-    name = words.weekdays[day.weekday()]
+    words = BANKS.get(lang, EN)
     kind = ""
     if facts is not None and facts.has_data:
-        mood = DAY_MOODS[lang][
-            0 if facts.intensity < QUIET_BELOW else 1 if facts.intensity < BUSY_ABOVE else 2
-        ]
-        part = DAY_PARTS[lang][part_of(facts.busiest_hour)]
-        kind = (
-            f" A {mood} day, liveliest in the {part}."
-            if lang == "en"
-            else f" Een {mood} dag, het levendigst in de {part}."
+        kind = words.review_kind.format(
+            mood=words.day_moods[mood_of(facts)], part=words.day_parts[part_of(facts.busiest_hour)]
         )
-    if lang == "en":
-        return (
-            f"{room} on {name} {day.isoformat()}, the day as generative music.{kind} "
-            "Every piece is steered by what the house did."
-        )
-    return (
-        f"{room} op {name.lower()} {day.isoformat()}, de dag als generatieve muziek.{kind} "
-        "Elk stuk wordt gestuurd door wat het huis deed."
+    return words.review_frame.format(
+        room=room, weekday=words.weekday_names[day.weekday()], date=day.isoformat(), kind=kind
     )
+
+
+def _noun_of(item: Series) -> str:
+    """Return the kind of thing a series is, in words that name no one and nothing in particular."""
+    kind = item.kind
+    simple = {
+        VoiceKind.DISHWASHER: NOUN_DISHWASHER,
+        VoiceKind.DRUM: NOUN_LAUNDRY,
+        VoiceKind.HOB: NOUN_HOB,
+        VoiceKind.DRONE: NOUN_HUM,
+        VoiceKind.CHORD: NOUN_LIGHT,
+        VoiceKind.MEDIA: NOUN_MEDIA,
+        VoiceKind.COVER: NOUN_BLINDS,
+        VoiceKind.PHASE: NOUN_CYCLE,
+        VoiceKind.BLIP: NOUN_SIGNAL,
+    }
+    if kind in simple:
+        return simple[kind]
+    if kind == VoiceKind.PLUCK:
+        text = f"{item.entity_id} {item.name}".lower()
+        if item.device_class == DEVICE_CLASS_WINDOW or any(w in text for w in WINDOW_WORDS):
+            return NOUN_WINDOW
+        if item.is_opening:
+            return NOUN_DOOR
+        return NOUN_MOTION if item.is_motion else NOUN_SIGNAL
+    return ""
+
+
+def _event_times(item: Series, noun: str) -> np.ndarray:
+    """Return when something of a kind happened: appliance runs, hob and cycle changes, openings."""
+    if noun in APPLIANCES:
+        return item.crossings(0.0, DAY_SECONDS, RUN_LEVEL, rising=True)
+    if noun in CHANGING_NOUNS:
+        return item.changes(0.0, DAY_SECONDS, CYCLE_CHANGE)
+    if noun == NOUN_HUM:
+        return np.empty(0)
+    if item.kind in BINARY_KINDS or noun in OPENING_NOUNS:
+        return item.onsets(0.0, DAY_SECONDS)
+    return item.changes(0.0, DAY_SECONDS, OTHER_CHANGE)
+
+
+def _climate(series: Sequence[Series]) -> str:
+    """Return warm or cool when the temperature of the day says so."""
+    values = [float(item.values.mean()) for item in series if item.kind == VoiceKind.TEMPERATURE]
+    if not values:
+        return ""
+    mean = sum(values) / len(values)
+    if mean > FAHRENHEIT_ABOVE:
+        mean = (mean - FAHRENHEIT_OFFSET) / FAHRENHEIT_PER_CELSIUS
+    if mean >= WARM_C:
+        return CLIMATE_WARM
+    return CLIMATE_COOL if mean <= COOL_C else ""
+
+
+def _priority(noun: str, hour: int) -> int:
+    """Return how notable an event is as the event of a day: 3 odd, 2 an appliance, 1 a hob or a door, 0 not."""
+    if (hour >= NIGHT_START or hour < NIGHT_END) and noun in ODD_AT_NIGHT:
+        return PRIORITY_ODD
+    if noun in APPLIANCES:
+        return PRIORITY_APPLIANCE
+    return PRIORITY_NOTABLE if noun in NOTABLE_NOUNS else PRIORITY_NONE
+
+
+def _fields(template: str) -> set[str]:
+    """Return the names of the slots of a template."""
+    return {name for _, name, _, _ in string.Formatter().parse(template) if name}
+
+
+def _slots(
+    words: Words,
+    facts: DayFacts,
+    rng: random.Random,
+    room: str,
+    style: StyleWords,
+) -> dict[str, str]:
+    """Return the words that a title of a day can use; a slot with nothing to say is missing."""
+    slots: dict[str, str] = {
+        "adj": rng.choice(style.adjectives),
+        "noun": rng.choice(style.nouns),
+        "weekday": words.weekdays[facts.weekday % DAYS_PER_WEEK],
+    }
+    bare, at = rng.choice(words.parts[part_of(facts.busiest_hour)])
+    slots["part"], slots["at_part"] = bare, at
+    slots["mood"] = words.moods[mood_of(facts)]
+    if room and len(room) <= MAX_ROOM:
+        slots["room"] = room
+    if facts.thing in words.things:
+        noun, article = rng.choice(words.things[facts.thing])
+        slots["thing"] = noun
+        slots["the_thing"] = f"{article} {noun}"
+    if facts.event in words.things:
+        slots["event_thing"] = words.things[facts.event][0][0]
+        slots["time"] = _clock_of(facts.event_minute)
+    if facts.climate in words.climates:
+        slots["climate"] = words.climates[facts.climate]
+    return slots
+
+
+def _clock_of(minute: int) -> str:
+    """Return a minute of the day as a clock time, such as 03:12."""
+    return f"{minute // MINUTES_PER_HOUR:02d}:{minute % MINUTES_PER_HOUR:02d}"
+
+
+def _rng(seed: str, salt: str) -> random.Random:
+    """Return a generator that is the same for the same text."""
+    return random.Random(stable_hash(salt, seed))  # noqa: S311 - not for security

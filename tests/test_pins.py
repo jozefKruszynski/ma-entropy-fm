@@ -5,6 +5,7 @@ import gzip
 import json
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -12,14 +13,17 @@ import numpy as np
 import pytest
 
 from entropy_fm.audiocache import AudioCache, cache_key
-from entropy_fm.const import ENGINE_VERSION
+from entropy_fm.constants import ENGINE_VERSION
 from entropy_fm.pins import (
+    BROKEN_SUFFIX,
+    INDEX_FILE,
     Membership,
     Pin,
     PinStore,
     entity_from_dict,
     entity_to_dict,
     load_membership,
+    safe_name,
     save_membership,
     write_atomic,
 )
@@ -39,6 +43,19 @@ def _pin(area: str = "kitchen", day: date = DAY, *, complete: bool = True) -> Pi
         {"entity": {}, "data": {"sun.sun": {"t": [0.0], "v": [1.0]}}},
         complete=complete,
     )
+
+
+def test_a_name_of_only_dots_is_never_a_folder_name(tmp_path: Path) -> None:
+    """Separators and dots cannot climb out of the pin folder."""
+    assert [safe_name(name) for name in ("..", ".", "...", "", "a/../b")] == [
+        "_",
+        "_",
+        "_",
+        "_",
+        "a_.._b",
+    ]
+    store = PinStore(tmp_path / "root")
+    assert store.path("..", date(2026, 11, 10)).parent == tmp_path / "root" / "pins" / "_"
 
 
 def test_a_pin_is_written_compressed_read_back_and_deleted(tmp_path: Path) -> None:
@@ -76,6 +93,68 @@ def test_a_damaged_pin_counts_as_missing_and_is_removed(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(gzip.compress(b'{"format": 99}'))
     assert store.read("kitchen", DAY) is None
+
+
+def test_a_pin_of_an_unknown_format_stays_on_disk(tmp_path: Path) -> None:
+    """A newer or older engine may own the file: it may be the only copy of a purged day."""
+    store = PinStore(tmp_path)
+    path = store.path("kitchen", DAY)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(gzip.compress(b'{"format": 99}'))
+    assert store.read("kitchen", DAY) is None
+    assert path.exists()
+    path.write_bytes(gzip.compress(b'{"format": 1}'))
+    assert store.read("kitchen", DAY) is None
+    assert path.exists()
+
+
+def test_a_corrupt_gzip_pin_is_deleted(tmp_path: Path) -> None:
+    """A file that is gzip but not JSON is damaged, not foreign: it goes."""
+    store = PinStore(tmp_path)
+    path = store.path("kitchen", DAY)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(gzip.compress(b"not json at all"))
+    assert store.read("kitchen", DAY) is None
+    assert not path.exists()
+
+
+def test_a_broken_library_file_is_moved_aside(tmp_path: Path) -> None:
+    """The membership is the only record of what was hearted: a broken file is kept as a backup."""
+    (tmp_path / INDEX_FILE).write_text("{not json")
+    assert load_membership(tmp_path).followed == {}
+    assert not (tmp_path / INDEX_FILE).exists()
+    assert (tmp_path / (INDEX_FILE + BROKEN_SUFFIX)).read_text() == "{not json"
+    assert load_membership(tmp_path).followed == {}
+
+
+def test_a_pin_that_cannot_be_read_stays_and_a_foreign_file_goes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read error is not proof that the pin is bad: it may be the only copy of a purged day."""
+    store = PinStore(tmp_path)
+    store.write(_pin())
+    path = store.path("kitchen", DAY)
+
+    def denied(_self: Path) -> bytes:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    assert store.read("kitchen", DAY) is None
+    assert path.exists()
+    monkeypatch.undo()
+    path.write_bytes(b"not gzip at all")
+    assert store.read("kitchen", DAY) is None
+    assert not path.exists()
+
+
+def test_writers_of_one_file_at_once_do_not_share_a_temporary_file(tmp_path: Path) -> None:
+    """Threads writing the same file each get their own temporary file and none fails."""
+    target = tmp_path / "sub" / "file.bin"
+    writers = 16
+    with ThreadPoolExecutor(writers) as pool:
+        list(pool.map(lambda n: write_atomic(target, bytes([n]) * 1000), range(writers)))
+    assert len(set(target.read_bytes())) == 1
+    assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
 
 
 def test_an_atomic_write_leaves_nothing_half_done(
@@ -144,7 +223,7 @@ async def test_a_track_is_recorded_hit_missed_and_corrupt_entries_are_dropped(
     key = cache_key("a")
     assert cache.get(key) is None
     assert cache.misses == 1
-    recorder = cache.recorder(key)
+    recorder = await cache.recorder(key)
     assert recorder is not None
     for _ in range(3):
         await recorder.feed(_wav_like(1.0))
@@ -154,7 +233,7 @@ async def test_a_track_is_recorded_hit_missed_and_corrupt_entries_are_dropped(
     assert path is not None
     assert path.read_bytes()[:4] == b"OggS"
     assert cache.hits == 1
-    assert cache.recorder(key) is None
+    assert await cache.recorder(key) is None
     # a half written file under the real name is a miss and is deleted
     path.write_bytes(path.read_bytes()[: len(path.read_bytes()) // 2])
     assert cache.get(key) is None
@@ -164,18 +243,37 @@ async def test_a_track_is_recorded_hit_missed_and_corrupt_entries_are_dropped(
     assert not path.exists()
 
 
+async def test_a_track_is_recorded_by_one_recorder_at_a_time_each_with_its_own_file(
+    tmp_path: Path,
+) -> None:
+    """A second recorder of a key that is being recorded is refused until the first one is done."""
+    cache = AudioCache(tmp_path / "entropy_fm", 50)
+    key = cache_key("b")
+    first = await cache.recorder(key)
+    assert first is not None
+    assert await cache.recorder(key) is None
+    other = await cache.recorder(cache_key("c"))
+    assert other is not None
+    assert other.temp != first.temp
+    assert first.temp.suffix == ".part"
+    await first.abort()
+    again = await cache.recorder(key)
+    assert again is not None
+    assert again.temp != first.temp
+
+
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 async def test_an_aborted_recording_leaves_no_entry_and_no_temporary_file(tmp_path: Path) -> None:
     """A track that is stopped halfway never becomes an entry."""
     cache = AudioCache(tmp_path / "cache", 50)
-    recorder = cache.recorder("stopped")
+    recorder = await cache.recorder("stopped")
     assert recorder is not None
     await recorder.feed(_wav_like(1.0))
     await recorder.abort()
     assert list((tmp_path / "cache").iterdir()) == []
     assert cache.get("stopped") is None
     # nothing was fed: a commit makes no entry either
-    empty = cache.recorder("empty")
+    empty = await cache.recorder("empty")
     assert empty is not None
     assert not await empty.commit()
     assert list((tmp_path / "cache").iterdir()) == []
@@ -188,7 +286,7 @@ async def test_the_least_recently_used_entries_go_first(tmp_path: Path) -> None:
     keys = []
     for index in range(4):
         key = cache_key("entry", index)
-        recorder = cache.recorder(key)
+        recorder = await cache.recorder(key)
         assert recorder is not None
         await recorder.feed(
             np.random.default_rng(index).integers(-3000, 3000, 44100 * 8, dtype="<i2").tobytes()
@@ -208,10 +306,10 @@ async def test_the_least_recently_used_entries_go_first(tmp_path: Path) -> None:
     assert cache.size() <= cache.limit
 
 
-def test_a_cache_of_zero_is_off(tmp_path: Path) -> None:
+async def test_a_cache_of_zero_is_off(tmp_path: Path) -> None:
     """With a limit of 0 nothing is recorded and nothing is found."""
     cache = AudioCache(tmp_path / "cache", 0)
     assert not cache.enabled
-    assert cache.recorder("x") is None
+    assert await cache.recorder("x") is None
     assert cache.get("x") is None
     assert asyncio.get_event_loop_policy() is not None

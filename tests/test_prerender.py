@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from entropy_fm import EntropyFMProvider, prerender
-from entropy_fm.const import CONF_AUDIO_CACHE_MB, CONF_KEEP_ROOMS, CONF_PRERENDER, CONF_STYLES
+from entropy_fm.constants import CONF_AUDIO_CACHE_MB, CONF_KEEP_ROOMS, CONF_STYLES
 from entropy_fm.library import TrackRef, album_id, track_id
 from music_assistant.mass import MusicAssistant
 from tests.test_library_provider import _quiet
@@ -23,59 +23,49 @@ ROOMS = ["_house", "kitchen", "living_room"]
 STYLES = ["ambient", "lofi", "glitch"]
 
 
-def _choose(mode: str, **kwargs: Any) -> list[tuple[str, str]]:
+def _choose(**kwargs: Any) -> list[tuple[str, str]]:
     found = prerender.choose_tracks(
-        mode,
         DAY,
         rooms=kwargs.pop("rooms", ROOMS),
         pinned_rooms=kwargs.pop("pinned_rooms", []),
         offered=kwargs.pop("offered", STYLES),
-        default_style=kwargs.pop("default_style", "ambient"),
         **kwargs,
     )
     assert all(ref.day == DAY and ref.target == "_scape" for ref in found)
     return [(ref.area_id, ref.style) for ref in found]
 
 
-def test_nothing_is_chosen_when_it_is_off_or_nothing_is_pinned() -> None:
-    """Off renders nothing, and so does pinned rooms when no room is pinned."""
-    assert _choose("off", pinned_rooms=["kitchen"]) == []
-    assert _choose("pinned") == []
-    assert _choose("nonsense", pinned_rooms=["kitchen"]) == []
+def test_nothing_is_chosen_when_nothing_is_pinned_or_no_style_is_offered() -> None:
+    """Without a pinned room, album or track nothing is rendered, and without a style neither."""
+    assert _choose() == []
+    assert _choose(pinned_rooms=["kitchen"], offered=[]) == []
 
 
-def test_pinned_rooms_get_every_offered_style_with_the_default_one_first() -> None:
-    """A kept room is rendered in the default style first and then in each style that is offered."""
-    assert _choose("pinned", pinned_rooms=["kitchen"]) == [
+def test_pinned_rooms_get_every_offered_style_with_the_first_one_first() -> None:
+    """A kept room is rendered in the first style that is offered and then in each style that is offered."""
+    assert _choose(pinned_rooms=["kitchen"]) == [
         ("kitchen", "ambient"),
         ("kitchen", "lofi"),
         ("kitchen", "glitch"),
     ]
     # a room that is not there any more is not asked for
-    assert _choose("pinned", pinned_rooms=["attic"]) == []
+    assert _choose(pinned_rooms=["attic"]) == []
 
 
-def test_all_rooms_get_the_default_style_and_pinned_rooms_all_of_them() -> None:
-    """With all rooms, the whole house and every room come in the default style before any other style."""
-    chosen = _choose("all", pinned_rooms=["kitchen"], offered=["lofi", "ambient"])
-    assert chosen[:3] == [("_house", "ambient"), ("kitchen", "ambient"), ("living_room", "ambient")]
-    assert chosen[3:] == [("kitchen", "lofi")]
-
-
-def test_the_default_style_is_rendered_even_when_it_is_not_in_the_offered_list() -> None:
-    """The library lists the default style whatever is offered, so it is rendered."""
-    assert _choose(
-        "pinned", pinned_rooms=["kitchen"], offered=["lofi"], default_style="ritual"
-    ) == [
-        ("kitchen", "ritual"),
+def test_only_what_is_pinned_is_rendered_and_the_first_style_leads() -> None:
+    """Rooms that are not pinned are left alone, and the first style that is offered is rendered first."""
+    chosen = _choose(pinned_rooms=["kitchen", "living_room"], offered=["lofi", "ambient"])
+    assert chosen == [
         ("kitchen", "lofi"),
+        ("living_room", "lofi"),
+        ("kitchen", "ambient"),
+        ("living_room", "ambient"),
     ]
 
 
 def test_what_was_added_to_the_library_for_that_day_is_pinned_too() -> None:
     """An album added for the day gets every style, a track only its own, and other days are ignored."""
     chosen = _choose(
-        "pinned",
         added_albums=[album_id("living_room", DAY), album_id("kitchen", DAY - timedelta(days=1))],
         added_tracks=[
             track_id("kitchen", DAY, style="glitch"),
@@ -147,7 +137,6 @@ async def _prepared(
 
     monkeypatch.setattr(provider, "_build_score", no_score)
     monkeypatch.setattr(prerender, "YIELD_SECONDS", 0.0)
-    monkeypatch.setattr(prerender, "POLL_SECONDS", 0.02)
     settings: dict[str, object] = {"day_character": False, **values}
     _quiet(provider, monkeypatch, **settings)
     provider.audio_cache.limit = int(settings.get(CONF_AUDIO_CACHE_MB, 500)) * 1_000_000  # type: ignore[call-overload]
@@ -167,11 +156,7 @@ async def test_the_last_day_of_pinned_rooms_is_rendered_into_the_cache_once(
         mass,
         fake_hass,
         monkeypatch,
-        **{
-            CONF_PRERENDER: "pinned",
-            CONF_KEEP_ROOMS: ["kitchen"],
-            CONF_STYLES: ["ambient", "lofi"],
-        },
+        **{CONF_KEEP_ROOMS: ["kitchen"], CONF_STYLES: ["ambient", "lofi"]},
     )
     day = await _yesterday(provider)
     assert await provider._prerender_yesterday() == 2  # noqa: SLF001
@@ -187,38 +172,13 @@ async def test_the_last_day_of_pinned_rooms_is_rendered_into_the_cache_once(
     assert len(played) == 2
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
-async def test_all_rooms_renders_the_default_style_of_every_room_and_skips_the_cached(
+async def test_nothing_is_rendered_when_the_cache_is_off(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The whole house and each room come in the default style; a track that is cached already is skipped."""
+    """A cache of 0 megabytes turns the pre-render off too."""
     provider, played = await _prepared(
-        mass, fake_hass, monkeypatch, **{CONF_PRERENDER: "all", CONF_STYLES: ["ambient", "lofi"]}
+        mass, fake_hass, monkeypatch, **{CONF_KEEP_ROOMS: ["kitchen"]}
     )
-    day = await _yesterday(provider)
-    today = (await provider._now()).date()  # noqa: SLF001
-    rooms = set(provider._artist_names(await provider._catalog_all()))  # noqa: SLF001
-    cached = TrackRef("kitchen", day, "_scape", "ambient")
-    key = provider._audio_key(cached, today)  # noqa: SLF001
-    assert key is not None
-    recorder = provider.audio_cache.recorder(key)
-    assert recorder is not None
-    await recorder.feed(bytes(44100 * 4 * 2))
-    assert await recorder.commit()
-    assert await provider._prerender_yesterday() == len(rooms) - 1  # noqa: SLF001
-    assert {ref.area_id for ref in played} == rooms - {"kitchen"}
-    assert {ref.style for ref in played} == {"ambient"}
-
-
-async def test_nothing_is_rendered_when_it_is_off_or_the_cache_is_off(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Off does nothing, and so does a cache of 0 megabytes."""
-    provider, played = await _prepared(
-        mass, fake_hass, monkeypatch, **{CONF_PRERENDER: "off", CONF_KEEP_ROOMS: ["kitchen"]}
-    )
-    assert await provider._prerender_yesterday() == 0  # noqa: SLF001
-    _quiet(provider, monkeypatch, **{CONF_PRERENDER: "all", CONF_KEEP_ROOMS: ["kitchen"]})
     provider.audio_cache.limit = 0
     assert not provider.audio_cache.enabled
     assert await provider._prerender_yesterday() == 0  # noqa: SLF001
@@ -230,7 +190,7 @@ async def test_it_stops_when_the_cache_has_no_room_instead_of_making_room(
 ) -> None:
     """A cache that is too small for a track is left alone: nothing is rendered and nothing is evicted."""
     provider, played = await _prepared(
-        mass, fake_hass, monkeypatch, **{CONF_PRERENDER: "all", CONF_AUDIO_CACHE_MB: 1}
+        mass, fake_hass, monkeypatch, **{CONF_KEEP_ROOMS: ["kitchen"], CONF_AUDIO_CACHE_MB: 1}
     )
     provider.audio_cache.root.mkdir(parents=True, exist_ok=True)
     old = provider.audio_cache.root / ("a" * 40 + ".opus")
@@ -246,14 +206,14 @@ async def test_it_waits_while_a_track_is_playing_and_goes_on_afterwards(
 ) -> None:
     """With a live stream the pre-render renders nothing; when the stream ends it carries on."""
     provider, played = await _prepared(
-        mass, fake_hass, monkeypatch, **{CONF_PRERENDER: "pinned", CONF_KEEP_ROOMS: ["kitchen"]}
+        mass, fake_hass, monkeypatch, **{CONF_KEEP_ROOMS: ["kitchen"]}
     )
-    provider._streams = 1  # noqa: SLF001
+    provider._stream_started()  # noqa: SLF001
     task = asyncio.create_task(provider._prerender_yesterday())  # noqa: SLF001
     await asyncio.sleep(0.5)
     assert not task.done()
     assert played == []
-    provider._streams = 0  # noqa: SLF001
+    provider._stream_ended()  # noqa: SLF001
     assert await asyncio.wait_for(task, 60) > 0
     assert played
 
@@ -267,7 +227,7 @@ async def test_it_pauses_in_the_middle_of_a_track_and_a_live_stream_counts(
         mass,
         fake_hass,
         monkeypatch,
-        **{CONF_PRERENDER: "pinned", CONF_KEEP_ROOMS: ["kitchen"], CONF_STYLES: ["ambient"]},
+        **{CONF_KEEP_ROOMS: ["kitchen"], CONF_STYLES: ["ambient"]},
     )
     chunks_seen: list[int] = []
     module = sys.modules[type(provider).__module__]
@@ -276,7 +236,7 @@ async def test_it_pauses_in_the_middle_of_a_track_and_a_live_stream_counts(
         for index in range(6):
             chunks_seen.append(index)
             if index == 1:
-                provider._streams += 1  # noqa: SLF001
+                provider._stream_started()  # noqa: SLF001
             yield bytes(44100 * 4)
 
     monkeypatch.setattr(module, "render_pcm", slow)
@@ -286,7 +246,7 @@ async def test_it_pauses_in_the_middle_of_a_track_and_a_live_stream_counts(
     assert held == 2
     await asyncio.sleep(0.3)
     assert len(chunks_seen) == held
-    provider._streams = 0  # noqa: SLF001
+    provider._stream_ended()  # noqa: SLF001
     await asyncio.wait_for(task, 60)
     assert len(chunks_seen) >= 6
     assert played == []
@@ -311,9 +271,43 @@ async def test_a_live_stream_is_counted_while_it_renders(
     assert provider._streams == 0  # noqa: SLF001
 
 
+async def test_the_wait_for_a_stream_ends_with_it_and_gives_up_when_it_does_not(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-render goes on at once when the last stream ends, and drops the track when one never does."""
+    provider, _ = await _prepared(mass, fake_hass, monkeypatch)
+    assert await provider._prerender_wait()  # noqa: SLF001
+    provider._stream_started()  # noqa: SLF001
+    provider._stream_started()  # noqa: SLF001
+    waiting = asyncio.create_task(provider._prerender_wait())  # noqa: SLF001
+    await asyncio.sleep(0.05)
+    provider._stream_ended()  # noqa: SLF001
+    await asyncio.sleep(0.05)
+    assert not waiting.done()
+    provider._stream_ended()  # noqa: SLF001
+    assert await asyncio.wait_for(waiting, 5)
+    # the provider has its own copy of the module, as the server loads it
+    monkeypatch.setattr(sys.modules[type(provider).__module__].prerender, "GIVE_UP_SECONDS", 0.05)
+    provider._stream_started()  # noqa: SLF001
+    assert not await provider._prerender_wait()  # noqa: SLF001
+    provider._stream_ended()  # noqa: SLF001
+
+
 def test_the_module_keeps_a_sensible_pace() -> None:
     """The pre-render never rests longer than it works, and gives up on a stream that never ends."""
     assert 0.0 < prerender.YIELD_SECONDS < 1.0
     assert prerender.GIVE_UP_SECONDS >= 600.0
     assert prerender.STARTUP_DELAY_SECONDS > 60.0
     assert datetime.now(UTC).tzinfo is not None
+
+
+def test_the_settings_text_names_the_share_of_the_cache_that_is_kept_free() -> None:
+    """The description of the cache size says the share that `fits` uses."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    folder = Path(prerender.__file__).parent
+    share = f"{round(prerender.CACHE_SHARE * 100)} "
+    for name in ("strings.json", "translations/nl.json"):
+        entry = json.loads((folder / name).read_text())["config_entries"]["audio_cache_mb"]
+        assert share in entry["description"], name

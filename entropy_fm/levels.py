@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .score import CR
+from .drums import DRUM_PREFIX
+from .score import CURVE_RATE
 from .voices import REF_VELOCITY, VELOCITY_POWER
 
 if TYPE_CHECKING:
@@ -149,6 +150,23 @@ HIT_ENERGY: dict[str, float] = {
 }
 # a note keeps sounding this long after its key goes up, for the estimate of the loudness
 TAIL_SECONDS = 0.8
+# the velocity that `HIT_ENERGY` was measured at, the energy of a hit that is not in it, and how long a hit counts for
+HIT_ENERGY_VELOCITY = 0.8
+DEFAULT_HIT_ENERGY = 0.002
+HIT_SPAN_SECONDS = 0.25
+# the energy of a voice that is not in `VOICE_ENERGY`, and the least that a note has
+DEFAULT_VOICE_ENERGY = (0.01, 0.01)
+MIN_NOTE_ENERGY = 1e-6
+# a texture is this share of its gain in amplitude
+TEXTURE_AMPLITUDE_SHARE = 0.5
+POWER_DB_FACTOR = 10.0
+MEAN_SQUARE_FLOOR = 1e-9
+# the gain that holds the level is kept within these dB
+GAIN_MIN_DB = -9.0
+GAIN_MAX_DB = 12.0
+# the second, narrower smoothing of the gain, in seconds
+GAIN_SMOOTH_SECONDS = 3.0
+SMOOTH_SECONDS = 8.0
 
 
 def trim_db(style: str, layer: str) -> float:
@@ -161,7 +179,9 @@ def trim_db(style: str, layer: str) -> float:
     return TRIMS.get(style, {}).get(layer, 0.0)
 
 
-def feed_forward(score: Score, target_db: float, smooth_seconds: float = 8.0) -> np.ndarray:
+def feed_forward(
+    score: Score, target_db: float, smooth_seconds: float = SMOOTH_SECONDS
+) -> np.ndarray:
     """
     Estimate the loudness of a score from its notes and return the gain in dB, a value every tenth of a second, that holds it.
 
@@ -174,37 +194,44 @@ def feed_forward(score: Score, target_db: float, smooth_seconds: float = 8.0) ->
     :param target_db: The mean square level to hold, in dB (RMS dBFS).
     :param smooth_seconds: The width of the smoothing of the estimate.
     """
-    count = score.length * CR + 1
+    count = score.length * CURVE_RATE + 1
     rate = np.zeros(count + 1)
     for note in score.notes:
         layer = score.layers[note.layer]
-        if note.voice.startswith("drum:"):
-            base = HIT_ENERGY.get(note.voice[5:], 0.002) * (note.vel / 0.8) ** 2
-            span = 0.25
+        if note.voice.startswith(DRUM_PREFIX):
+            base = (
+                HIT_ENERGY.get(note.voice[len(DRUM_PREFIX) :], DEFAULT_HIT_ENERGY)
+                * (note.vel / HIT_ENERGY_VELOCITY) ** 2
+            )
+            span = HIT_SPAN_SECONDS
         else:
-            a, b = VOICE_ENERGY.get(note.voice, (0.01, 0.01))
-            base = max(a + b * note.dur, 1e-6) * (note.vel / REF_VELOCITY) ** (2.0 * VELOCITY_POWER)
+            a, b = VOICE_ENERGY.get(note.voice, DEFAULT_VOICE_ENERGY)
+            base = max(a + b * note.dur, MIN_NOTE_ENERGY) * (note.vel / REF_VELOCITY) ** (
+                2.0 * VELOCITY_POWER
+            )
             span = note.dur + TAIL_SECONDS
         present = layer.gain
         if layer.presence is not None:
-            present *= float(layer.presence[min(int(note.t * CR), len(layer.presence) - 1)])
-        first = int(note.t * CR)
-        last = min(int((note.t + span) * CR) + 1, count)
+            present *= float(layer.presence[min(int(note.t * CURVE_RATE), len(layer.presence) - 1)])
+        first = int(note.t * CURVE_RATE)
+        last = min(int((note.t + span) * CURVE_RATE) + 1, count)
         if first >= count:
             continue
         rate[first] += base * present**2 / span
         rate[last] -= base * present**2 / span
     mean_square = np.cumsum(rate)[:count]
     for texture in score.textures:
-        mean_square = mean_square + (texture.gain * 0.5) ** 2
-    width = int(smooth_seconds * CR)
+        mean_square = mean_square + (texture.gain * TEXTURE_AMPLITUDE_SHARE) ** 2
+    width = int(smooth_seconds * CURVE_RATE)
     kernel = np.hanning(width * 2 + 1)
     padded = np.concatenate(
         (np.full(width, mean_square[0]), mean_square, np.full(width, mean_square[-1]))
     )
     smooth = np.convolve(padded, kernel / kernel.sum(), mode="same")[width:-width]
-    gain = np.clip(target_db - 10.0 * np.log10(smooth + 1e-9), -9.0, 12.0)
-    narrow = int(3.0 * CR)
+    gain = np.clip(
+        target_db - POWER_DB_FACTOR * np.log10(smooth + MEAN_SQUARE_FLOOR), GAIN_MIN_DB, GAIN_MAX_DB
+    )
+    narrow = int(GAIN_SMOOTH_SECONDS * CURVE_RATE)
     padded = np.concatenate((np.full(narrow, gain[0]), gain, np.full(narrow, gain[-1])))
     kernel = np.hanning(narrow * 2 + 1)
     return np.asarray(np.convolve(padded, kernel / kernel.sum(), mode="same")[narrow:-narrow])

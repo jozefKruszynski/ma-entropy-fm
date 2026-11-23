@@ -1,29 +1,33 @@
 """
 The small generative tools that the four styles share.
 
-Weighted choices, Markov chains, random walks and the curves of anomaly events. Everything
-takes a numpy generator.
+Weighted choices, Markov chains, random walks and the curves of anomaly events.
 
-Everything takes a numpy generator that the plan seeds from the room, the day and the style, so a piece is the same
-every time it is made.
+The generator is seeded by the plan from the room, the day and the style, so a piece is the same every time it
+is made.
 
 The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .score import CR
+from .score import CURVE_RATE
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .plan import Plan
 
-T = TypeVar("T")
+# an anomaly lifts the strength that its curves are drawn with by this much, up to 1
+EVENT_STRENGTH_LIFT = 0.3
+# the rise of a dip, in seconds
+DIP_RISE_SECONDS = 0.6
+# the walk of a block is made at this step, in seconds, and drawn out to every value
+BLOCK_WALK_STEP_SECONDS = 2.0
 
 
 def weighted[T](rng: np.random.Generator, items: Sequence[T], weights: Sequence[float]) -> T:
@@ -67,9 +71,18 @@ def walk(rng: np.random.Generator, count: int, tau: float, amplitude: float) -> 
 def block_walk(
     rng: np.random.Generator, seconds: int, tau_s: float, amplitude: float
 ) -> np.ndarray:
-    """Return a slow random walk with CR values a second."""
-    coarse = walk(rng, max(int(seconds / 2.0) + 2, 2), tau_s / 2.0, amplitude)
-    return np.interp(np.arange(seconds * CR) / (2.0 * CR), np.arange(len(coarse)), coarse)
+    """Return a slow random walk with CURVE_RATE values a second."""
+    coarse = walk(
+        rng,
+        max(int(seconds / BLOCK_WALK_STEP_SECONDS) + 2, 2),
+        tau_s / BLOCK_WALK_STEP_SECONDS,
+        amplitude,
+    )
+    return np.interp(
+        np.arange(seconds * CURVE_RATE) / (BLOCK_WALK_STEP_SECONDS * CURVE_RATE),
+        np.arange(len(coarse)),
+        coarse,
+    )
 
 
 def ramp(count: int, start: int, end: int, up: int, down: int) -> np.ndarray:
@@ -86,12 +99,23 @@ def dips(plan: Plan, depth: float = 0.85, hold: float = 0.7, back: float = 3.5) 
     Return a multiplier of a cutoff that closes like a tape slowing down and opens again, at each anomaly.
 
     It is a filter, never a pitch: 1 when nothing happens, down to `1 - depth` at the dip.
+
+    :param plan: The plan, whose events are the anomalies.
+    :param depth: How far the cutoff closes at the deepest dip, a share of it.
+    :param hold: Seconds that the dip stays closed.
+    :param back: Seconds that it takes to open again.
     """
     out = np.ones(plan.count)
     for second, strength in plan.events:
-        start = int(second * CR)
-        shape = ramp(plan.count, start, start + int(hold * CR), int(0.6 * CR), int(back * CR))
-        out = out * (1.0 - depth * min(strength + 0.3, 1.0) * shape)
+        start = int(second * CURVE_RATE)
+        shape = ramp(
+            plan.count,
+            start,
+            start + int(hold * CURVE_RATE),
+            int(DIP_RISE_SECONDS * CURVE_RATE),
+            int(back * CURVE_RATE),
+        )
+        out = out * (1.0 - depth * min(strength + EVENT_STRENGTH_LIFT, 1.0) * shape)
     return out
 
 
@@ -99,23 +123,13 @@ def swells(plan: Plan, rise: float = 5.0, fall: float = 10.0, hold: float = 2.0)
     """Return a curve that swells to 1 at each anomaly and falls back to 0."""
     out = np.zeros(plan.count)
     for second, strength in plan.events:
-        start = int((second - rise / 2.0) * CR)
-        shape = ramp(plan.count, start, start + int(hold * CR), int(rise * CR), int(fall * CR))
-        out = np.maximum(out, shape * min(strength + 0.3, 1.0))
+        start = int((second - rise / 2.0) * CURVE_RATE)
+        shape = ramp(
+            plan.count,
+            start,
+            start + int(hold * CURVE_RATE),
+            int(rise * CURVE_RATE),
+            int(fall * CURVE_RATE),
+        )
+        out = np.maximum(out, shape * min(strength + EVENT_STRENGTH_LIFT, 1.0))
     return out
-
-
-def event_kinds(plan: Plan, kinds: Sequence[str], weights: Sequence[float]) -> list[str]:
-    """Choose what each anomaly of the piece does, from a style's list of textural events."""
-    rng = plan.rng("event kinds")
-    return [weighted(rng, kinds, weights) for _ in plan.events]
-
-
-def at_times(plan: Plan, curve: np.ndarray, times: np.ndarray) -> np.ndarray:  # noqa: ARG001
-    """Return the values of a curve at several seconds of the piece."""
-    return np.interp(times * CR, np.arange(len(curve)), curve)
-
-
-def vel_scale(value: float, low: float, high: float) -> float:
-    """Return a velocity between `low` and `high` for a value from 0 to 1."""
-    return float(low + (high - low) * min(max(value, 0.0), 1.0))

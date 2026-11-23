@@ -239,7 +239,7 @@ def build_day(index: int) -> dict[str, list[Series]]:
         "bathroom": [],
     }
 
-    def add(  # noqa: PLR0913, PLR0917
+    def add(
         area: str,
         entity_id: str,
         name: str,

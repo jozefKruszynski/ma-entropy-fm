@@ -33,7 +33,7 @@ def _peaks(frame: np.ndarray, window: np.ndarray, freqs: np.ndarray) -> list[tup
     return found[:PEAKS_PER_FRAME]
 
 
-def find_glides(  # noqa: C901, PLR0912
+def find_glides(
     mono: np.ndarray, minimum: float = 3.0, within: float = 1.5, direction: int = -1
 ) -> list[tuple[float, float]]:
     """

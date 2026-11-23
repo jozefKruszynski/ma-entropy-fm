@@ -3,19 +3,19 @@
 import itertools
 import re
 from datetime import date
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+from music_assistant_models.enums import MediaType
 from music_assistant_models.errors import ProviderUnavailableError
-from music_assistant_models.media_items import Album
+from music_assistant_models.media_items import Album, Track
 
 from entropy_fm.styles import STYLES
 from entropy_fm.timeline import Series, VoiceKind
 from entropy_fm.titles import (
     BANKS,
     FORBIDDEN_TITLES,
-    HISTORY,
     MAX_TITLE,
     DayFacts,
     album_review,
@@ -28,16 +28,13 @@ from music_assistant.mass import MusicAssistant
 from tests.test_library_provider import _album
 from tests.test_provider import _setup
 
-if TYPE_CHECKING:
-    import pytest
-
 HOUR = 3600.0
 DAY = date(2026, 11, 17)
 BUSY = DayFacts(0.8, 15, "dishwasher", 3, "door", 14 * 60 + 12, "warm", 1)
 STYLE_KEYS = list(STYLES)
 
 
-def _series(  # noqa: PLR0913, PLR0917
+def _series(
     entity_id: str,
     name: str,
     kind: VoiceKind,
@@ -194,7 +191,7 @@ def test_every_style_has_a_description_that_tells_its_history() -> None:
             seen.add(text)
             assert 3 <= len(re.findall(r"[.!?](?:\s|$)", text)) <= 6, text
             assert text.endswith(day_line(BUSY, lang))
-            assert HISTORY[lang][style] in text
+            assert BANKS[lang].styles[style].history in text
             assert "—" not in text
     assert len(seen) == 2 * len(STYLE_KEYS)
     for style, needle in needles.items():
@@ -240,7 +237,8 @@ async def test_the_tracks_of_an_album_have_titles_descriptions_and_the_style_as_
     facts = await provider._facts("kitchen", day)  # noqa: SLF001
     for track, style in zip(tracks, STYLE_KEYS, strict=True):
         assert track.metadata.description == track_description(style, facts)
-    review = tracks[0].album.metadata.description if isinstance(tracks[0].album, Album) else None
+    album_of = (await provider.get_track(tracks[0].item_id)).album
+    review = album_of.metadata.description if isinstance(album_of, Album) else None
     assert review is not None
     assert review.startswith("Kitchen on ")
     # the same on every route
@@ -257,8 +255,13 @@ async def test_the_titles_follow_the_day_and_the_listings_agree(
 ) -> None:
     """The library lists the same title that the album and the track have; another room has other titles."""
     provider, _ = await _setup(mass, fake_hass)
+    cold = [t async for t in provider.get_library_tracks()]
+    assert cold
+    # the library reads nothing: until a day has been read (by opening it) its tracks have the plain titles
+    for track in cold[:6]:
+        assert track.album
+        await provider.get_album_tracks(track.album.item_id)
     library = [t async for t in provider.get_library_tracks()]
-    assert library
     for track in library[:6]:
         again = await provider.get_track(track.item_id)
         assert again.name == track.name
@@ -276,9 +279,13 @@ async def test_a_title_is_kept_for_the_hour(mass: MusicAssistant, fake_hass: Mag
     day = date.fromisoformat(album.item_id.split("|")[1])
     first = await provider._facts("kitchen", day)  # noqa: SLF001
     calls = len(fake.hass.history_calls)
-    assert await provider._facts("kitchen", day) is first  # noqa: SLF001
+    assert await provider._facts("kitchen", day) == first  # noqa: SLF001
     assert len(fake.hass.history_calls) == calls
-    assert await provider._facts("kitchen", day, cached_only=True) is first  # noqa: SLF001
+    assert await provider._facts("kitchen", day, cached_only=True) == first  # noqa: SLF001
+    # the reading lives in the cache of the server, not in the provider
+    await mass.cache.clear()
+    assert first is not None
+    assert await provider._facts("kitchen", day, cached_only=True) is None  # noqa: SLF001
 
 
 async def test_without_home_assistant_the_listing_still_works_with_plain_titles(
@@ -292,13 +299,40 @@ async def test_without_home_assistant_the_listing_still_works_with_plain_titles(
         raise ProviderUnavailableError("Home Assistant is away")
 
     monkeypatch.setattr(provider, "_series_of", down)
-    tracks = await provider.get_album_tracks(album.item_id)
-    assert len(tracks) == len(STYLES)
-    for track, style in zip(tracks, STYLE_KEYS, strict=True):
+    # search and browsing only use what is kept: plain titles, and they never fail
+    found = await provider.search("Kitchen", [MediaType.TRACK], limit=500)
+    mine = [t for t in found.tracks if t.item_id.startswith(album.item_id)]
+    assert len(mine) == len(STYLES)
+    for track, style in zip(mine, STYLE_KEYS, strict=True):
+        assert isinstance(track, Track)
         assert track.name in BANKS["en"].styles[style].plain
         assert (track.metadata.description or "").endswith(day_line(None))
-    assert [t async for t in provider.get_library_tracks()]
-    assert [a async for a in provider.get_library_albums()]
+    assert [a.name for a in await provider.get_artist_albums("kitchen")]
+
+
+async def test_the_library_listing_fails_instead_of_listing_plain_titles(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the server stores for good is never made from a history that could not be read."""
+    provider, _ = await _setup(mass, fake_hass)
+
+    async def down(*_args: object, **_kwargs: object) -> None:
+        raise ProviderUnavailableError("Home Assistant is away")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(provider.history, "prefetch", down)
+        with pytest.raises(ProviderUnavailableError):
+            [t async for t in provider.get_library_tracks()]
+        with pytest.raises(ProviderUnavailableError):
+            [a async for a in provider.get_library_albums()]
+
+    async def series_down(*_args: object, **_kwargs: object) -> list[Series]:
+        raise ProviderUnavailableError("Home Assistant is away")
+
+    monkeypatch.setattr(provider, "_series_of", series_down)
+    await mass.cache.clear()
+    with pytest.raises(ProviderUnavailableError):
+        [t async for t in provider.get_library_tracks()]
 
 
 async def test_titles_and_descriptions_are_dutch_when_the_server_is(
@@ -314,10 +348,32 @@ async def test_titles_and_descriptions_are_dutch_when_the_server_is(
     text = dutch[0].metadata.description or ""
     assert "Brian Eno" in text
     assert "tapelussen" in text
-    review = dutch[0].album.metadata.description if isinstance(dutch[0].album, Album) else None
+    dutch_album = (await provider.get_track(dutch[0].item_id)).album
+    review = dutch_album.metadata.description if isinstance(dutch_album, Album) else None
     assert review is not None
     assert " op " in review
     monkeypatch.setattr(type(provider), "_language", property(lambda _self: "fr"))
     assert [t.name for t in await provider.get_album_tracks(album.item_id)] == [
         t.name for t in english
     ]
+
+
+async def test_what_the_server_would_store_is_never_made_from_an_unreadable_day(
+    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The album, its tracks and a single track fail when the day cannot be read; browsing falls back."""
+    provider, _ = await _setup(mass, fake_hass)
+    album = await _album(provider, "kitchen", 3)
+    await mass.cache.clear()
+
+    async def down(*_args: object, **_kwargs: object) -> list[Series]:
+        raise ProviderUnavailableError("Home Assistant is away")
+
+    monkeypatch.setattr(provider, "_series_of", down)
+    with pytest.raises(ProviderUnavailableError):
+        await provider.get_album(album.item_id)
+    with pytest.raises(ProviderUnavailableError):
+        await provider.get_album_tracks(album.item_id)
+    with pytest.raises(ProviderUnavailableError):
+        await provider.get_track(f"{album.item_id}|_scape|lofi")
+    assert await provider.get_artist_albums("kitchen")

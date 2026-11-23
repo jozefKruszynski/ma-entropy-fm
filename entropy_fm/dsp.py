@@ -14,13 +14,14 @@ The module imports nothing from Music Assistant.
 from __future__ import annotations
 
 import math
+import threading
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
 from pedalboard import LadderFilter
 
-from .synth import SAMPLE_RATE
+from .synth import A4_HZ, A4_MIDI, SAMPLE_RATE, SEMITONES_PER_OCTAVE
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -29,9 +30,69 @@ SR = SAMPLE_RATE
 TABLE_SIZE = 4096
 # the highest partial that a table holds, in Hz
 PARTIAL_LIMIT = 19000.0
-LEVELS = 22
+# the number of band-limited tables of a shape, two to an octave
+TABLE_LEVELS = 22
 LOWEST = 20.0
-KINDS = ("saw", "square", "triangle", "sine")
+SAW = "saw"
+SQUARE = "square"
+TRIANGLE = "triangle"
+SINE = "sine"
+KINDS = (SAW, SQUARE, TRIANGLE, SINE)
+LADDER_LP24 = "lp24"
+LADDER_LP12 = "lp12"
+LADDER_BP24 = "bp24"
+LADDER_HP24 = "hp24"
+CENTS_PER_OCTAVE = 1200.0
+# the divisor that turns an amplitude ratio's decibels into the exponent of 10
+AMPLITUDE_DB_DIVISOR = 20.0
+# what is added to a measured peak or RMS that is divided by, or taken as the least of a gain, so that silence is not
+# a division by zero
+SILENCE_FLOOR = 1e-9
+# the lowest peak or RMS that is worth bringing to a level, and the lowest gain that is taken a logarithm of
+MIN_LEVEL = 1e-6
+# the tables of the shapes are made two to an octave
+LEVELS_PER_OCTAVE = 2.0
+# the lowest limit that a shape is dulled to, in Hz
+MIN_PARTIAL_LIMIT = 100.0
+SHAPE_TABLES_CACHED = 64
+HARMONIC_TABLES_CACHED = 256
+# the shortest time that a rise, a decay or a fade is worked out over, in seconds
+MIN_ENVELOPE_SECONDS = 1e-3
+MIN_FADE_SECONDS = 0.05
+# the delay line of a vibrato never reads closer than this to the present, in samples
+VIBRATO_BASE_DELAY_SAMPLES = 2.0
+# the release is the time that the level takes to fall to the rest, a share of it is the time constant
+ENVELOPE_RELEASE_DIVISOR = 4.0
+# the last stretch of every envelope is faded to nothing, in seconds
+ENVELOPE_END_FADE_SECONDS = 0.02
+CUTOFF_MIN_HZ = 20.0
+CUTOFF_MAX_HZ = 18000.0
+LADDER_CHUNK = 128
+STREAM_LADDER_CHUNK = 256
+STREAM_LADDER_START_CUTOFF_HZ = 2000.0
+MS_TO_SECONDS = 1e-3
+# the grains of the shimmer, in seconds
+SHIMMER_GRAIN_SECONDS = 0.06
+ENSEMBLE_BASE_DELAY_SECONDS = 0.006
+# a tap whose LFO is faster than this swings only a small share of the depth
+ENSEMBLE_FAST_RATE_HZ = 2.0
+ENSEMBLE_FAST_DEPTH_SHARE = 0.06
+ENSEMBLE_TAP_DELAY_SPREAD = 0.4
+ENSEMBLE_WIDTH = 0.8
+# a band of noise is cut from a loop of this many seconds
+NOISE_LOOP_SECONDS = 6
+NOISE_SEED_LOW_FACTOR = 7
+# the band edge of the noise is smoothed by a Hann window of a 400th of the loop, 5 samples at the least
+NOISE_EDGE_DIVISOR = 400
+NOISE_EDGE_MIN_SAMPLES = 5
+_LOOPS_LOCK = threading.Lock()
+_LOOPS: dict[tuple[float, float], np.ndarray] = {}
+_LADDER_MODES = {
+    LADDER_LP24: LadderFilter.Mode.LPF24,
+    LADDER_LP12: LadderFilter.Mode.LPF12,
+    LADDER_BP24: LadderFilter.Mode.BPF24,
+    LADDER_HP24: LadderFilter.Mode.HPF24,
+}
 
 
 def midi_hz(note: float) -> float:
@@ -40,25 +101,10 @@ def midi_hz(note: float) -> float:
 
     :param note: The note number, 69 is A at 440 Hz.
     """
-    return float(440.0 * 2.0 ** ((note - 69.0) / 12.0))
+    return float(A4_HZ * 2.0 ** ((note - A4_MIDI) / SEMITONES_PER_OCTAVE))
 
 
-def _harmonics(kind: str, count: int) -> tuple[np.ndarray, np.ndarray]:
-    """Return partial numbers and amplitudes of a shape, with the Lanczos factor that tames the ripple."""
-    k = np.arange(1, count + 1, dtype=np.float64)
-    if kind == "saw":
-        amp = 1.0 / k
-    elif kind == "square":
-        amp = np.where(k % 2 == 1, 1.0 / k, 0.0)
-    elif kind == "triangle":
-        amp = np.where(k % 2 == 1, 1.0 / k**2 * np.where(((k - 1) // 2) % 2 == 0, 1.0, -1.0), 0.0)
-    else:
-        amp = np.where(k == 1, 1.0, 0.0)
-    sigma = np.sinc(k / (count + 1.0)) ** 0.5
-    return k, amp * sigma
-
-
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=SHAPE_TABLES_CACHED)
 def table(kind: str, level: int) -> np.ndarray:
     """
     Return one cycle of a shape that is band-limited for the octave `level` (two levels an octave).
@@ -66,7 +112,7 @@ def table(kind: str, level: int) -> np.ndarray:
     :param kind: saw, square, triangle or sine.
     :param level: 0 is for the notes up to about 28 Hz; the partials stop under 19 kHz of the top note.
     """
-    top = LOWEST * 2.0 ** ((level + 1) / 2.0)
+    top = LOWEST * 2.0 ** ((level + 1) / LEVELS_PER_OCTAVE)
     count = max(int(PARTIAL_LIMIT / top), 1)
     _k, amp = _harmonics(kind, count)
     spectrum = np.zeros(TABLE_SIZE // 2 + 1, dtype=np.complex128)
@@ -78,7 +124,7 @@ def table(kind: str, level: int) -> np.ndarray:
     return np.append(wave, wave[0]).astype(np.float32)
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=HARMONIC_TABLES_CACHED)
 def harmonic_table(amps: tuple[float, ...], phases: tuple[float, ...] = ()) -> np.ndarray:
     """
     Return one cycle made of the given partial amplitudes (partial 1 first), normalised to a peak of 1.
@@ -104,11 +150,13 @@ def level_for(freq: float, limit: float = PARTIAL_LIMIT) -> int:
     :param freq: The highest pitch in Hz.
     :param limit: The highest partial that may sound, in Hz; lowers the brightness of the shape.
     """
-    base = max(math.ceil(2.0 * math.log2(max(freq, LOWEST) / LOWEST)) - 1, 0)
+    base = max(math.ceil(LEVELS_PER_OCTAVE * math.log2(max(freq, LOWEST) / LOWEST)) - 1, 0)
     if limit < PARTIAL_LIMIT:
         # a duller shape: use the table of a higher octave, which has fewer partials
-        base += max(round(2.0 * math.log2(PARTIAL_LIMIT / max(limit, 100.0))), 0)
-    return min(base, LEVELS - 1)
+        base += max(
+            round(LEVELS_PER_OCTAVE * math.log2(PARTIAL_LIMIT / max(limit, MIN_PARTIAL_LIMIT))), 0
+        )
+    return min(base, TABLE_LEVELS - 1)
 
 
 def read_table(tab: np.ndarray, phase: np.ndarray) -> np.ndarray:
@@ -136,7 +184,7 @@ def osc(
     :param phase0: The starting phase in cycles.
     :param limit: The highest partial in Hz (a duller sound when lower).
     """
-    if kind == "sine":
+    if kind == SINE:
         return sine(freq, n, phase0)
     if np.isscalar(freq):
         phase = phase0 + float(freq) * np.arange(n, dtype=np.float64) / SR  # type: ignore[arg-type]
@@ -179,13 +227,15 @@ def vibrato(n: int, rate: float, cents: float, delay: float, phase: float = 0.0)
     :param phase: Starting phase in cycles.
     """
     t = np.arange(n) / SR
-    depth = np.clip((t - delay) / max(delay, 0.05), 0.0, 1.0) if delay > 0 else np.ones(n)
-    return np.power(2.0, depth * cents / 1200.0 * np.sin(2.0 * np.pi * (rate * t + phase))).astype(
-        np.float64
+    depth = (
+        np.clip((t - delay) / max(delay, MIN_FADE_SECONDS), 0.0, 1.0) if delay > 0 else np.ones(n)
     )
+    return np.power(
+        2.0, depth * cents / CENTS_PER_OCTAVE * np.sin(2.0 * np.pi * (rate * t + phase))
+    ).astype(np.float64)
 
 
-def vibrato_phase(  # noqa: PLR0913, PLR0917
+def vibrato_phase(
     freq: float, n: int, rate: float, cents: float, delay: float, phase: float = 0.0
 ) -> np.ndarray:
     """
@@ -202,12 +252,12 @@ def vibrato_phase(  # noqa: PLR0913, PLR0917
     :param phase: Starting phase of the vibrato in cycles.
     """
     t = np.arange(n, dtype=np.float64) / SR
-    depth = np.clip((t - delay) / max(delay, 0.05), 0.0, 1.0) if delay > 0 else 1.0
-    swing = cents / 1200.0 * math.log(2.0) * freq / (2.0 * math.pi * rate)
+    depth = np.clip((t - delay) / max(delay, MIN_FADE_SECONDS), 0.0, 1.0) if delay > 0 else 1.0
+    swing = cents / CENTS_PER_OCTAVE * math.log(2.0) * freq / (2.0 * math.pi * rate)
     return freq * t - swing * depth * np.cos(2.0 * np.pi * (rate * t + phase))
 
 
-def envelope(  # noqa: PLR0913, PLR0917
+def envelope(
     n: int, attack: float, decay: float, sustain: float, hold: float, release: float
 ) -> np.ndarray:
     """
@@ -221,26 +271,32 @@ def envelope(  # noqa: PLR0913, PLR0917
     :param release: Seconds of the fall after the key goes up.
     """
     t = np.arange(n, dtype=np.float64) / SR
-    rise = np.clip(t / max(attack, 1e-3), 0.0, 1.0)
+    rise = np.clip(t / max(attack, MIN_ENVELOPE_SECONDS), 0.0, 1.0)
     rise = rise * rise * (3.0 - 2.0 * rise)
-    fall = sustain + (1.0 - sustain) * np.exp(-np.maximum(t - attack, 0.0) / max(decay, 1e-3))
+    fall = sustain + (1.0 - sustain) * np.exp(
+        -np.maximum(t - attack, 0.0) / max(decay, MIN_ENVELOPE_SECONDS)
+    )
     env = rise * fall
     after = np.maximum(t - hold, 0.0)
     held = env[min(int(hold * SR), n - 1)] if n else 0.0
-    env = np.where(t > hold, held * np.exp(-after / max(release / 4.0, 1e-3)), env)
-    ending = min(int(0.02 * SR), n)
+    env = np.where(
+        t > hold,
+        held * np.exp(-after / max(release / ENVELOPE_RELEASE_DIVISOR, MIN_ENVELOPE_SECONDS)),
+        env,
+    )
+    ending = min(int(ENVELOPE_END_FADE_SECONDS * SR), n)
     if ending:
         env[-ending:] *= np.linspace(1.0, 0.0, ending)
     return env.astype(np.float32)
 
 
-def ladder(  # noqa: PLR0913, PLR0917
+def ladder(
     x: np.ndarray,
     cutoff: float | np.ndarray,
     resonance: float = 0.3,
     drive: float = 1.0,
-    chunk: int = 128,
-    mode: str = "lp24",
+    chunk: int = LADDER_CHUNK,
+    mode: str = LADDER_LP24,
 ) -> np.ndarray:
     """
     Filter a mono signal with a resonant Moog-style ladder whose cutoff may move.
@@ -252,14 +308,8 @@ def ladder(  # noqa: PLR0913, PLR0917
     :param chunk: Samples between two cutoff updates.
     :param mode: lp24, lp12, bp24 or hp24.
     """
-    modes = {
-        "lp24": LadderFilter.Mode.LPF24,
-        "lp12": LadderFilter.Mode.LPF12,
-        "bp24": LadderFilter.Mode.BPF24,
-        "hp24": LadderFilter.Mode.HPF24,
-    }
     plug = LadderFilter(
-        mode=modes[mode], cutoff_hz=float(np.mean(cutoff)), resonance=resonance, drive=drive
+        mode=_LADDER_MODES[mode], cutoff_hz=float(np.mean(cutoff)), resonance=resonance, drive=drive
     )
     sig = np.ascontiguousarray(x, dtype=np.float32)[None, :]
     if np.isscalar(cutoff):
@@ -269,7 +319,9 @@ def ladder(  # noqa: PLR0913, PLR0917
     starts = range(0, len(x), chunk)
     # one clip for all the chunks: the loop below calls a native filter, and anything else in it is overhead
     cuts = np.clip(
-        arr[np.minimum(np.arange(0, len(x), chunk) + chunk // 2, len(arr) - 1)], 20.0, 18000.0
+        arr[np.minimum(np.arange(0, len(x), chunk) + chunk // 2, len(arr) - 1)],
+        CUTOFF_MIN_HZ,
+        CUTOFF_MAX_HZ,
     )
     for start, cut in zip(starts, cuts.tolist(), strict=True):
         plug.cutoff_hz = cut
@@ -280,7 +332,7 @@ def ladder(  # noqa: PLR0913, PLR0917
 class StreamLadder:
     """A ladder filter that keeps its state between blocks, for the buses of the mix."""
 
-    def __init__(self, resonance: float = 0.2, drive: float = 1.0, mode: str = "lp24") -> None:
+    def __init__(self, resonance: float = 0.2, drive: float = 1.0, mode: str = LADDER_LP24) -> None:
         """
         Make the filter.
 
@@ -288,17 +340,16 @@ class StreamLadder:
         :param drive: 1 and up.
         :param mode: lp24, lp12, bp24 or hp24.
         """
-        modes = {
-            "lp24": LadderFilter.Mode.LPF24,
-            "lp12": LadderFilter.Mode.LPF12,
-            "bp24": LadderFilter.Mode.BPF24,
-            "hp24": LadderFilter.Mode.HPF24,
-        }
         self.plug = LadderFilter(
-            mode=modes[mode], cutoff_hz=2000.0, resonance=resonance, drive=drive
+            mode=_LADDER_MODES[mode],
+            cutoff_hz=STREAM_LADDER_START_CUTOFF_HZ,
+            resonance=resonance,
+            drive=drive,
         )
 
-    def process(self, block: np.ndarray, cutoff: np.ndarray, chunk: int = 256) -> np.ndarray:
+    def process(
+        self, block: np.ndarray, cutoff: np.ndarray, chunk: int = STREAM_LADDER_CHUNK
+    ) -> np.ndarray:
         """
         Filter a stereo block (n, 2) with a cutoff for each chunk of samples.
 
@@ -310,7 +361,7 @@ class StreamLadder:
         out = np.empty_like(sig)
         for index, start in enumerate(range(0, sig.shape[1], chunk)):
             self.plug.cutoff_hz = float(
-                min(max(cutoff[min(index, len(cutoff) - 1)], 20.0), 18000.0)
+                min(max(cutoff[min(index, len(cutoff) - 1)], CUTOFF_MIN_HZ), CUTOFF_MAX_HZ)
             )
             out[:, start : start + chunk] = self.plug.process(
                 sig[:, start : start + chunk], SR, reset=False
@@ -334,7 +385,7 @@ def delay_read(x: np.ndarray, delay: np.ndarray) -> np.ndarray:
     return out
 
 
-def pitch_vibrato(  # noqa: PLR0913, PLR0917
+def pitch_vibrato(
     wave: np.ndarray,
     cents: float,
     rate: float,
@@ -358,11 +409,15 @@ def pitch_vibrato(  # noqa: PLR0913, PLR0917
     """
     n = len(wave)
     t = np.arange(n, dtype=np.float32) / SR
-    ramp = np.clip((t - wait) / max(onset, 0.05), 0.0, 1.0)
+    ramp = np.clip((t - wait) / max(onset, MIN_FADE_SECONDS), 0.0, 1.0)
     ramp = ramp * ramp * (3.0 - 2.0 * ramp)
     # a delay of A sin(w t) samples bends the pitch by A w / SR of itself
-    swing = (2.0 ** (cents / 1200.0) - 1.0) * SR / (2.0 * math.pi * rate)
-    delay = swing + 2.0 + swing * ramp * np.sin(np.float32(2.0 * np.pi) * (rate * t + phase))
+    swing = (2.0 ** (cents / CENTS_PER_OCTAVE) - 1.0) * SR / (2.0 * math.pi * rate)
+    delay = (
+        swing
+        + VIBRATO_BASE_DELAY_SAMPLES
+        + swing * ramp * np.sin(np.float32(2.0 * np.pi) * (rate * t + phase))
+    )
     # the positions are float64: a float32 position is only good to a thirtieth of a sample late in a long note,
     # which is a jitter that can be heard under a pure tone
     pos = np.arange(n, dtype=np.float64) - delay
@@ -382,7 +437,7 @@ def pitch_vibrato(  # noqa: PLR0913, PLR0917
     return out
 
 
-def ensemble(  # noqa: PLR0913, PLR0917
+def ensemble(
     mono: np.ndarray,
     rng: np.random.Generator,
     rates: tuple[float, ...] = (0.55, 0.7, 5.5),
@@ -404,17 +459,22 @@ def ensemble(  # noqa: PLR0913, PLR0917
     t = np.arange(n) / SR
     left = np.zeros(n, dtype=np.float32)
     right = np.zeros(n, dtype=np.float32)
-    base = 0.006 * SR
+    base = ENSEMBLE_BASE_DELAY_SECONDS * SR
     for tap in range(taps):
         rate = rates[tap % len(rates)]
         phase = rng.uniform(0, 1)
         mod = np.sin(2 * np.pi * (rate * t + phase))
         # the fast LFO is small, the slow ones carry the swing; the tap is pitch modulation of a few cents
-        size = depth_ms * 1e-3 * SR * (0.06 if rate > 2.0 else 1.0)
-        delayed = delay_read(mono, base * (1 + 0.4 * tap) + size * mod)
+        size = (
+            depth_ms
+            * MS_TO_SECONDS
+            * SR
+            * (ENSEMBLE_FAST_DEPTH_SHARE if rate > ENSEMBLE_FAST_RATE_HZ else 1.0)
+        )
+        delayed = delay_read(mono, base * (1 + ENSEMBLE_TAP_DELAY_SPREAD * tap) + size * mod)
         side = -1.0 + 2.0 * (tap % 2) if taps > 1 else 0.0
-        left += delayed * (0.5 - 0.5 * side * 0.8)
-        right += delayed * (0.5 + 0.5 * side * 0.8)
+        left += delayed * (0.5 - 0.5 * side * ENSEMBLE_WIDTH)
+        right += delayed * (0.5 + 0.5 * side * ENSEMBLE_WIDTH)
     left /= taps / 2.0
     right /= taps / 2.0
     dry = mono * (1.0 - mix)
@@ -432,35 +492,35 @@ def noise(rng: np.random.Generator, n: int) -> np.ndarray:
     return rng.standard_normal(n).astype(np.float32)
 
 
-_LOOPS: dict[tuple[float, float], np.ndarray] = {}
-
-
 def band_noise(rng: np.random.Generator, n: int, low: float, high: float) -> np.ndarray:
     """
     Return noise limited to a band, of unit standard deviation, cut from a cached loop at a random place.
 
     A loop of 6 seconds is made once for each band by the spectrum; a longer stretch wraps round it.
+
+    :param rng: Picks the place in the loop.
+    :param n: The number of samples.
+    :param low: The lower edge of the band in Hz.
+    :param high: The upper edge of the band in Hz.
     """
     key = (float(low), float(high))
-    if key not in _LOOPS:
-        _LOOPS[key] = _band_noise(np.random.default_rng(int(low * 7 + high)), 6 * SR, low, high)
-    loop = _LOOPS[key]
+    loop = _LOOPS.get(key)
+    if loop is None:
+        with _LOOPS_LOCK:
+            loop = _LOOPS.get(key)
+            if loop is None:
+                loop = _band_noise(
+                    np.random.default_rng(int(low * NOISE_SEED_LOW_FACTOR + high)),
+                    NOISE_LOOP_SECONDS * SR,
+                    low,
+                    high,
+                )
+                loop.flags.writeable = False
+                _LOOPS[key] = loop
     start = int(rng.integers(0, len(loop)))
     if n <= len(loop) - start:
         return loop[start : start + n]
     return np.take(loop, np.arange(start, start + n), mode="wrap")
-
-
-def _band_noise(rng: np.random.Generator, n: int, low: float, high: float) -> np.ndarray:
-    """Make noise limited to a band by the spectrum (no filter state)."""
-    spec = np.fft.rfft(rng.standard_normal(n))
-    freqs = np.fft.rfftfreq(n, 1.0 / SR)
-    shape = np.where((freqs >= low) & (freqs <= high), 1.0, 0.0)
-    shape = np.convolve(
-        shape, np.hanning(max(n // 400, 5)) / np.hanning(max(n // 400, 5)).sum(), mode="same"
-    )
-    out = np.fft.irfft(spec * shape, n).astype(np.float32)
-    return out / (float(out.std()) or 1.0)
 
 
 def rms(x: np.ndarray) -> float:
@@ -470,7 +530,7 @@ def rms(x: np.ndarray) -> float:
 
 def db(x: float) -> float:
     """Return a gain as decibels."""
-    return 20.0 * math.log10(max(x, 1e-9))
+    return AMPLITUDE_DB_DIVISOR * math.log10(max(x, SILENCE_FLOOR))
 
 
 class Shimmer:
@@ -481,7 +541,7 @@ class Shimmer:
     a grain overlap to a constant level, so a steady tone comes out steady and an octave higher.
     """
 
-    GRAIN = 2646
+    GRAIN = round(SHIMMER_GRAIN_SECONDS * SR)
 
     def __init__(self) -> None:
         """Make an empty shimmer."""
@@ -506,3 +566,29 @@ class Shimmer:
             out[k * hop : k * hop + grain] += source * self._window[:, None]
         self._tail = buffer[-2 * grain :].copy()
         return out[: len(block)]
+
+
+def _harmonics(kind: str, count: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return partial numbers and amplitudes of a shape, with the Lanczos factor that tames the ripple."""
+    k = np.arange(1, count + 1, dtype=np.float64)
+    if kind == SAW:
+        amp = 1.0 / k
+    elif kind == SQUARE:
+        amp = np.where(k % 2 == 1, 1.0 / k, 0.0)
+    elif kind == TRIANGLE:
+        amp = np.where(k % 2 == 1, 1.0 / k**2 * np.where(((k - 1) // 2) % 2 == 0, 1.0, -1.0), 0.0)
+    else:
+        amp = np.where(k == 1, 1.0, 0.0)
+    sigma = np.sinc(k / (count + 1.0)) ** 0.5
+    return k, amp * sigma
+
+
+def _band_noise(rng: np.random.Generator, n: int, low: float, high: float) -> np.ndarray:
+    """Make noise limited to a band by the spectrum (no filter state)."""
+    spec = np.fft.rfft(rng.standard_normal(n))
+    freqs = np.fft.rfftfreq(n, 1.0 / SR)
+    shape = np.where((freqs >= low) & (freqs <= high), 1.0, 0.0)
+    edge = np.hanning(max(n // NOISE_EDGE_DIVISOR, NOISE_EDGE_MIN_SAMPLES))
+    shape = np.convolve(shape, edge / edge.sum(), mode="same")
+    out = np.fft.irfft(spec * shape, n).astype(np.float32)
+    return out / (float(out.std()) or 1.0)

@@ -10,16 +10,17 @@ import pytest
 
 from entropy_fm.character import ALL_DAY, FLAT, HIGH, LOW, NEUTRAL, DayCharacter
 from entropy_fm.day_analysis import analyze_day
-from entropy_fm.plan import MAX_SECONDS, MIN_SECONDS, Plan, build_plan, length_of
+from entropy_fm.plan import PieceOptions, Plan, build_plan, condensed_seconds
 from entropy_fm.quality import LIGHT, RICH, STANDARD, Quality
 from entropy_fm.scape import scape_score
 from entropy_fm.scape_ambient import LENGTHS
 from entropy_fm.scape_berlin import CELLS_A, CELLS_B, CELLS_C, _mutate
-from entropy_fm.score import CR, Score
+from entropy_fm.score import CURVE_RATE, Score
 from entropy_fm.styles import STYLES, get_style
 from entropy_fm.synth import Scale
 from entropy_fm.timeline import EntityInfo, Series, VoiceKind, build_series
 from entropy_fm.voices import VOICES
+from tests.test_room_signatures import vetoed
 
 from .scape_tools import demo, the_demo
 
@@ -43,32 +44,6 @@ def test_there_are_five_styles_and_the_removed_ones_are_gone() -> None:
         assert gone not in covers.GLYPHS
     assert "slendro" not in synth.SCALES
     assert "pelog" not in palette.MODE_WARMTH
-
-
-def test_the_piece_is_ten_to_twenty_two_minutes_and_longer_on_a_busy_day() -> None:
-    """The length follows the day: 12 minutes when quiet, 20 when busy, never under 10 or over 22."""
-    series = [
-        build_series(
-            EntityInfo("sensor.p", "p", None, VoiceKind.DRONE),
-            [0.0, 40000.0, 41000.0],
-            [0.0, 900.0, 0.0],
-        )
-    ]
-    base = analyze_day(series)
-    lengths = []
-    for busy, events in ((0.0, 0), (0.5, 0), (1.0, 0), (1.0, 5)):
-        from dataclasses import replace  # noqa: PLC0415
-
-        moments = tuple(m for m in base.moments if m.kind != "anomaly")
-        from entropy_fm.day_analysis import Moment  # noqa: PLC0415
-
-        moments += tuple(Moment(10000.0 + 100 * k, "anomaly", 0.9, "x") for k in range(events))
-        lengths.append(length_of(replace(base, busyness=busy, moments=moments)))
-    assert lengths == sorted(lengths)
-    assert lengths[0] == 720
-    assert 1150 <= lengths[2] <= 1250
-    assert all(MIN_SECONDS <= value <= MAX_SECONDS for value in lengths)
-    assert lengths[3] <= MAX_SECONDS
 
 
 def test_the_day_is_spread_over_the_piece_in_order() -> None:
@@ -130,10 +105,8 @@ def _score_of(style: str, index: int, character: DayCharacter) -> tuple[Score, P
         style,
         f"kitchen|{demo_house.day_of(index).isoformat()}|_scape|{style}",
         Scale(2, "dorian"),
-        day=demo_house.day_of(index),
         quality=STANDARD,
-        area_key="kitchen",
-        character=character,
+        options=PieceOptions(day=demo_house.day_of(index), area_key="kitchen", character=character),
     )
 
 
@@ -236,7 +209,12 @@ def test_events_do_not_write_notes(style: str) -> None:
     counts = []
     for series in (few, many):
         score, _ = scape_score(
-            series, analyze_day(series), style, "x", Scale(2, "dorian"), area_key="x"
+            series,
+            analyze_day(series),
+            style,
+            "x",
+            Scale(2, "dorian"),
+            options=PieceOptions(area_key="x"),
         )
         # the kit of Cinematic Glitch is a pattern that the heat of the house opens, in whole bars: it is not counted
         counts.append(
@@ -362,7 +340,7 @@ def test_an_appliance_that_runs_brings_in_its_layer() -> None:
     score, plan = the_demo().score(13, ("kitchen",), "berlin_school", STANDARD)
     on = np.flatnonzero(plan.runs["dish"] > 0.8)
     assert len(on)
-    seconds = on / CR
+    seconds = on / CURVE_RATE
     inside = [n for n in score.notes if n.layer == "seqB" and seconds.min() <= n.t <= seconds.max()]
     assert inside
 
@@ -376,9 +354,11 @@ def test_an_anomaly_is_a_texture_event_and_never_a_pitch_glide() -> None:
         for layer in score.layers.values():
             if layer.cutoff is not None:
                 second = plan.events[0][0]
-                here = layer.cutoff[int(second * CR) : int((second + 1.0) * CR)].min()
+                here = layer.cutoff[
+                    int(second * CURVE_RATE) : int((second + 1.0) * CURVE_RATE)
+                ].min()
                 before = layer.cutoff[
-                    max(int((second - 20) * CR), 0) : int((second - 10) * CR)
+                    max(int((second - 20) * CURVE_RATE), 0) : int((second - 10) * CURVE_RATE)
                 ].mean()
                 assert here < before, (style, layer.key)
 
@@ -409,7 +389,7 @@ def test_every_voice_a_score_names_is_in_the_library() -> None:
                 or is_wash(voice)
                 or is_glitch(voice)
             ), voice
-        assert sum(1 for v in score.voices_used() if v in {"glass_pad", "fm_ep"}) <= 2
+        assert not set(score.voices_used()) & vetoed(style)
 
 
 def test_the_plan_curves_are_slow_and_in_range() -> None:
@@ -417,7 +397,7 @@ def test_the_plan_curves_are_slow_and_in_range() -> None:
     _, plan = _score("ambient")
     for name in ("activity", "power", "bright", "humid", "lights", "evening"):
         curve = getattr(plan, name)
-        assert len(curve) == plan.length * CR
+        assert len(curve) == plan.length * CURVE_RATE
         assert curve.min() >= 0.0
         assert curve.max() <= 1.0
         assert np.abs(np.diff(curve)).max() < 0.25, name
@@ -425,7 +405,7 @@ def test_the_plan_curves_are_slow_and_in_range() -> None:
     assert isinstance(date(2026, 1, 1) - timedelta(days=1), date)
     series = _series(10)
     plain = build_plan(series, analyze_day(series), "ambient", "x", Scale(2, "dorian"), STANDARD)
-    assert plain.length >= MIN_SECONDS
+    assert plain.length == condensed_seconds("ambient")
 
 
 def test_the_gain_estimate_is_finite_and_bounded() -> None:

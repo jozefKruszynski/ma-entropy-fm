@@ -18,7 +18,7 @@ from entropy_fm.harmony import (
     triad_is_diminished,
     voice_lead,
 )
-from entropy_fm.plan import CLIMAX, PLATEAU, Plan, build_plan
+from entropy_fm.plan import CLIMAX, PLATEAU, PieceOptions, Plan, build_plan
 from entropy_fm.quality import STANDARD
 from entropy_fm.references import rescale
 from entropy_fm.scape import COMPOSERS, analysis_of, scape_score
@@ -78,10 +78,8 @@ def _made(style: str, character: DayCharacter) -> tuple[Score, Plan]:
         style,
         f"kitchen|{day}|{style}",
         HOME,
-        day=day,
         quality=STANDARD,
-        area_key="kitchen",
-        character=character,
+        options=PieceOptions(day=day, area_key="kitchen", character=character),
     )
 
 
@@ -97,9 +95,7 @@ def _plan(
         f"kitchen|{day}|{style}",
         Scale(HOME.root, mode),
         STANDARD,
-        day=day,
-        area_key="kitchen",
-        character=character,
+        options=PieceOptions(day=day, area_key="kitchen", character=character),
     )
     plan.events = list(events)
     return plan

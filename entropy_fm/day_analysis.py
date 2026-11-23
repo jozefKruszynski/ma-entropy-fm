@@ -19,14 +19,13 @@ import numpy as np
 
 from .energy import activity
 from .references import showers
-from .timeline import VoiceKind
+from .timeline import DAY_SECONDS, POWER_KINDS, SECONDS_PER_HOUR, VoiceKind
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .timeline import Series
 
-DAY_SECONDS = 86400.0
 # the curve has a value for every quarter of an hour
 STEP = 900.0
 # a stretch of the day is at least this long (in steps): an hour and a half
@@ -37,12 +36,59 @@ MAX_SECTIONS = 7
 QUIET_KINDS = frozenset(
     {VoiceKind.SUN, VoiceKind.TEMPERATURE, VoiceKind.HUMIDITY, VoiceKind.PAD_PARTIAL}
 )
-POWER_KINDS = frozenset({VoiceKind.DISHWASHER, VoiceKind.DRUM, VoiceKind.DRONE})
 # kinds that are read as a level, not counted as things that happen: the CO2 of a room changes all the time
 LEVEL_KINDS = QUIET_KINDS | {VoiceKind.AIR}
 # when the series are measured against their own days, a quiet day stays quiet: the curve is stretched to at least this
 # range (the range of 1 stretches every day to the full scale, which is what a day without a reference gets)
 REFERENCE_SPAN = 0.4
+# the names of the stretches of a day
+LABEL_NIGHT = "night"
+LABEL_WAKING = "waking"
+LABEL_DAYTIME = "daytime"
+LABEL_COOKING = "cooking"
+LABEL_EVENING = "evening"
+LABEL_WINDDOWN = "winddown"
+# the kinds of the moments that stood out
+MOMENT_APPLIANCE = "appliance"
+MOMENT_PHASE = "phase"
+MOMENT_COOKING = "cooking"
+MOMENT_ANOMALY = "anomaly"
+MOMENT_SHOWER = "shower"
+MOMENT_PEAK = "peak"
+# the hours of the day (on the clock) where the stretches change: night is before the first and from the last
+NIGHT_END_HOUR = 5.5
+NIGHT_START_HOUR = 23.0
+WAKING_END_HOUR = 10.0
+DAYTIME_END_HOUR = 17.0
+EVENING_END_HOUR = 21.5
+# the busiest stretch is cooking when it is between these hours
+COOKING_START_HOUR = 11.0
+# a step of the normalised value that is more than this counts as something that happened
+MOVE_THRESHOLD = 0.05
+# the curve is the energy macro and the density of events, in these shares, and the density is smoothed over this many steps
+BASE_SHARE = 0.65
+EVENTS_SHARE = 0.35
+DENSITY_SMOOTH_STEPS = 3
+ENERGY_SMOOTH_STEPS = 2.0
+MIN_CURVE_RANGE = 1e-9
+FLAT_CURVE_LEVEL = 0.5
+# a day that changes more than these spreads of its curve has one section more, and another
+EVENTFUL_SPREAD = 0.22
+VERY_EVENTFUL_SPREAD = 0.3
+MIN_GAIN_STEP = 1e-12
+# a rising crossing of these levels is an appliance run, and a hob that is switched on
+APPLIANCE_LEVEL = 0.2
+HOB_LEVEL = 0.05
+PHASE_STRENGTH = 0.5
+# the evening (warmth) and the day (brightness), in hours of the clock
+WARMTH_FROM_HOUR = 17.0
+WARMTH_UNTIL_HOUR = 23.5
+BRIGHTNESS_FROM_HOUR = 8.0
+BRIGHTNESS_UNTIL_HOUR = 17.0
+# busyness: the mean of the curve scaled, each anomaly adds this much, and it is halved with the share of the events of a day that is this many
+BUSYNESS_CURVE_SCALE = 1.4
+BUSYNESS_ANOMALY = 0.15
+BUSYNESS_EVENTS_FULL = 400.0
 
 
 @dataclass(frozen=True)
@@ -107,22 +153,24 @@ def activity_curve(series: Sequence[Series], covered: float = DAY_SECONDS) -> np
     """
     count = max(int(min(covered, DAY_SECONDS) / STEP), 1)
     times = (np.arange(count) + 0.5) * STEP
-    base = activity(series, times, smooth=STEP * 2.0)
+    base = activity(series, times, smooth=STEP * ENERGY_SMOOTH_STEPS)
     density = np.zeros(count)
     for item in series:
         if item.kind in LEVEL_KINDS:
             continue
-        moved = np.flatnonzero(np.abs(np.diff(item.norm)) > 0.05) + 1
+        moved = np.flatnonzero(np.abs(np.diff(item.norm)) > MOVE_THRESHOLD) + 1
         if len(moved):
             hits = np.clip((item.times[moved] // STEP).astype(int), 0, count - 1)
             np.add.at(density, hits, 1.0)
-    smoothed = np.convolve(density, np.ones(3) / 3.0, mode="same")
+    smoothed = np.convolve(
+        density, np.ones(DENSITY_SMOOTH_STEPS) / float(DENSITY_SMOOTH_STEPS), mode="same"
+    )
     peak = float(smoothed.max())
     events = smoothed / peak if peak > 0 else smoothed
-    curve = 0.65 * base + 0.35 * events
+    curve = BASE_SHARE * base + EVENTS_SHARE * events
     low, high = float(curve.min()), float(curve.max())
-    if high - low < 1e-9:
-        return np.full(count, 0.5)
+    if high - low < MIN_CURVE_RANGE:
+        return np.full(count, FLAT_CURVE_LEVEL)
     if any(item.ref is not None for item in series):
         return np.asarray(np.clip((curve - low) / max(high - low, REFERENCE_SPAN), 0.0, 1.0))
     return np.asarray((curve - low) / (high - low), dtype=np.float64)
@@ -153,29 +201,13 @@ def change_points(curve: np.ndarray, sections: int) -> list[int]:
                     for a, b in ((left, cut), (cut, right))
                 )
                 gain = whole - parts
-                if best is None or gain > best[0] + 1e-12:
+                if best is None or gain > best[0] + MIN_GAIN_STEP:
                     best = (gain, cut)
         if best is None:
             break
         bounds = sorted([*bounds, best[1]])
         cuts.append(best[1])
     return sorted(cuts)
-
-
-def _label(start: float, end: float, *, is_peak: bool) -> str:
-    """Name a stretch of the day by when it is and how busy it is."""
-    middle = ((start + end) / 2.0 % DAY_SECONDS) / 3600.0
-    if middle < 5.5 or middle >= 23.0:
-        return "night"
-    if is_peak and 11.0 <= middle <= 21.5:
-        return "cooking"
-    if middle < 10.0:
-        return "waking"
-    if middle < 17.0:
-        return "daytime"
-    if middle < 21.5:
-        return "evening"
-    return "winddown"
 
 
 def sections_of(curve: np.ndarray, covered: float) -> tuple[DaySection, ...]:
@@ -190,9 +222,9 @@ def sections_of(curve: np.ndarray, covered: float) -> tuple[DaySection, ...]:
     steps = len(curve)
     wanted = MIN_SECTIONS
     spread = float(np.std(curve))
-    if spread > 0.22:
+    if spread > EVENTFUL_SPREAD:
         wanted += 1
-    if spread > 0.3:
+    if spread > VERY_EVENTFUL_SPREAD:
         wanted += 1
     wanted = int(
         np.clip(wanted, MIN_SECTIONS, min(MAX_SECTIONS, max(steps // MIN_SECTION_STEPS, 1)))
@@ -212,42 +244,6 @@ def sections_of(curve: np.ndarray, covered: float) -> tuple[DaySection, ...]:
     return tuple(found)
 
 
-def _moments(
-    series: Sequence[Series],
-    curve: np.ndarray,
-    anomalies: Sequence[tuple[float, float, str]],
-    covered: float = DAY_SECONDS,
-) -> tuple[Moment, ...]:
-    """Collect the salient moments: appliance runs, hob cooking, anomalies, showers and the busiest time."""
-    found: list[Moment] = []
-    for item in series:
-        if item.kind in POWER_KINDS and item.kind != VoiceKind.DRONE:
-            found.extend(
-                Moment(float(t), "appliance", float(item.norm.max()), item.entity_id)
-                for t in item.crossings(0.0, DAY_SECONDS, 0.2, rising=True)
-            )
-        elif item.kind == VoiceKind.PHASE:
-            found.extend(
-                Moment(float(t), "phase", 0.5, item.entity_id)
-                for t in item.changes(0.0, DAY_SECONDS)
-            )
-        elif item.kind == VoiceKind.HOB:
-            found.extend(
-                Moment(float(t), "cooking", float(item.norm.max()), item.entity_id)
-                for t in item.crossings(0.0, DAY_SECONDS, 0.05, rising=True)
-            )
-    found.extend(
-        Moment(float(t), "anomaly", float(score), entity) for t, score, entity in anomalies
-    )
-    for item in series:
-        found.extend(
-            Moment(float(t), "shower", float(strength), item.entity_id)
-            for t, strength in showers(item, covered)
-        )
-    found.append(Moment((int(np.argmax(curve)) + 0.5) * STEP, "peak", float(curve.max())))
-    return tuple(sorted(found, key=lambda m: (m.time, m.kind, m.source)))
-
-
 def analyze_day(
     series: Sequence[Series],
     covered: float = DAY_SECONDS,
@@ -262,16 +258,24 @@ def analyze_day(
     """
     curve = activity_curve(series, covered)
     sections = sections_of(curve, covered)
-    hours = (np.arange(len(curve)) + 0.5) * STEP / 3600.0
+    hours = (np.arange(len(curve)) + 0.5) * STEP / SECONDS_PER_HOUR
     total = float(curve.sum()) or 1.0
-    warmth = float(curve[(hours >= 17.0) & (hours < 23.5)].sum() / total)
-    brightness = float(curve[(hours >= 8.0) & (hours < 17.0)].sum() / total)
-    busyness = float(np.clip(curve.mean() * 1.4 + 0.15 * len(anomalies), 0.0, 1.0))
+    warmth = float(curve[(hours >= WARMTH_FROM_HOUR) & (hours < WARMTH_UNTIL_HOUR)].sum() / total)
+    brightness = float(
+        curve[(hours >= BRIGHTNESS_FROM_HOUR) & (hours < BRIGHTNESS_UNTIL_HOUR)].sum() / total
+    )
+    busyness = float(
+        np.clip(curve.mean() * BUSYNESS_CURVE_SCALE + BUSYNESS_ANOMALY * len(anomalies), 0.0, 1.0)
+    )
     # a flat curve is normalised to 0.5, so how much really happened is told by the events
     events = sum(
-        int((np.abs(np.diff(s.norm)) > 0.05).sum()) for s in series if s.kind not in LEVEL_KINDS
+        int((np.abs(np.diff(s.norm)) > MOVE_THRESHOLD).sum())
+        for s in series
+        if s.kind not in LEVEL_KINDS
     )
-    busyness = float(np.clip(0.5 * busyness + 0.5 * min(events / 400.0, 1.0), 0.0, 1.0))
+    busyness = float(
+        np.clip(0.5 * busyness + 0.5 * min(events / BUSYNESS_EVENTS_FULL, 1.0), 0.0, 1.0)
+    )
     return DayAnalysis(
         curve,
         min(covered, DAY_SECONDS),
@@ -282,3 +286,55 @@ def analyze_day(
         brightness,
         any(item.ref is not None for item in series),
     )
+
+
+def _label(start: float, end: float, *, is_peak: bool) -> str:
+    """Name a stretch of the day by when it is and how busy it is."""
+    middle = ((start + end) / 2.0 % DAY_SECONDS) / SECONDS_PER_HOUR
+    if middle < NIGHT_END_HOUR or middle >= NIGHT_START_HOUR:
+        return LABEL_NIGHT
+    if is_peak and COOKING_START_HOUR <= middle <= EVENING_END_HOUR:
+        return LABEL_COOKING
+    if middle < WAKING_END_HOUR:
+        return LABEL_WAKING
+    if middle < DAYTIME_END_HOUR:
+        return LABEL_DAYTIME
+    if middle < EVENING_END_HOUR:
+        return LABEL_EVENING
+    return LABEL_WINDDOWN
+
+
+def _moments(
+    series: Sequence[Series],
+    curve: np.ndarray,
+    anomalies: Sequence[tuple[float, float, str]],
+    covered: float = DAY_SECONDS,
+) -> tuple[Moment, ...]:
+    """Collect the salient moments: appliance runs, hob cooking, anomalies, showers and the busiest time."""
+    found: list[Moment] = []
+    for item in series:
+        if item.kind in POWER_KINDS and item.kind != VoiceKind.DRONE:
+            found.extend(
+                Moment(float(t), MOMENT_APPLIANCE, float(item.norm.max()), item.entity_id)
+                for t in item.crossings(0.0, DAY_SECONDS, APPLIANCE_LEVEL, rising=True)
+            )
+        elif item.kind == VoiceKind.PHASE:
+            found.extend(
+                Moment(float(t), MOMENT_PHASE, PHASE_STRENGTH, item.entity_id)
+                for t in item.changes(0.0, DAY_SECONDS)
+            )
+        elif item.kind == VoiceKind.HOB:
+            found.extend(
+                Moment(float(t), MOMENT_COOKING, float(item.norm.max()), item.entity_id)
+                for t in item.crossings(0.0, DAY_SECONDS, HOB_LEVEL, rising=True)
+            )
+    found.extend(
+        Moment(float(t), MOMENT_ANOMALY, float(score), entity) for t, score, entity in anomalies
+    )
+    for item in series:
+        found.extend(
+            Moment(float(t), MOMENT_SHOWER, float(strength), item.entity_id)
+            for t, strength in showers(item, covered)
+        )
+    found.append(Moment((int(np.argmax(curve)) + 0.5) * STEP, MOMENT_PEAK, float(curve.max())))
+    return tuple(sorted(found, key=lambda m: (m.time, m.kind, m.source)))

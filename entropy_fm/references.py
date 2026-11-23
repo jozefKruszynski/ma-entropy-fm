@@ -18,7 +18,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .baseline import day_weights, weighted_percentiles
-from .timeline import BINARY_KINDS, MIN_POWER_PEAK, MIN_TEMPERATURE_SPAN, VoiceKind
+from .timeline import (
+    BINARY_KINDS,
+    DAY_SECONDS,
+    MIN_POWER_PEAK,
+    MIN_TEMPERATURE_SPAN,
+    POWER_KINDS,
+    SECONDS_PER_HOUR,
+    VoiceKind,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -40,9 +48,8 @@ NUMERIC_KINDS = frozenset(
         VoiceKind.AIR,
     }
 )
-POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 # a reading that moves less than this is constant (a stuck sensor reads the same to the last digit)
-EPSILON = 1e-6
+FLAT_EPSILON = 1e-6
 # the narrowest scale of a CO2 monitor: a room that always reads 400 to 450 ppm has nothing to say
 MIN_AIR_SPAN = 250.0
 # a spike of humidity is a shower when it is this far (percent points) over the usual level, and at least this
@@ -53,14 +60,16 @@ SHOWER_SPREAD = 2.5
 SHOWER_MERGE = 1800.0
 SHOWER_MAX = 3
 # humidity that stays up for longer than this is the weather (or a laundry day), not a shower
-SHOWER_LONGEST = 3 * 3600.0
-
-
-def _reference(baseline: EntityBaseline | None) -> Reference | None:
-    """Return the reference of a series when its baseline has enough days."""
-    if baseline is None or baseline.days < MIN_REFERENCE_DAYS:
-        return None
-    return baseline.reference
+SHOWER_LONGEST = 3 * SECONDS_PER_HOUR
+# a series needs this many readings to hold a shower
+MIN_SHOWER_READINGS = 4
+# the percentiles of the day that give the usual level and spread of a room without a reference
+SHOWER_PERCENTILES = (10.0, 50.0, 90.0)
+# the strength of a shower is this at the limit, grows by one for each of this many points above it, within these bounds
+SHOWER_STRENGTH_BASE = 0.4
+SHOWER_STRENGTH_POINTS = 25.0
+SHOWER_STRENGTH_MIN = 0.3
+SHOWER_STRENGTH_MAX = 1.0
 
 
 def is_dead(item: Series, ref: Reference | None) -> bool:
@@ -74,30 +83,14 @@ def is_dead(item: Series, ref: Reference | None) -> bool:
     :param ref: What it read on the days before, when known.
     """
     if item.kind in BINARY_KINDS:
-        return ref is not None and ref.flat and float(np.ptp(item.values)) < EPSILON
+        return ref is not None and ref.flat and float(np.ptp(item.values)) < FLAT_EPSILON
     if item.kind not in NUMERIC_KINDS:
         return False
-    constant = float(np.ptp(item.values)) < EPSILON
+    constant = float(np.ptp(item.values)) < FLAT_EPSILON
     if not constant:
         return False
     # a sensor that was quiet today but moved on the days before (a TV that was off) is only quiet
-    return ref is None or ref.flat or (ref.high - ref.low) < EPSILON
-
-
-def _normalised(item: Series, ref: Reference) -> np.ndarray | None:
-    """Return the values of a series scaled with its reference, or None to keep the scale of the day."""
-    values = item.values
-    if item.kind == VoiceKind.AIR:
-        span = max(ref.high - ref.low, MIN_AIR_SPAN)
-        return np.clip((values - ref.low) / span, 0.0, 1.0)
-    if item.kind in POWER_KINDS:
-        if ref.peak < MIN_POWER_PEAK:
-            return None
-        return np.clip(values / ref.peak, 0.0, 1.0)
-    if item.kind == VoiceKind.TEMPERATURE:
-        span = max(ref.high - ref.low, MIN_TEMPERATURE_SPAN)
-        return np.clip((values - ref.mid) / span + 0.5, 0.0, 1.0)
-    return None
+    return ref is None or ref.flat or (ref.high - ref.low) < FLAT_EPSILON
 
 
 def rescale(
@@ -131,7 +124,7 @@ def rescale(
     return kept, dropped
 
 
-def showers(item: Series, covered: float = 86400.0) -> list[tuple[float, float]]:
+def showers(item: Series, covered: float = DAY_SECONDS) -> list[tuple[float, float]]:
     """
     Return the humidity spikes of a series as (second of the day, strength 0 to 1): a shower, a boiling pot.
 
@@ -142,13 +135,13 @@ def showers(item: Series, covered: float = 86400.0) -> list[tuple[float, float]]
     :param item: A humidity series (other kinds give nothing).
     :param covered: How many seconds of the day have happened.
     """
-    if item.kind != VoiceKind.HUMIDITY or len(item.times) < 4:
+    if item.kind != VoiceKind.HUMIDITY or len(item.times) < MIN_SHOWER_READINGS:
         return []
     if item.ref is not None:
         mid, spread = item.ref.mid, item.ref.high - item.ref.low
     else:
         weights = day_weights(item, covered)
-        low, mid, high = weighted_percentiles(item.values, weights, (10.0, 50.0, 90.0))
+        low, mid, high = weighted_percentiles(item.values, weights, SHOWER_PERCENTILES)
         spread = high - low
     limit = mid + max(SHOWER_RISE, SHOWER_SPREAD * spread)
     above = item.values > limit
@@ -169,7 +162,13 @@ def showers(item: Series, covered: float = 86400.0) -> list[tuple[float, float]]
         peak = float(item.values[index : end + 1].max())
         # where it climbs: the start of the stretch
         start = float(item.times[index])
-        strength = float(np.clip(0.4 + (peak - limit) / 25.0, 0.3, 1.0))
+        strength = float(
+            np.clip(
+                SHOWER_STRENGTH_BASE + (peak - limit) / SHOWER_STRENGTH_POINTS,
+                SHOWER_STRENGTH_MIN,
+                SHOWER_STRENGTH_MAX,
+            )
+        )
         if start < covered:
             if found and start - found[-1][0] < SHOWER_MERGE:
                 found[-1] = (found[-1][0], max(found[-1][1], strength))
@@ -177,3 +176,26 @@ def showers(item: Series, covered: float = 86400.0) -> list[tuple[float, float]]
                 found.append((start, strength))
         index = end + 1
     return sorted(found, key=lambda moment: -moment[1])[:SHOWER_MAX]
+
+
+def _reference(baseline: EntityBaseline | None) -> Reference | None:
+    """Return the reference of a series when its baseline has enough days."""
+    if baseline is None or baseline.days < MIN_REFERENCE_DAYS:
+        return None
+    return baseline.reference
+
+
+def _normalised(item: Series, ref: Reference) -> np.ndarray | None:
+    """Return the values of a series scaled with its reference, or None to keep the scale of the day."""
+    values = item.values
+    if item.kind == VoiceKind.AIR:
+        span = max(ref.high - ref.low, MIN_AIR_SPAN)
+        return np.clip((values - ref.low) / span, 0.0, 1.0)
+    if item.kind in POWER_KINDS:
+        if ref.peak < MIN_POWER_PEAK:
+            return None
+        return np.clip(values / ref.peak, 0.0, 1.0)
+    if item.kind == VoiceKind.TEMPERATURE:
+        span = max(ref.high - ref.low, MIN_TEMPERATURE_SPAN)
+        return np.clip((values - ref.mid) / span + 0.5, 0.0, 1.0)
+    return None

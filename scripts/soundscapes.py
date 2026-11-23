@@ -1,7 +1,7 @@
 """
 Render the soundscapes of Entropy FM and write what is needed to judge them without listening.
 
-    uv run python scripts/soundscapes.py [output folder] [--fast] [--only excerpts parts voices full notes condensed]
+    uv run python scripts/soundscapes.py [output folder] [--fast] [--only excerpts parts voices notes condensed]
 
 For each of the five styles, on the anomaly day of the demo house and on the kitchen of the real house:
 
@@ -9,8 +9,7 @@ For each of the five styles, on the anomaly day of the demo house and on the kit
   one minute from the night, one from the active daytime and one from the evening of the piece, with short cross
   fades, so that the arc of the day can be heard quickly;
 - `entropy_fm_<style>_parts.mp3`: each layer of the piece on its own for a few seconds, then all together;
-- `entropy_fm_ambient_demo_full.mp3` and `entropy_fm_berlin_school_demo_full.mp3`: the whole piece;
-- `condensed/entropy_fm_<style>_demo_condensed.mp3` (only with `--only condensed`): the whole condensed piece of the demo day;
+- `condensed/entropy_fm_<style>_demo_condensed.mp3` (only with `--only condensed`): the whole piece of the demo day;
 - `entropy_fm_voice_library.mp3`: every voice of the library alone for four seconds on a short phrase;
 - `soundscapes.md`: for each piece its length, its arc, what the day chose, how the house shaped it, the voices.
 """
@@ -338,7 +337,7 @@ def write_notes(
 
 def condensed_pieces(demo: demo_render.Demo, tier: Quality, out: Path) -> None:
     """
-    Render the whole condensed piece of the demo day (anomaly day, kitchen) in every style.
+    Render the whole piece of the demo day (anomaly day, kitchen) in every style.
 
     :param demo: The invented fortnight.
     :param tier: The quality tier.
@@ -348,7 +347,7 @@ def condensed_pieces(demo: demo_render.Demo, tier: Quality, out: Path) -> None:
 
     for style in demo.styles.STYLES:
         began = time.time()
-        score, _ = demo.score(demo_render.ANOMALY_DAY, ("kitchen",), style, tier, "condensed")
+        score, _ = demo.score(demo_render.ANOMALY_DAY, ("kitchen",), style, tier)
         audio = render_all(score, tier, "condensed")
         demo_render.render_to(out, f"entropy_fm_{style}_demo_condensed", audio)
         print(
@@ -365,7 +364,7 @@ def main() -> None:
     only = (
         set(sys.argv[sys.argv.index("--only") + 1 :])
         if "--only" in sys.argv
-        else {"excerpts", "parts", "voices", "full", "notes"}
+        else {"excerpts", "parts", "voices", "notes"}
     )
     demo = demo_render.Demo()
     import real_house_demo  # noqa: PLC0415
@@ -395,11 +394,6 @@ def main() -> None:
                 audio, index = parts(score, plan, tier)
                 demo_render.render_to(out, f"entropy_fm_{style}_parts", audio)
                 parts_index[title] = index
-            if "full" in only and label == "demo" and style in {"ambient", "berlin_school"}:
-                from entropy_fm.render import render_all  # noqa: PLC0415
-
-                audio = render_all(score, tier, "full")
-                demo_render.render_to(out, f"entropy_fm_{style}_demo_full", audio)
             print(f"{title}: {time.time() - began:.0f} s", flush=True)
     voice_index: list[str] = []
     if "voices" in only:

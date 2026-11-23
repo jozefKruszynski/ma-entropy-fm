@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .baseline import DAY_SECONDS, episodes
+from .baseline import episodes
 from .energy import activity
-from .synth import Scale
-from .timeline import PRESENCE_DOMAINS, VoiceKind
+from .synth import FIFTH_SEMITONES, SEMITONES_PER_OCTAVE, Scale
+from .timeline import DAY_SECONDS, PRESENCE_DOMAINS, SECONDS_PER_HOUR, VoiceKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -70,7 +70,7 @@ WEATHER_WARMTH = {
 # the key moves this far from home on the circle of fifths, and back, over twelve weeks
 FIFTHS_REACH = 3
 WALK_WEEKS = 2 * 2 * FIFTHS_REACH
-# how much the room of the day weighs in the mode, against the mode the user chose
+# how much the room of the day weighs in the mode, against the home mode
 HOME_MODE_WEIGHT = 0.25
 # how much the season counts in the warmth of a day, against its temperature (1) and its weather (0.8)
 SEASON_WEIGHT = 0.5
@@ -79,7 +79,32 @@ WEEKEND_BUSY = 0.15
 SEASON_TEMPO = 0.05
 SEASON_FILTER = 0.12
 HOME_HOURS_FOR_FULL_MOVEMENT = 14.0
+# a room whose CO2 is this far up its usual range has someone in it
+AIR_HOME_LEVEL = 0.3
 MOTION_CLASSES = frozenset({"motion", "occupancy", "moving"})
+# the density of a style is multiplied by this at no density, and by this much more at full density
+DENSITY_SCALE_BASE = 0.6
+DENSITY_SCALE_RANGE = 0.8
+DAYS_PER_YEAR = 365.0
+# the warmest day of the year falls this many days after the solstice's day number
+SEASON_OFFSET_DAYS = 10
+# the weights of the measures of a day's warmth, and the temperature in deviations that is as warm as can be
+TEMPERATURE_WEIGHT = 1.0
+WEATHER_WEIGHT = 0.8
+FULL_WARMTH_Z = 2.0
+# the warmth of a home mode that is not in `MODE_WARMTH`
+DEFAULT_HOME_WARMTH = -0.5
+# Saturday and Sunday are the days from this weekday on (Monday is 0)
+FIRST_WEEKEND_WEEKDAY = 5
+# a day with no energy or motion measured is this busy, and has this many hours at home
+DEFAULT_ENERGY = 0.5
+DEFAULT_HOME_HOURS = 8.0
+# a temperature needs this many days of baseline, and its spread is at least this wide, to say how unusual a day was
+MIN_TEMPERATURE_DAYS = 3
+MIN_TEMPERATURE_SPREAD = 0.6
+# the activity of the house is sampled at this step, in seconds, and the air of a room around its hours over this window
+ENERGY_STEP_SECONDS = 900.0
+AIR_WINDOW_SECONDS = 1800.0
 
 
 @dataclass(frozen=True)
@@ -117,12 +142,15 @@ class DayPalette:
     @property
     def density_scale(self) -> float:
         """Return what the density of the style is multiplied by."""
-        return 0.6 + 0.8 * self.density
+        return DENSITY_SCALE_BASE + DENSITY_SCALE_RANGE * self.density
 
     @property
     def filter_scale(self) -> float:
         """Return what the cutoff of the filters is multiplied by: brighter in summer."""
         return 1.0 + SEASON_FILTER * self.season
+
+
+DAYS_PER_WEEK = 7
 
 
 def week_index(day: date) -> int:
@@ -131,7 +159,7 @@ def week_index(day: date) -> int:
 
     :param day: The day.
     """
-    return (day.toordinal() - 1) // 7
+    return (day.toordinal() - 1) // DAYS_PER_WEEK
 
 
 def circle_position(day: date) -> int:
@@ -154,7 +182,7 @@ def season_warmth(day: date) -> float:
 
     :param day: The day.
     """
-    return -math.cos(2.0 * math.pi * (day.timetuple().tm_yday + 10) / 365.0)
+    return -math.cos(2.0 * math.pi * (day.timetuple().tm_yday + SEASON_OFFSET_DAYS) / DAYS_PER_YEAR)
 
 
 def day_warmth(traits: DayTraits, season: float, season_weight: float = SEASON_WEIGHT) -> float:
@@ -168,9 +196,9 @@ def day_warmth(traits: DayTraits, season: float, season_weight: float = SEASON_W
     """
     parts: list[tuple[float, float]] = [(season_weight, season)] if season_weight > 0 else []
     if traits.temp_z is not None:
-        parts.append((1.0, float(np.clip(traits.temp_z / 2.0, -1.0, 1.0))))
+        parts.append((TEMPERATURE_WEIGHT, float(np.clip(traits.temp_z / FULL_WARMTH_Z, -1.0, 1.0))))
     if traits.weather is not None and traits.weather in WEATHER_WARMTH:
-        parts.append((0.8, WEATHER_WARMTH[traits.weather]))
+        parts.append((WEATHER_WEIGHT, WEATHER_WARMTH[traits.weather]))
     if not parts:
         return 0.0
     return float(sum(w * v for w, v in parts) / sum(w for w, _ in parts))
@@ -192,21 +220,21 @@ def derive_palette(style: Style, day: date, home: Scale, traits: DayTraits) -> D
 
     :param style: The style of the track, which limits the modes.
     :param day: The day.
-    :param home: The key and mode the user chose, which the day moves away from.
+    :param home: The home key and mode, which the day moves away from.
     :param traits: What the day was like.
     """
     season = season_warmth(day)
     fifths = circle_position(day)
-    root = (home.root + 7 * fifths) % 12
+    root = (home.root + FIFTH_SEMITONES * fifths) % SEMITONES_PER_OCTAVE
     warmth = day_warmth(traits, season)
-    anchor = MODE_WARMTH.get(home.mode, -0.5)
+    anchor = MODE_WARMTH.get(home.mode, DEFAULT_HOME_WARMTH)
     target = float(np.clip(HOME_MODE_WEIGHT * anchor + warmth, -1.0, 1.0))
     mode = pick_mode(style.modes, target)
-    weekend = day.weekday() >= 5
-    energy = 0.5 if traits.energy is None else float(np.clip(traits.energy, 0.0, 1.0))
+    weekend = day.weekday() >= FIRST_WEEKEND_WEEKDAY
+    energy = DEFAULT_ENERGY if traits.energy is None else float(np.clip(traits.energy, 0.0, 1.0))
     busy = energy + (WEEKEND_BUSY if weekend else 0.0)
     tempo = (WEEKEND_TEMPO if weekend else 0.0) + SEASON_TEMPO * season
-    home_hours = 8.0 if traits.home_hours is None else traits.home_hours
+    home_hours = DEFAULT_HOME_HOURS if traits.home_hours is None else traits.home_hours
     return DayPalette(
         root=root,
         mode=mode,
@@ -217,10 +245,6 @@ def derive_palette(style: Style, day: date, home: Scale, traits: DayTraits) -> D
         fifths=fifths,
         weekend=weekend,
     )
-
-
-# a room whose CO2 is this far up its usual range has someone in it
-AIR_HOME_LEVEL = 0.3
 
 
 def measure_traits(
@@ -240,10 +264,17 @@ def measure_traits(
     z_values = []
     for item in series:
         baseline = baselines.get(item.entity_id)
-        if item.kind.value == "temperature" and baseline is not None and baseline.days >= 3:
-            spread = max(baseline.spread, 0.6)
+        if (
+            item.kind == VoiceKind.TEMPERATURE
+            and baseline is not None
+            and baseline.days >= MIN_TEMPERATURE_DAYS
+        ):
+            spread = max(baseline.spread, MIN_TEMPERATURE_SPREAD)
             z_values.append((float(np.mean(item.values)) - baseline.mean) / spread)
-    grid = np.arange(0.0, max(covered, 900.0), 900.0) + 450.0
+    grid = (
+        np.arange(0.0, max(covered, ENERGY_STEP_SECONDS), ENERGY_STEP_SECONDS)
+        + ENERGY_STEP_SECONDS / 2.0
+    )
     energy = float(np.mean(activity(series, grid))) if series else None
     hours: set[int] = set()
     for item in series:
@@ -252,7 +283,12 @@ def measure_traits(
             continue
         if item.is_motion and item.device_class in MOTION_CLASSES | {""}:
             for start, end in episodes(item, covered):
-                hours.update(range(int(start // 3600), int(min(end, covered) // 3600) + 1))
+                hours.update(
+                    range(
+                        int(start // SECONDS_PER_HOUR),
+                        int(min(end, covered) // SECONDS_PER_HOUR) + 1,
+                    )
+                )
     has_motion = any(
         item.is_motion and item.entity_id.partition(".")[0] not in PRESENCE_DOMAINS
         for item in series
@@ -261,8 +297,10 @@ def measure_traits(
     air = [item for item in series if item.kind == VoiceKind.AIR]
     if home_hours is None and air:
         # without motion sensors the CO2 of the rooms says when someone was about: the hours it is up
-        steps = (np.arange(int(min(covered, DAY_SECONDS) // 3600)) + 0.5) * 3600.0
-        level = np.mean([item.at(steps, 1800.0) for item in air], axis=0)
+        steps = (
+            np.arange(int(min(covered, DAY_SECONDS) // SECONDS_PER_HOUR)) + 0.5
+        ) * SECONDS_PER_HOUR
+        level = np.mean([item.at(steps, AIR_WINDOW_SECONDS) for item in air], axis=0)
         home_hours = float(np.count_nonzero(level > AIR_HOME_LEVEL))
     return DayTraits(
         temp_z=float(np.mean(z_values)) if z_values else None,

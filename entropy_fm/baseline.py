@@ -14,26 +14,49 @@ Assistant, so the baseline can be unit tested and cached as plain JSON.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .timeline import BINARY_KINDS, MIN_POWER_PEAK, Reference, VoiceKind
+from .timeline import (
+    BINARY_KINDS,
+    DAY_SECONDS,
+    HOURS_PER_DAY,
+    MIN_POWER_PEAK,
+    POWER_KINDS,
+    SECONDS_PER_HOUR,
+    Reference,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .timeline import Series
 
-SCHEMA = 2
-DAY_SECONDS = 86400.0
 # a baseline of fewer days than this is trusted only in part
 MIN_EVIDENCE_DAYS = 4
-POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 # the percentiles of the values that make the scale of an entity (see `timeline.Reference`)
 REFERENCE_LOW, REFERENCE_MID, REFERENCE_HIGH = 5.0, 50.0, 95.0
 # a power sensor has episodes only when it has a clear on and off level
 MIN_POWER_SPAN = 3.0
+# a binary entity is on above this, and a value that moves less than this is the same
+BINARY_ON_LEVEL = 0.5
+# a value that moves less than this is constant, and a span under it is none
+SPAN_EPSILON = 1e-9
+# a power sensor is on above its low level by this share of the way to its high one (the 10th and the 98th percentile)
+POWER_LOW_PERCENTILE = 10
+POWER_HIGH_PERCENTILE = 98
+POWER_ON_SHARE = 0.25
+# the highest daily value is the 98th percentile
+PEAK_PERCENTILE = 98.0
+PERCENT = 100.0
+# the hours of the neighbours of an hour count for this much of it
+NEIGHBOUR_SHARE = 0.5
+# the decimals that the stored values keep
+SHARE_DECIMALS = 4
+RATE_DECIMALS = 3
+CYCLE_DECIMALS = 1
 
 
 def episodes(series: Series, end: float = DAY_SECONDS) -> list[tuple[float, float]]:
@@ -44,13 +67,14 @@ def episodes(series: Series, end: float = DAY_SECONDS) -> list[tuple[float, floa
     :param end: Where the day ends, for a stretch that is still going.
     """
     if series.kind in BINARY_KINDS:
-        active = series.norm > 0.5
+        active = series.norm > BINARY_ON_LEVEL
     elif series.kind in POWER_KINDS:
         values = series.values
-        low, high = float(np.percentile(values, 10)), float(np.percentile(values, 98))
-        if high < MIN_POWER_PEAK or high < MIN_POWER_SPAN * max(low, 1e-9):
+        low = float(np.percentile(values, POWER_LOW_PERCENTILE))
+        high = float(np.percentile(values, POWER_HIGH_PERCENTILE))
+        if high < MIN_POWER_PEAK or high < MIN_POWER_SPAN * max(low, SPAN_EPSILON):
             return []
-        active = values > low + 0.25 * (high - low)
+        active = values > low + POWER_ON_SHARE * (high - low)
     else:
         return []
     found: list[tuple[float, float]] = []
@@ -119,30 +143,32 @@ class EntityBaseline:
 
         :param hour: The hour of the day, 0 to 24; a neighbouring hour counts for half.
         """
-        values = np.asarray(self.hours)
-        smooth = np.minimum(1.0, values + 0.5 * (np.roll(values, 1) + np.roll(values, -1)))
-        position = (hour % 24.0) - 0.5
+        smooth = self._smooth_hours
+        position = (hour % HOURS_PER_DAY) - 0.5
         first = int(np.floor(position))
         fraction = position - first
-        return float(smooth[first % 24] * (1.0 - fraction) + smooth[(first + 1) % 24] * fraction)
+        return float(
+            smooth[first % HOURS_PER_DAY] * (1.0 - fraction)
+            + smooth[(first + 1) % HOURS_PER_DAY] * fraction
+        )
 
     def to_json(self) -> dict[str, Any]:
         """Return the baseline as plain data for the cache."""
         return {
             "id": self.entity_id,
             "days": self.days,
-            "hours": [round(value, 4) for value in self.hours],
-            "active": round(self.active_days, 4),
-            "rate": round(self.rate, 3),
-            "cycle": round(self.cycle_s, 1),
-            "mean": round(self.mean, 4),
-            "spread": round(self.spread, 4),
-            "low": round(self.low, 4),
-            "mid": round(self.mid, 4),
-            "high": round(self.high, 4),
-            "peak": round(self.peak, 4),
-            "on_hours": round(self.on_hours, 3),
-            "on_count": round(self.on_count, 3),
+            "hours": [round(value, SHARE_DECIMALS) for value in self.hours],
+            "active": round(self.active_days, SHARE_DECIMALS),
+            "rate": round(self.rate, RATE_DECIMALS),
+            "cycle": round(self.cycle_s, CYCLE_DECIMALS),
+            "mean": round(self.mean, SHARE_DECIMALS),
+            "spread": round(self.spread, SHARE_DECIMALS),
+            "low": round(self.low, SHARE_DECIMALS),
+            "mid": round(self.mid, SHARE_DECIMALS),
+            "high": round(self.high, SHARE_DECIMALS),
+            "peak": round(self.peak, SHARE_DECIMALS),
+            "on_hours": round(self.on_hours, RATE_DECIMALS),
+            "on_count": round(self.on_count, RATE_DECIMALS),
             "flat": self.flat,
         }
 
@@ -171,6 +197,13 @@ class EntityBaseline:
             bool(data.get("flat", False)),
         )
 
+    @cached_property
+    def _smooth_hours(self) -> np.ndarray:
+        values = np.asarray(self.hours)
+        return np.asarray(
+            np.minimum(1.0, values + NEIGHBOUR_SHARE * (np.roll(values, 1) + np.roll(values, -1)))
+        )
+
 
 def weighted_percentiles(
     values: np.ndarray, weights: np.ndarray, percentiles: Sequence[float]
@@ -187,7 +220,7 @@ def weighted_percentiles(
     order = np.argsort(values, kind="stable")
     ordered, share = values[order], np.cumsum(weights[order])
     share = (share - 0.5 * weights[order]) / share[-1]
-    return [float(np.interp(p / 100.0, share, ordered)) for p in percentiles]
+    return [float(np.interp(p / PERCENT, share, ordered)) for p in percentiles]
 
 
 def day_weights(series: Series, end: float = DAY_SECONDS) -> np.ndarray:
@@ -212,7 +245,7 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
     :param days: The entity on each of those days.
     """
     count = len(days)
-    hours = np.zeros(24)
+    hours = np.zeros(HOURS_PER_DAY)
     active = 0
     total = 0
     gaps: list[float] = []
@@ -225,22 +258,22 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
     changed = False
     first_value: float | None = None
     for series in days:
-        if float(np.ptp(series.values)) > 1e-9 or (
-            first_value is not None and abs(float(series.values[0]) - first_value) > 1e-9
+        if float(np.ptp(series.values)) > SPAN_EPSILON or (
+            first_value is not None and abs(float(series.values[0]) - first_value) > SPAN_EPSILON
         ):
             changed = True
         first_value = float(series.values[0])
         span = day_weights(series)
         pooled.append(series.values)
         weights.append(span)
-        peaks.append(weighted_percentiles(series.values, span, (98.0,))[0])
+        peaks.append(weighted_percentiles(series.values, span, (PEAK_PERCENTILE,))[0])
         if series.kind in BINARY_KINDS:
-            on_seconds += float(span[series.values > 0.5].sum())
+            on_seconds += float(span[series.values > BINARY_ON_LEVEL].sum())
         found = episodes(series)
         on_periods += len(found) if series.kind in BINARY_KINDS else 0
         active += bool(found)
         total += len(found)
-        for hour in {int(start // 3600) % 24 for start, _ in found}:
+        for hour in {int(start // SECONDS_PER_HOUR) % HOURS_PER_DAY for start, _ in found}:
             hours[hour] += 1.0
         gaps.extend(np.diff([start for start, _ in found]).tolist())
         means.append(float(np.mean(series.values)))
@@ -264,7 +297,7 @@ def build_baseline(entity_id: str, days: Sequence[Series]) -> EntityBaseline:
         mid,
         high,
         max(peaks, default=0.0),
-        on_seconds / 3600.0 / scale,
+        on_seconds / SECONDS_PER_HOUR / scale,
         on_periods / scale,
         not changed,
     )

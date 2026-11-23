@@ -10,7 +10,7 @@ import pytest
 from entropy_fm.baseline import EntityBaseline, build_baselines
 from entropy_fm.day_analysis import analyze_day
 from entropy_fm.energy import activity, occupancy
-from entropy_fm.plan import MAX_EVENTS, MAX_SHOWERS, build_plan
+from entropy_fm.plan import MAX_EVENTS, MAX_SHOWERS, PieceOptions, build_plan
 from entropy_fm.quality import STANDARD
 from entropy_fm.references import MIN_REFERENCE_DAYS, is_dead, rescale, showers
 from entropy_fm.roles import classify
@@ -29,7 +29,7 @@ HOUR = 3600.0
 DAY = 86400.0
 
 
-def _series(  # noqa: PLR0913, PLR0917
+def _series(
     entity_id: str,
     kind: VoiceKind,
     times: list[float],
@@ -389,8 +389,7 @@ def test_a_calm_day_still_plays_the_whole_base_of_the_style(style: str) -> None:
         style,
         f"calm|{style}",
         Scale(2, "dorian"),
-        day=date(2026, 11, 17),
-        area_key="calm",
+        options=PieceOptions(day=date(2026, 11, 17), area_key="calm"),
     )
     counts = sorted(layers_playing(score))
     assert counts[int(len(counts) * 0.1)] >= BASE_LAYERS[style], (style, counts)

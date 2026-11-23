@@ -17,6 +17,10 @@ from typing import Any, NamedTuple
 Pattern = dict[str, Any]
 
 STEPS = 16
+# the characters of a lane: a rest, a full hit, and the digits that are tenths of the velocity
+REST = "."
+FULL_HIT = "X"
+VELOCITY_TENTHS = 10.0
 KINDS = ("sparse", "light", "mid", "full", "big")
 # the lanes that sound from each level of the kit on; the kick and the snare are always there
 LANE_FROM = {
@@ -49,9 +53,9 @@ def _lane(text: str) -> list[tuple[int, float]]:
     """Return the hits of a lane as (step, velocity)."""
     steps = text.replace(" ", "")
     return [
-        (index, 1.0 if char == "X" else int(char) / 10.0)
+        (index, 1.0 if char == FULL_HIT else int(char) / VELOCITY_TENTHS)
         for index, char in enumerate(steps)
-        if char != "."
+        if char != REST
     ]
 
 
@@ -80,7 +84,7 @@ def _build(lanes: dict[str, str], kind: str) -> Pattern:
     }
 
 
-def _family(  # noqa: PLR0913, PLR0917
+def _family(
     name: str,
     energy: float,
     modes: tuple[str, ...],

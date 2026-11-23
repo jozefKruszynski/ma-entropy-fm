@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .character import chord_bars
-from .score import CR
-from .synth import SCALES
-from .timeline import stable_hash
+from .character import OCTAVE_DEGREES, chord_bars
+from .score import CURVE_RATE
+from .synth import SCALES, SEMITONES_PER_OCTAVE
+from .timeline import SEED_MODULUS, stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,7 +41,8 @@ NO_GROWL = "none"
 GROWLS: dict[str, VoiceTag] = {NO_GROWL: (0.25, 0.0), "reese": (0.8, -0.3), "fm_growl": (0.95, 0.3)}
 VOICE_ENERGY_WEIGHT = 0.7
 VOICE_WARMTH_WEIGHT = 0.3
-WARMTH_SPAN = 2.0
+# a tag that runs from -1 to 1 spans two
+SIGNED_TAG_SPAN = 2.0
 LATE_NIGHT_COOLING = 0.3
 # the chord on a degree of a mode is stacked from thirds of the mode; a diminished one is no chord to rest on for bars
 DIMINISHED_FIFTH = 6
@@ -49,8 +50,16 @@ TRIAD_THIRDS = (2, 4)
 # a chord changes no faster than every two bars: the lines are cells of one bar and the sequence needs time to be heard
 MIN_CHORD_BARS = 2
 BARS_PER_PHRASE = 8
+# the sixteenth steps of a bar of four beats
+STEPS_PER_BAR = 16
+# the energy of a day is read in this many equal bands, and the chords get shorter as it rises within its band
+ENERGY_BANDS = 3
+ENERGY_BAND_WIDTH = 1.0 / ENERGY_BANDS
 WINDOW_DEGREES = 14
-OCTAVE_DEGREES = 7
+# the lower note of an open interval of the piano lies this many steps of the scale under the melody (a fifth, else a
+# sixth), and the piano is sent this far to the long hall
+PIANO_FIFTH_STEPS, PIANO_SIXTH_STEPS = 4, 5
+PIANO_HALL_SEND = 6.0
 # the lead: the motif is played in this octave, or the next when it would fall under middle C
 LEAD_OCTAVE = 4
 LEAD_FLOOR_MIDI = 60
@@ -62,6 +71,13 @@ MOTIF_CHOICE = "motif statements"
 # turned over, or followed by itself a step up
 MOTIF_TRANSPOSE_STEPS = (2, 4)
 MOTIF_STRETCH = 2.0
+# a sequence plays the motif twice, one after the other
+MOTIF_SEQUENCE_REPEATS = 2
+MOTIF_TRANSPOSE = "transpose"
+MOTIF_STRETCHED = "stretch"
+MOTIF_SHRUNK = "shrink"
+MOTIF_SEQUENCE = "sequence"
+MOTIF_INVERTED = "invert"
 MIN_MOTIF_NOTE_BEATS = 0.5
 MAX_MOTIF_BEATS = 16.0
 # the tail of the motif is turned over from this note on, so the first two intervals keep their direction
@@ -75,7 +91,7 @@ def voice_fit(tag: VoiceTag, character: DayCharacter) -> float:
     return (
         1.0
         - VOICE_ENERGY_WEIGHT * abs(tag[0] - character.energy)
-        - VOICE_WARMTH_WEIGHT * abs(tag[1] - warmth) / WARMTH_SPAN
+        - VOICE_WARMTH_WEIGHT * abs(tag[1] - warmth) / SIGNED_TAG_SPAN
     )
 
 
@@ -92,9 +108,9 @@ def triad_is_diminished(mode: str, degree: int) -> bool:
 
     def semitones(offset: int) -> int:
         shift, index = divmod(degree + offset, size)
-        return 12 * shift + steps[index] - steps[degree % size]
+        return SEMITONES_PER_OCTAVE * shift + steps[index] - steps[degree % size]
 
-    return semitones(TRIAD_THIRDS[1]) % 12 == DIMINISHED_FIFTH
+    return semitones(TRIAD_THIRDS[1]) % SEMITONES_PER_OCTAVE == DIMINISHED_FIFTH
 
 
 def progressions_for(mode: str, family: tuple[Progression, ...]) -> list[Progression]:
@@ -117,7 +133,7 @@ def harmonic_rhythm(plan: Plan) -> int:
         "harmonic rhythm",
         options,
         [
-            1.0 - abs(math.log2(bars / MIN_CHORD_BARS) / span - (1.0 - plan.character.energy))
+            closeness(math.log2(bars / MIN_CHORD_BARS) / span, 1.0 - plan.character.energy)
             for bars in options
         ],
     )
@@ -132,8 +148,8 @@ def section_curve(
     """Return a curve that holds a value for each section of the form and changes over `ramp` seconds from its start."""
     curve = np.zeros(plan.count)
     for start, end, role, intensity in spans:
-        curve[int(start * CR) : int(end * CR)] = value_of(role, intensity)
-    width = max(int(ramp * CR), 1)
+        curve[int(start * CURVE_RATE) : int(end * CURVE_RATE)] = value_of(role, intensity)
+    width = max(int(ramp * CURVE_RATE), 1)
     padded = np.concatenate((np.full(width - 1, curve[0]), curve))
     return np.asarray(np.convolve(padded, np.ones(width) / width, mode="valid"))
 
@@ -224,9 +240,35 @@ def lead_octave(scale: Scale, motif: tuple[tuple[int, float], ...]) -> int:
     return LEAD_OCTAVE if scale.midi(lowest, LEAD_OCTAVE) >= LEAD_FLOOR_MIDI else LEAD_OCTAVE + 1
 
 
+def motif_notes(plan: Plan, motif: tuple[tuple[int, float], ...]) -> list[tuple[int, float]]:
+    """Return a motif as (MIDI note, beats) in the key and mode of the day, from C4 up."""
+    octave = LEAD_OCTAVE
+    while min(plan.scale.midi(degree, octave) for degree, _ in motif) < LEAD_FLOOR_MIDI:
+        octave += 1
+    return [(plan.scale.midi(degree, octave), beats) for degree, beats in motif]
+
+
+def closeness(tag: float, wanted: float, span: float = 1.0) -> float:
+    """Return 1 when a tag is what the day wants and 0 when it is a whole span away."""
+    return 1.0 - abs(tag - wanted) / span
+
+
+def bars_fit(count: int, energy: float) -> list[float]:
+    """
+    Return how well each of the lengths of a chord suits the energy of the day: the busier within its band, the shorter.
+
+    :param count: How many lengths there are, the shortest first.
+    :param energy: The energy of the day, 0 to 1.
+    """
+    band = min(int(energy / ENERGY_BAND_WIDTH), ENERGY_BANDS - 1)
+    within = float(np.clip(energy / ENERGY_BAND_WIDTH - band, 0.0, 1.0))
+    last = max(count - 1, 1)
+    return [closeness(index / last, 1.0 - within) for index in range(count)]
+
+
 def motif_seed(plan: Plan) -> int:
     """Return a number that is the same for this room on this day and differs from day to day."""
-    return stable_hash("motif", plan.style, plan.area_key, str(plan.day), plan.seed) % 2**63
+    return stable_hash("motif", plan.style, plan.area_key, str(plan.day), plan.seed) % SEED_MODULUS
 
 
 def motif_sites(sites: list[int]) -> list[int]:
@@ -253,24 +295,24 @@ def develop_motif(
     """
     if statement <= 0:
         return motif
-    rng = np.random.default_rng(stable_hash("develop motif", seed, statement) % 2**63)
-    kinds = ["transpose", "stretch", "shrink", "sequence"]
+    rng = np.random.default_rng(stable_hash("develop motif", seed, statement) % SEED_MODULUS)
+    kinds = [MOTIF_TRANSPOSE, MOTIF_STRETCHED, MOTIF_SHRUNK, MOTIF_SEQUENCE]
     if len(motif) > MOTIF_INVERT_FROM:
-        kinds.append("invert")
+        kinds.append(MOTIF_INVERTED)
     kind = kinds[int(rng.integers(0, len(kinds)))]
     total = sum(beats for _, beats in motif)
-    if kind == "transpose":
+    if kind == MOTIF_TRANSPOSE:
         shift = MOTIF_TRANSPOSE_STEPS[int(rng.integers(0, len(MOTIF_TRANSPOSE_STEPS)))]
         return tuple((degree + shift, beats) for degree, beats in motif)
-    if kind == "invert":
+    if kind == MOTIF_INVERTED:
         pivot = motif[MOTIF_INVERT_FROM - 1][0]
         return tuple(
             (2 * pivot - degree if index >= MOTIF_INVERT_FROM else degree, beats)
             for index, (degree, beats) in enumerate(motif)
         )
-    if kind == "sequence" and total * 2 <= max_beats:
+    if kind == MOTIF_SEQUENCE and total * MOTIF_SEQUENCE_REPEATS <= max_beats:
         return motif + tuple((degree + MOTIF_SEQUENCE_STEP, beats) for degree, beats in motif)
-    if kind == "stretch" and total * MOTIF_STRETCH <= max_beats:
+    if kind == MOTIF_STRETCHED and total * MOTIF_STRETCH <= max_beats:
         return tuple((degree, beats * MOTIF_STRETCH) for degree, beats in motif)
     return tuple(
         (degree, max(beats / MOTIF_STRETCH, MIN_MOTIF_NOTE_BEATS)) for degree, beats in motif

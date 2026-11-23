@@ -4,45 +4,32 @@ Covers for the albums and the tracks, in the look of the covers of Music Assista
 Music Assistant has AI generated covers for playlists (the Playlist Metadata provider): a rich
 gradient of two or three colours chosen for the mood, a soft bloom and fine grain, a big white
 line-art illustration cropped off the top and right edges, and the title in the calm lower-left
-corner. This module makes the covers of Entropy FM the same way.
+corner. This module draws the covers of Entropy FM in the same look, locally, as a 1024 pixel JPEG
+(players need a raster image; Music Assistant passes an SVG through as it is): the gradient follows
+the style and the key and mode of the day, the glyph is that of the style (a sequencer for Berlin
+School, a horizon for Ambient, a record for Lo-fi, a drum for Ritual, torn slices of a waveform for
+Cinematic Glitch) and is shaped by the events of the day, the dots-to-wave of the icon is a small
+detail, and the title is set lower left. It is the same every time for the same area, day, style.
 
-- The cover that is always there is drawn locally as a 1024 pixel JPEG in that look (players need
-  a raster image; Music Assistant passes an SVG through as it is): the
-  gradient follows the style and the key and mode of the day, the glyph is that of the style (a
-  sequencer for Berlin School, a horizon for Ambient, a record for Lo-fi, a drum for Ritual, torn slices of a waveform for Cinematic Glitch)
-  and is shaped by the events of the day, the dots-to-wave of the icon is a small
-  detail, and the title is set lower left by the overlay of the covers. It is the same every time for the same area, day, style.
-- When the user turns it on, an AI image engine of Music Assistant makes the cover instead, from
-  the prompt of the upstream presets, with the title drawn over it afterwards. The only things in
-  that prompt are the title (the area, which is the user's own label for their own cover) and a
-  `{context}` of mood words from a fixed list: no entity id, name, person, time or count.
-  A cover is made once and kept, again only when its title, style, prompt or engine changes, the
-  old one stays until the new one is ready, there is a limit an hour, and a failure waits an hour,
-  then six, then a day, then until something changes. The cover that is drawn is shown meanwhile.
-
-The module imports nothing from Music Assistant (see `maart` for the upstream presets).
+The module imports nothing from Music Assistant.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import hashlib
-import json
-import time
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .timeline import VoiceKind, stable_hash
+from .constants import IMAGE_SEED_MODULUS
+from .timeline import DAY_SECONDS, VoiceKind, stable_hash
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Callable, Sequence
 
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
 
     from .timeline import Series
     from .titles import DayFacts
@@ -50,16 +37,12 @@ if TYPE_CHECKING:
 SIZE = 1024
 BINS = 96
 MAX_DOTS = 160
-COVER_OFF = "off"
-COVER_PROCEDURAL = "procedural"
-COVER_AI = "ai"
-DEFAULT_AI_PER_HOUR = 30
-AI_TIMEOUT_S = 300.0
-# a failed cover is tried again after these delays, and after the last one only when it changes
-FAILURE_BACKOFF_S = (3600.0, 6 * 3600.0, 24 * 3600.0)
-MAX_STORE_BYTES = 120_000_000
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-JPEG_MAGIC = b"\xff\xd8\xff"
+# a series moves the profile where its normalised value changes by more than this between two points
+MOVE_THRESHOLD = 0.1
+# the last fraction of the day that still falls in the last bin
+LAST_FRACTION = 0.9999
+# the share of the bins that is full on a day of full intensity
+FULL_INTENSITY_SHARE = 0.25
 
 # the colours of the styles: the dark end of the gradient, the middle, the bright end and an accent
 PALETTES: dict[str, tuple[tuple[int, int, int], ...]] = {
@@ -68,49 +51,6 @@ PALETTES: dict[str, tuple[tuple[int, int, int], ...]] = {
     "lofi": ((46, 26, 24), (140, 84, 62), (244, 176, 104), (214, 124, 150)),
     "ritual": ((26, 14, 22), (126, 40, 48), (226, 112, 66), (255, 206, 138)),
     "glitch": ((10, 12, 24), (52, 38, 112), (214, 62, 96), (120, 230, 255)),
-}
-# the words of the context: all fixed, none comes from the data
-STYLE_WORDS: dict[str, str] = {
-    "ambient": "soft drifting light and slow breathing shapes",
-    "berlin_school": "glowing sequences of light over a quiet machine landscape at sunset",
-    "lofi": "a dusty warm evening, worn textures and tape grain",
-    "ritual": "embers and slow ripples around a great drum in the dark, a quiet ceremony",
-    "glitch": "a dark film title sequence, a waveform cut into slices and torn out of place",
-}
-ROOT_COLOURS = (
-    "red",
-    "red-orange",
-    "orange",
-    "amber",
-    "yellow",
-    "green",
-    "teal",
-    "cyan",
-    "blue",
-    "indigo",
-    "violet",
-    "magenta",
-)
-MODE_MOODS: dict[str, str] = {
-    "dorian": "wistful and open",
-    "aeolian": "dark and tender",
-    "mixolydian": "bright and relaxed",
-    "ionian": "clear and warm",
-    "lydian": "airy and floating",
-    "phrygian": "tense and shadowed",
-    "pentatonic": "simple and calm",
-}
-MOTIF_WORDS: dict[VoiceKind, str] = {
-    VoiceKind.DISHWASHER: "interlocking arpeggios like rippling water",
-    VoiceKind.HOB: "small points of warm flame",
-    VoiceKind.PHASE: "gentle shifts from one scene to the next",
-    VoiceKind.MEDIA: "soft waves of sound",
-    VoiceKind.COVER: "slow light through blinds",
-    VoiceKind.DRONE: "a low steady hum",
-    VoiceKind.CHORD: "a warm kitchen glow",
-    VoiceKind.PLUCK: "single bright notes",
-    VoiceKind.TEMPERATURE: "a faint haze of warmth",
-    VoiceKind.HUMIDITY: "a veil of mist",
 }
 
 
@@ -147,27 +87,40 @@ def profile_of(series: Sequence[Series]) -> DayProfile:
         if item.kind == VoiceKind.SUN:
             continue
         moved = np.abs(np.diff(item.norm))
-        points = np.flatnonzero(moved > 0.1) + 1
+        points = np.flatnonzero(moved > MOVE_THRESHOLD) + 1
         if len(points):
             kinds.add(item.kind)
         for index in points:
-            fraction = float(np.clip(item.times[index] / 86400.0, 0.0, 0.9999))
+            fraction = float(np.clip(item.times[index] / DAY_SECONDS, 0.0, LAST_FRACTION))
             bins[int(fraction * BINS)] += float(moved[index - 1])
             found.append((fraction, float(moved[index - 1]), order.index(item.kind)))
     peak = float(bins.max())
     bins = bins / peak if peak > 0 else bins
     found.sort(key=lambda event: (-event[1], event[0], event[2]))
     kept = tuple(sorted(found[:MAX_DOTS]))
-    intensity = float(np.clip(np.sum(bins) / (BINS * 0.25), 0.0, 1.0))
+    intensity = float(np.clip(np.sum(bins) / (BINS * FULL_INTENSITY_SHARE), 0.0, 1.0))
     return DayProfile(bins, kept, frozenset(kinds), intensity)
 
 
 # -- the drawn cover -----------------------------------------------------------------------------
 
 
+# the key of the day moves the colours by up to this share, over the 12 keys (0 to 11)
+KEY_SHIFT = 0.4
+KEYS = 12
+LAST_KEY = 11.0
+# the colours of a mode are lighter (above 1) or darker (below 1); a mode that is not listed is 1
+MODE_LIFT = {"aeolian": 0.88, "phrygian": 0.84, "dorian": 0.96, "mixolydian": 1.08, "lydian": 1.14}
+DEFAULT_LIFT = 1.0
+# the middle of the gradient is scaled by this much plus up to this much more, by the seed
+WANDER_BASE = 0.88
+WANDER_RANGE = 0.24
+BYTE_MAX = 255
+
+
 def _hex(colour: np.ndarray) -> str:
     """Return a colour as #rrggbb."""
-    r, g, b = (int(np.clip(round(float(c)), 0, 255)) for c in colour)
+    r, g, b = (int(np.clip(round(float(c)), 0, BYTE_MAX)) for c in colour)
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
@@ -186,14 +139,13 @@ def mood_colours(style_key: str, root: int, mode: str, seed: str) -> list[str]:
     dark, middle, bright, accent = (
         np.array(c, dtype=np.float64) for c in PALETTES.get(style_key, PALETTES["ambient"])
     )
-    shift = 0.4 * (root % 12) / 11.0
+    shift = KEY_SHIFT * (root % KEYS) / LAST_KEY
     mix = np.array([[1 - shift, shift, 0.0], [0.0, 1 - shift, shift], [shift, 0.0, 1 - shift]])
-    light = {"aeolian": 0.88, "phrygian": 0.84, "dorian": 0.96, "mixolydian": 1.08, "lydian": 1.14}
-    lift = light.get(mode, 1.0)
-    rng = np.random.default_rng(stable_hash("mood", seed) % 2**32)
-    wander = 0.88 + 0.24 * float(rng.random())
+    lift = MODE_LIFT.get(mode, DEFAULT_LIFT)
+    rng = np.random.default_rng(stable_hash("mood", seed) % IMAGE_SEED_MODULUS)
+    wander = WANDER_BASE + WANDER_RANGE * float(rng.random())
     colours = [mix @ c * lift for c in (dark, middle * wander, bright, accent)]
-    return [_hex(np.clip(c, 0, 255)) for c in colours]
+    return [_hex(np.clip(c, 0, BYTE_MAX)) for c in colours]
 
 
 # A glyph is a list of drawing operations in its own units, centred on (0, 0):
@@ -207,8 +159,130 @@ def mood_colours(style_key: str, root: int, mode: str, seed: str) -> list[str]:
 type Op = tuple[Any, ...]
 
 
-def _arc(  # noqa: PLR0913, PLR0917
-    cx: float, cy: float, radius: float, start: float, end: float, steps: int = 48
+# the kinds of drawing operation
+OP_LINE = "line"
+OP_FILL = "fill"
+OP_RING = "ring"
+OP_DISC = "disc"
+OP_DASH = "dash"
+OP_BOX = "box"
+# the two colours of a glyph: white, and the accent of the style
+WHITE = "w"
+ACCENT = "a"
+OPAQUE = 1.0
+FULL_TURN = 360
+QUARTER_TURN = 90
+ARC_STEPS = 48
+
+# the sequencer of Berlin School: bars on a rail, the busiest one in the accent
+SEQ_MIN_STEPS = 9
+SEQ_EXTRA_STEPS = 5
+SEQ_SPAN = 720
+SEQ_LEFT = -330
+SEQ_BASE = 330
+SEQ_MIN_HEIGHT = 90
+SEQ_HEIGHT_RANGE = 330
+SEQ_FLOOR = 0.25
+SEQ_LEVEL_SHARE = 0.75
+SEQ_ACCENT_EVERY = 4
+SEQ_WIDE_WIDTH = 30
+SEQ_WIDTH = 20
+SEQ_CAP_HALF = 24
+SEQ_CAP_RISE = 36
+SEQ_CAP_WIDTH = 8
+SEQ_RAIL = ((-370, 372), (420, 372))
+SEQ_RAIL_WIDTH = 10
+
+# the horizon of Ambient: a sun on an arc, and three strokes of still water
+HORIZON_LINE = ((-420, 80), (520, 80))
+HORIZON_WIDTH = 22
+HORIZON_Y = 80
+HORIZON_RADIUS = 360
+HORIZON_ARC = (180, 360)
+HORIZON_ARC_WIDTH = 18
+SUN_LEFT = -250
+SUN_TRAVEL = 500
+SUN_RADIUS = 40
+WATER_WIDTHS = (420, 300, 190)
+WATER_TOP = 230
+WATER_PITCH = 70
+WATER_WIDTH = 16
+WATER_TAPER = 3
+
+# the record of Lo-fi: grooves, a label and a tonearm that lifts with the intensity of the day
+RECORD_MIN_GROOVES = 3
+RECORD_EXTRA_GROOVES = 4
+RECORD_RADIUS = 400
+RECORD_RIM = 26
+GROOVE_OUTER = 330
+GROOVE_INNER = 165
+GROOVE_WIDTH = 7
+GROOVE_ALPHA = 0.8
+RECORD_LABEL_RADIUS = 92
+RECORD_SPINDLE_RADIUS = 14
+TONEARM_TILT = 8
+TONEARM_TILT_RANGE = 14
+TONEARM_PIVOT = (470, -320)
+TONEARM_ELBOW_X = 360
+TONEARM_ELBOW_FACTOR = 4
+TONEARM_HEAD_X = 250
+TONEARM_HEAD_Y = 20
+TONEARM_HEAD_FACTOR = 6
+TONEARM_WIDTH = 20
+PIVOT_RADIUS = 30
+PIVOT_WIDTH = 14
+
+# the taiko of Ritual: a rim with lugs, a swirl of commas on the skin, ripples that grow with the day
+DRUM_MIN_LUGS = 8
+DRUM_LUG_STEP = 2
+DRUM_LUG_CHOICES = 3
+DRUM_RIM_RADIUS = 340
+DRUM_RIM_WIDTH = 26
+DRUM_SKIN_RADIUS = 280
+DRUM_SKIN_WIDTH = 8
+DRUM_SKIN_ALPHA = 0.8
+DRUM_LUG_RING = 310.0
+DRUM_LUG_RADIUS = 11
+COMMAS = 3
+COMMA_SPACING = 120.0
+COMMA_CENTRE = 100.0
+COMMA_RADIUS = 62
+COMMA_FROM = 150
+COMMA_TO = 400
+COMMA_WIDTH = 26
+RIPPLE_RADIUS = 400
+RIPPLE_PITCH = 46
+RIPPLE_WIDTH = 5
+RIPPLE_ALPHA = 0.7
+RIPPLE_FADE = 0.2
+RIPPLE_MIN = 1
+RIPPLE_RANGE = 2.0
+
+# the slices of Cinematic Glitch: a waveform of bars with a few torn sideways and one cut out
+SLICES_MIN = 17
+SLICES_STEP = 2
+SLICES_CHOICES = 3
+SLICES_LEFT = -380.0
+SLICES_SPAN = 760.0
+SLICE_MIN_HALF = 40.0
+SLICE_HALF_RANGE = 300.0
+SLICE_FLOOR = 0.15
+SLICE_LEVEL_SHARE = 0.85
+SLICE_WIDTH = 18
+TORN_COUNT = 3
+CUT_MARGIN = 3
+TEAR_MIN = 60.0
+TEAR_RANGE = 90.0
+TEAR_HALF = 16
+TEAR_WIDTH = 6
+TEAR_ALPHA = 0.8
+SLICES_TICKS = (((-420, 0), (-398, 0)), ((398, 0), (440, 0)))
+SLICES_TICK_WIDTH = 8
+SLICES_TICK_ALPHA = 0.8
+
+
+def _arc(
+    cx: float, cy: float, radius: float, start: float, end: float, steps: int = ARC_STEPS
 ) -> list[tuple[float, float]]:
     """Return the points of an arc from `start` to `end` degrees (0 is to the right, y points down)."""
     angles = np.radians(np.linspace(start, end, steps))
@@ -217,100 +291,159 @@ def _arc(  # noqa: PLR0913, PLR0917
 
 def _glyph_sequencer(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
     """Return stepped sequencer bars: as high as what happened in each stretch of the day."""
-    steps = 9 + int(rng.integers(0, 5))
+    steps = SEQ_MIN_STEPS + int(rng.integers(0, SEQ_EXTRA_STEPS))
     levels = profile.parts(steps)
-    gap = 720 // steps
+    gap = SEQ_SPAN // steps
     ops: list[Op] = []
     top = int(np.argmax(levels))
     for index, level in enumerate(levels):
-        height = 90 + 330 * (0.25 + 0.75 * level)
-        x = -330 + index * gap
-        colour = "a" if index == top else "w"
+        height = SEQ_MIN_HEIGHT + SEQ_HEIGHT_RANGE * (SEQ_FLOOR + SEQ_LEVEL_SHARE * level)
+        x = SEQ_LEFT + index * gap
+        colour = ACCENT if index == top else WHITE
+        width = SEQ_WIDE_WIDTH if index % SEQ_ACCENT_EVERY == 0 else SEQ_WIDTH
+        ops.append((OP_LINE, [(x, SEQ_BASE), (x, SEQ_BASE - height)], width, colour, OPAQUE))
+        cap = SEQ_BASE - height - SEQ_CAP_RISE
         ops.append(
-            ("line", [(x, 330), (x, 330 - height)], 30 if index % 4 == 0 else 20, colour, 1.0)
+            (
+                OP_LINE,
+                [(x - SEQ_CAP_HALF, cap), (x + SEQ_CAP_HALF, cap)],
+                SEQ_CAP_WIDTH,
+                WHITE,
+                OPAQUE,
+            )
         )
-        ops.append(
-            ("line", [(x - 24, 330 - height - 36), (x + 24, 330 - height - 36)], 8, "w", 1.0)
-        )
-    ops.append(("line", [(-370, 372), (420, 372)], 10, "w", 1.0))
+    ops.append((OP_LINE, list(SEQ_RAIL), SEQ_RAIL_WIDTH, WHITE, OPAQUE))
     return ops
 
 
 def _glyph_horizon(profile: DayProfile, rng: np.random.Generator) -> list[Op]:  # noqa: ARG001
     """Return a horizon arc: a sun at the hour of the busiest time, and still water."""
     peak = int(np.argmax(profile.bins)) / BINS
-    ops: list[Op] = [("line", [(-420, 80), (520, 80)], 22, "w", 1.0)]
-    ops.append(("line", _arc(0, 80, 360, 180, 360), 18, "w", 1.0))
-    sun_x = -250 + 500 * peak
-    sun_y = 80 - (max(0.0, 1 - (sun_x / 360) ** 2) ** 0.5) * 360
-    ops.append(("disc", sun_x, sun_y, 40, "a"))
-    for index, width in enumerate((420, 300, 190)):
-        y = 230 + index * 70
-        ops.append(("line", [(-width / 2, y), (width / 2, y)], 16 - 3 * index, "w", 1.0))
+    ops: list[Op] = [(OP_LINE, list(HORIZON_LINE), HORIZON_WIDTH, WHITE, OPAQUE)]
+    ops.append(
+        (
+            OP_LINE,
+            _arc(0, HORIZON_Y, HORIZON_RADIUS, *HORIZON_ARC),
+            HORIZON_ARC_WIDTH,
+            WHITE,
+            OPAQUE,
+        )
+    )
+    sun_x = SUN_LEFT + SUN_TRAVEL * peak
+    sun_y = HORIZON_Y - (max(0.0, 1 - (sun_x / HORIZON_RADIUS) ** 2) ** 0.5) * HORIZON_RADIUS
+    ops.append((OP_DISC, sun_x, sun_y, SUN_RADIUS, ACCENT))
+    for index, width in enumerate(WATER_WIDTHS):
+        y = WATER_TOP + index * WATER_PITCH
+        ops.append(
+            (
+                OP_LINE,
+                [(-width / 2, y), (width / 2, y)],
+                WATER_WIDTH - WATER_TAPER * index,
+                WHITE,
+                OPAQUE,
+            )
+        )
     return ops
 
 
 def _glyph_record(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
     """Return a record with grooves, a label and a tonearm."""
-    grooves = 3 + int(rng.integers(0, 4))
-    ops: list[Op] = [("ring", 0, 0, 400, 26, "w", 1.0)]
-    ops.extend(("ring", 0, 0, float(r), 7, "w", 0.8) for r in np.linspace(330, 165, grooves))
-    ops.append(("disc", 0, 0, 92, "a"))
-    ops.append(("disc", 0, 0, 14, "w"))
-    tilt = 8 + 14 * profile.intensity
-    ops.append(("line", [(470, -320), (360, -tilt * 4), (250, 20 + tilt * 6)], 20, "w", 1.0))
-    ops.append(("ring", 470, -320, 30, 14, "w", 1.0))
+    grooves = RECORD_MIN_GROOVES + int(rng.integers(0, RECORD_EXTRA_GROOVES))
+    ops: list[Op] = [(OP_RING, 0, 0, RECORD_RADIUS, RECORD_RIM, WHITE, OPAQUE)]
+    ops.extend(
+        (OP_RING, 0, 0, float(r), GROOVE_WIDTH, WHITE, GROOVE_ALPHA)
+        for r in np.linspace(GROOVE_OUTER, GROOVE_INNER, grooves)
+    )
+    ops.append((OP_DISC, 0, 0, RECORD_LABEL_RADIUS, ACCENT))
+    ops.append((OP_DISC, 0, 0, RECORD_SPINDLE_RADIUS, WHITE))
+    tilt = TONEARM_TILT + TONEARM_TILT_RANGE * profile.intensity
+    arm = [
+        TONEARM_PIVOT,
+        (TONEARM_ELBOW_X, -tilt * TONEARM_ELBOW_FACTOR),
+        (TONEARM_HEAD_X, TONEARM_HEAD_Y + tilt * TONEARM_HEAD_FACTOR),
+    ]
+    ops.append((OP_LINE, arm, TONEARM_WIDTH, WHITE, OPAQUE))
+    ops.append((OP_RING, *TONEARM_PIVOT, PIVOT_RADIUS, PIVOT_WIDTH, WHITE, OPAQUE))
     return ops
 
 
 def _glyph_drum(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
     """Return a taiko seen from the front with a swirl of three commas on the skin, and ripples that grow with the day's intensity."""
-    lugs = 8 + 2 * int(rng.integers(0, 3))
-    ops: list[Op] = [("ring", 0, 0, 340, 26, "w", 1.0), ("ring", 0, 0, 280, 8, "w", 0.8)]
+    lugs = DRUM_MIN_LUGS + DRUM_LUG_STEP * int(rng.integers(0, DRUM_LUG_CHOICES))
+    ops: list[Op] = [
+        (OP_RING, 0, 0, DRUM_RIM_RADIUS, DRUM_RIM_WIDTH, WHITE, OPAQUE),
+        (OP_RING, 0, 0, DRUM_SKIN_RADIUS, DRUM_SKIN_WIDTH, WHITE, DRUM_SKIN_ALPHA),
+    ]
     for index in range(lugs):
         angle = 2.0 * np.pi * index / lugs
-        ops.append(("disc", 310.0 * float(np.cos(angle)), 310.0 * float(np.sin(angle)), 11, "w"))
-    turn = float(rng.uniform(0.0, 120.0))
-    for index in range(3):
-        start = turn + 120.0 * index
-        cx, cy = 100.0 * float(np.cos(np.radians(start))), 100.0 * float(np.sin(np.radians(start)))
         ops.append(
             (
-                "line",
-                _arc(cx, cy, 62, start + 150, start + 400),
-                26,
-                "a" if index == 0 else "w",
-                1.0,
+                OP_DISC,
+                DRUM_LUG_RING * float(np.cos(angle)),
+                DRUM_LUG_RING * float(np.sin(angle)),
+                DRUM_LUG_RADIUS,
+                WHITE,
+            )
+        )
+    turn = float(rng.uniform(0.0, COMMA_SPACING))
+    for index in range(COMMAS):
+        start = turn + COMMA_SPACING * index
+        cx = COMMA_CENTRE * float(np.cos(np.radians(start)))
+        cy = COMMA_CENTRE * float(np.sin(np.radians(start)))
+        ops.append(
+            (
+                OP_LINE,
+                _arc(cx, cy, COMMA_RADIUS, start + COMMA_FROM, start + COMMA_TO),
+                COMMA_WIDTH,
+                ACCENT if index == 0 else WHITE,
+                OPAQUE,
             )
         )
     ops.extend(
-        ("ring", 0, 0, 400 + 46 * index, 5, "w", 0.7 - 0.2 * index)
-        for index in range(1 + round(2.0 * profile.intensity))
+        (
+            OP_RING,
+            0,
+            0,
+            RIPPLE_RADIUS + RIPPLE_PITCH * index,
+            RIPPLE_WIDTH,
+            WHITE,
+            RIPPLE_ALPHA - RIPPLE_FADE * index,
+        )
+        for index in range(RIPPLE_MIN + round(RIPPLE_RANGE * profile.intensity))
     )
     return ops
 
 
 def _glyph_slices(profile: DayProfile, rng: np.random.Generator) -> list[Op]:
     """Return a waveform of bars as high as the day's activity, with a few slices torn sideways and a cut gap."""
-    count = 17 + 2 * int(rng.integers(0, 3))
+    count = SLICES_MIN + SLICES_STEP * int(rng.integers(0, SLICES_CHOICES))
     levels = profile.parts(count)
     top = int(np.argmax(levels))
-    torn = {int(i) for i in rng.choice(count, size=3, replace=False)}
-    gap = int(rng.integers(3, count - 3))
+    torn = {int(i) for i in rng.choice(count, size=TORN_COUNT, replace=False)}
+    gap = int(rng.integers(CUT_MARGIN, count - CUT_MARGIN))
     ops: list[Op] = []
     for index, level in enumerate(levels):
         if index == gap:
             continue
-        x = -380.0 + index * (760.0 / (count - 1))
-        half = 40.0 + 300.0 * (0.15 + 0.85 * level)
+        x = SLICES_LEFT + index * (SLICES_SPAN / (count - 1))
+        half = SLICE_MIN_HALF + SLICE_HALF_RANGE * (SLICE_FLOOR + SLICE_LEVEL_SHARE * level)
         shift = 0.0
         if index in torn:
-            shift = float(rng.choice((-1.0, 1.0))) * (60.0 + 90.0 * float(rng.random()))
-            ops.append(("line", [(x - 16, -shift), (x + 16, -shift)], 6, "w", 0.8))
-        colour = "a" if index == top else "w"
-        ops.append(("line", [(x, shift - half), (x, shift + half)], 18, colour, 1.0))
-    ops.append(("line", [(-420, 0), (-398, 0)], 8, "w", 0.8))
-    ops.append(("line", [(398, 0), (440, 0)], 8, "w", 0.8))
+            shift = float(rng.choice((-1.0, 1.0))) * (TEAR_MIN + TEAR_RANGE * float(rng.random()))
+            ops.append(
+                (
+                    OP_LINE,
+                    [(x - TEAR_HALF, -shift), (x + TEAR_HALF, -shift)],
+                    TEAR_WIDTH,
+                    WHITE,
+                    TEAR_ALPHA,
+                )
+            )
+        colour = ACCENT if index == top else WHITE
+        ops.append((OP_LINE, [(x, shift - half), (x, shift + half)], SLICE_WIDTH, colour, OPAQUE))
+    ops.extend(
+        (OP_LINE, list(tick), SLICES_TICK_WIDTH, WHITE, SLICES_TICK_ALPHA) for tick in SLICES_TICKS
+    )
     return ops
 
 
@@ -363,13 +496,79 @@ REACH = {
     "ritual": 450,
     "glitch": 420,
 }
+# a style that has no listed reach, and a glyph that is not listed, reach and look like the horizon
+DEFAULT_REACH = 400
 SUPERSAMPLE = 2
+# where the red, green and blue pairs of a #rrggbb colour start, and the base of its numbers
+HEX_FIELDS = (1, 3, 5)
+HEX_BASE = 16
+# the gradient has three stops, the middle one at this position between 0 and 1
+GRADIENT_STOPS = 3
+STOP_POSITIONS = [0.0, 0.55, 1.0]
+CHANNELS = 3
+# the gradient runs along an angle, and is this wide of the cover
+GRADIENT_CENTRE = 0.5
+GRADIENT_SPREAD = 0.9
+# the bloom: its radius in cover widths, and how much of the way to white it goes at its centre
+BLOOM_RADIUS = 0.6
+BLOOM_STRENGTH = 0.34
+# the darkening of the lower left: an offset and a span of the diagonal, a curve and how dark it gets
+SHADE_DIAGONAL_OFFSET = 0.2
+SHADE_DIAGONAL_SPAN = 1.2
+SHADE_CURVE = 1.4
+SHADE_DARKNESS = 0.55
+# the cell of the corner of a rounded square, as a share of its side, and the steps of its arcs
+BOX_CORNER = 0.22
+BOX_ARC_STEPS = 8
+# a ring is drawn as a polygon of this many steps; a dashed circle has a dash every pitch, this long
+RING_STEPS = 96
+DASH_PITCH = 20
+DASH_LENGTH = 11
+DASH_STEPS = 8
+# a stroke is at least this wide in pixels
+MIN_STROKE = 1
+# the dots-to-wave of the icon, in sheet units: where it starts, the dots, and the wave they turn into
+WAVE_ORIGIN = (64, 84)
+WAVE_DOTS = 5
+WAVE_DOT_PITCH = 34
+WAVE_DOT_RADIUS = 6
+WAVE_START = 190
+WAVE_STEPS = 25
+WAVE_STEP = 10
+WAVE_AMPLITUDE = 14
+WAVE_FREQUENCY = 0.62
+WAVE_RAMP = 5
+WAVE_WIDTH = 5
+WAVE_ALPHA = 0.85
+# where the glyph is put on the cover, in cover units, with a random part on top of each
+GLYPH_ANGLE_RANGE = 80
+GLYPH_X = 560
+GLYPH_X_RANGE = 200
+GLYPH_Y = 250
+GLYPH_Y_RANGE = 220
+GLYPH_BOTTOM = 700
+GLYPH_SCALE = 0.95
+GLYPH_SCALE_RANGE = 0.4
+GLYPH_TURN_RANGE = 28
+GLYPH_TURN_HALF = 14
+# the bloom sits at a random place around this one, in cover widths
+BLOOM_X = 0.55
+BLOOM_X_RANGE = 0.3
+BLOOM_Y = 0.12
+BLOOM_Y_RANGE = 0.28
+# the standard deviation of the film grain
+GRAIN = 2.2
+JPEG_QUALITY = 90
+GLYPH_COLOURS = 3
+ACCENT_COLOUR = 3
 
 
 def _stops(colours: list[str], t: np.ndarray) -> np.ndarray:
     """Return the colour of a gradient of three stops at positions t between 0 and 1."""
-    rgb = np.array([[int(c[i : i + 2], 16) for i in (1, 3, 5)] for c in colours], dtype=np.float32)
-    channels = [np.interp(t, [0.0, 0.55, 1.0], rgb[:3, k]) for k in range(3)]
+    rgb = np.array(
+        [[int(c[i : i + 2], HEX_BASE) for i in HEX_FIELDS] for c in colours], dtype=np.float32
+    )
+    channels = [np.interp(t, STOP_POSITIONS, rgb[:GRADIENT_STOPS, k]) for k in range(CHANNELS)]
     return np.stack(channels, axis=-1).astype(np.float32)
 
 
@@ -386,15 +585,28 @@ def _background(
         (np.arange(size, dtype=np.float32) + 0.5) / size,
     )
     theta = np.radians(angle)
-    t = np.clip(0.5 + (x - 0.5) * np.cos(theta) * 0.9 + (y - 0.5) * np.sin(theta) * 0.9, 0.0, 1.0)
+    t = np.clip(
+        GRADIENT_CENTRE
+        + (x - GRADIENT_CENTRE) * np.cos(theta) * GRADIENT_SPREAD
+        + (y - GRADIENT_CENTRE) * np.sin(theta) * GRADIENT_SPREAD,
+        0.0,
+        1.0,
+    )
     canvas = _stops(colours, t)
-    glow = np.clip(1.0 - np.hypot(x - bloom[0], y - bloom[1]) / 0.6, 0.0, 1.0) ** 2 * 0.34
-    canvas += glow[..., None] * (255.0 - canvas)
-    shade = np.clip((x * -1 + y * 1 + 0.2) / 1.2, 0.0, 1.0) ** 1.4 * 0.55
+    glow = (
+        np.clip(1.0 - np.hypot(x - bloom[0], y - bloom[1]) / BLOOM_RADIUS, 0.0, 1.0) ** 2
+        * BLOOM_STRENGTH
+    )
+    canvas += glow[..., None] * (BYTE_MAX - canvas)
+    shade = (
+        np.clip((x * -1 + y * 1 + SHADE_DIAGONAL_OFFSET) / SHADE_DIAGONAL_SPAN, 0.0, 1.0)
+        ** SHADE_CURVE
+        * SHADE_DARKNESS
+    )
     return canvas * (1.0 - shade[..., None])
 
 
-def _draw_ops(  # noqa: C901, PLR0913, PLR0917
+def _draw_ops(
     ops: list[Op],
     place: Callable[[float, float], tuple[float, float]],
     scale: float,
@@ -406,8 +618,8 @@ def _draw_ops(  # noqa: C901, PLR0913, PLR0917
     from PIL import Image, ImageDraw  # noqa: PLC0415
 
     masks = {
-        "w": Image.new("L", (width or size, size), 0),
-        "a": Image.new("L", (width or size, size), 0),
+        WHITE: Image.new("L", (width or size, size), 0),
+        ACCENT: Image.new("L", (width or size, size), 0),
     }
     draws = {key: ImageDraw.Draw(image) for key, image in masks.items()}
     k = size / SIZE
@@ -421,26 +633,26 @@ def _draw_ops(  # noqa: C901, PLR0913, PLR0917
     def stroke(
         draw: ImageDraw.ImageDraw, points: list[tuple[float, float]], width: float, alpha: float
     ) -> None:
-        w = max(1, round(width * scale * k))
-        fill = round(255 * alpha)
+        w = max(MIN_STROKE, round(width * scale * k))
+        fill = round(BYTE_MAX * alpha)
         draw.line(points, fill=fill, width=w, joint="curve")
         for x, y in (points[0], points[-1]):
             draw.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=fill)
 
     for op in ops:
         kind = op[0]
-        if kind == "line":
+        if kind == OP_LINE:
             _, pts, width, colour, alpha = op
             stroke(draws[colour], [map_point(x, y) for x, y in pts], width, alpha)
-        elif kind == "fill":
+        elif kind == OP_FILL:
             _, pts, colour = op
-            draws[colour].polygon([map_point(x, y) for x, y in pts], fill=255)
-        elif kind in {"ring", "disc"}:
-            if kind == "ring":
+            draws[colour].polygon([map_point(x, y) for x, y in pts], fill=BYTE_MAX)
+        elif kind in {OP_RING, OP_DISC}:
+            if kind == OP_RING:
                 _, cx, cy, radius, width, colour, alpha = op
                 stroke(
                     draws[colour],
-                    [map_point(*pt) for pt in _arc(cx, cy, radius, 0, 360, 96)],
+                    [map_point(*pt) for pt in _arc(cx, cy, radius, 0, FULL_TURN, RING_STEPS)],
                     width,
                     alpha,
                 )
@@ -448,52 +660,65 @@ def _draw_ops(  # noqa: C901, PLR0913, PLR0917
                 _, cx, cy, radius, colour = op
                 x, y = map_point(cx, cy)
                 r = radius * scale * k
-                draws[colour].ellipse((x - r, y - r, x + r, y + r), fill=255)
-        elif kind == "dash":
+                draws[colour].ellipse((x - r, y - r, x + r, y + r), fill=BYTE_MAX)
+        elif kind == OP_DASH:
             _, cx, cy, radius, width, colour = op
-            for start in range(0, 360, 20):
+            for start in range(0, FULL_TURN, DASH_PITCH):
                 stroke(
                     draws[colour],
-                    [map_point(*pt) for pt in _arc(cx, cy, radius, start, start + 11, 8)],
+                    [
+                        map_point(*pt)
+                        for pt in _arc(cx, cy, radius, start, start + DASH_LENGTH, DASH_STEPS)
+                    ],
                     width,
-                    1.0,
+                    OPAQUE,
                 )
-        elif kind == "box":
+        elif kind == OP_BOX:
             _, cx, cy, side, width, colour = op
-            half, corner = side / 2, side * 0.22
+            half, corner = side / 2, side * BOX_CORNER
+            q = QUARTER_TURN
             pts = (
-                _arc(cx + half - corner, cy + half - corner, corner, 0, 90, 8)
-                + _arc(cx - half + corner, cy + half - corner, corner, 90, 180, 8)
-                + _arc(cx - half + corner, cy - half + corner, corner, 180, 270, 8)
-                + _arc(cx + half - corner, cy - half + corner, corner, 270, 360, 8)
+                _arc(cx + half - corner, cy + half - corner, corner, 0, q, BOX_ARC_STEPS)
+                + _arc(cx - half + corner, cy + half - corner, corner, q, 2 * q, BOX_ARC_STEPS)
+                + _arc(cx - half + corner, cy - half + corner, corner, 2 * q, 3 * q, BOX_ARC_STEPS)
+                + _arc(cx + half - corner, cy - half + corner, corner, 3 * q, 4 * q, BOX_ARC_STEPS)
             )
             if width:
-                stroke(draws[colour], [map_point(x, y) for x, y in [*pts, pts[0]]], width, 1.0)
+                stroke(draws[colour], [map_point(x, y) for x, y in [*pts, pts[0]]], width, OPAQUE)
             else:
-                draws[colour].polygon([map_point(x, y) for x, y in pts], fill=255)
+                draws[colour].polygon([map_point(x, y) for x, y in pts], fill=BYTE_MAX)
     return masks["w"], masks["a"]
 
 
 def _wave_ops() -> tuple[list[Op], list[Op]]:
     """Return the dots-to-wave of the icon: five dots that turn into one wave, in sheet units."""
-    x, y = 64, 84
-    dots: list[Op] = [("disc", x + index * 34, y, 6, "w") for index in range(5)]
+    x, y = WAVE_ORIGIN
+    dots: list[Op] = [
+        (OP_DISC, x + index * WAVE_DOT_PITCH, y, WAVE_DOT_RADIUS, WHITE)
+        for index in range(WAVE_DOTS)
+    ]
     wave: list[Op] = [
         (
-            "line",
+            OP_LINE,
             [
-                (x + 190 + step * 10, y + 14 * float(np.sin(step * 0.62)) * min(1.0, step / 5))
-                for step in range(25)
+                (
+                    x + WAVE_START + step * WAVE_STEP,
+                    y
+                    + WAVE_AMPLITUDE
+                    * float(np.sin(step * WAVE_FREQUENCY))
+                    * min(1.0, step / WAVE_RAMP),
+                )
+                for step in range(WAVE_STEPS)
             ],
-            5,
-            "w",
-            0.85,
+            WAVE_WIDTH,
+            WHITE,
+            WAVE_ALPHA,
         )
     ]
     return dots, wave
 
 
-def procedural_cover(  # noqa: PLR0913, PLR0917
+def procedural_cover(
     profile: DayProfile, style_key: str, root: int, mode: str, seed: str, title: str
 ) -> bytes:
     """
@@ -514,361 +739,163 @@ def procedural_cover(  # noqa: PLR0913, PLR0917
 
     from PIL import Image  # noqa: PLC0415
 
-    from .maart import draw_title_on  # noqa: PLC0415
-
-    rng = np.random.default_rng(stable_hash("glyph", seed) % 2**32)
+    rng = np.random.default_rng(stable_hash("glyph", seed) % IMAGE_SEED_MODULUS)
     colours = mood_colours(style_key, root, mode, seed)
-    angle = float(rng.random()) * 80
-    gx = 560 + float(rng.integers(0, 200))
-    scale = 0.95 + 0.4 * float(rng.random())
-    gy = min(250 + float(rng.integers(0, 220)), 700 - REACH.get(style_key, 400) * scale)
-    turn = float(rng.random()) * 28 - 14
-    bloom = (0.55 + 0.3 * float(rng.random()), 0.12 + 0.28 * float(rng.random()))
+    angle = float(rng.random()) * GLYPH_ANGLE_RANGE
+    gx = GLYPH_X + float(rng.integers(0, GLYPH_X_RANGE))
+    scale = GLYPH_SCALE + GLYPH_SCALE_RANGE * float(rng.random())
+    gy = min(
+        GLYPH_Y + float(rng.integers(0, GLYPH_Y_RANGE)),
+        GLYPH_BOTTOM - REACH.get(style_key, DEFAULT_REACH) * scale,
+    )
+    turn = float(rng.random()) * GLYPH_TURN_RANGE - GLYPH_TURN_HALF
+    bloom = (
+        BLOOM_X + BLOOM_X_RANGE * float(rng.random()),
+        BLOOM_Y + BLOOM_Y_RANGE * float(rng.random()),
+    )
     ops = GLYPHS.get(style_key, _glyph_horizon)(profile, rng)
-    canvas = _background(colours[:3], angle, bloom, SIZE)
+    canvas = _background(colours[:GLYPH_COLOURS], angle, bloom, SIZE)
     layer = SIZE * SUPERSAMPLE
     white, accent = _draw_ops(ops, lambda x, y: (gx + x, gy + y), scale, turn, layer)
     dots, wave = _wave_ops()
     small_white, _ = _draw_ops([*dots, *wave], lambda x, y: (x, y), 1.0, 0.0, layer)
-    accent_rgb = np.array([int(colours[3][i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float32)
+    accent_rgb = np.array(
+        [int(colours[ACCENT_COLOUR][i : i + 2], HEX_BASE) for i in HEX_FIELDS], dtype=np.float32
+    )
     box = Image.Resampling.BOX
     mask_w = (
         np.maximum(
             np.asarray(white.resize((SIZE, SIZE), box), dtype=np.float32),
             np.asarray(small_white.resize((SIZE, SIZE), box), dtype=np.float32),
         )[..., None]
-        / 255.0
+        / BYTE_MAX
     )
-    mask_a = np.asarray(accent.resize((SIZE, SIZE), box), dtype=np.float32)[..., None] / 255.0
-    canvas = canvas * (1 - mask_w) + 255.0 * mask_w
+    mask_a = np.asarray(accent.resize((SIZE, SIZE), box), dtype=np.float32)[..., None] / BYTE_MAX
+    canvas = canvas * (1 - mask_w) + BYTE_MAX * mask_w
     canvas = canvas * (1 - mask_a) + accent_rgb * mask_a
     # fine film grain, the same for the same seed
-    canvas += rng.normal(0.0, 2.2, (SIZE, SIZE, 1)).astype(np.float32)
-    image = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGB")
+    canvas += rng.normal(0.0, GRAIN, (SIZE, SIZE, 1)).astype(np.float32)
+    image = Image.fromarray(np.clip(canvas, 0, BYTE_MAX).astype(np.uint8), "RGB")
     image = draw_title_on(image, title)
     out = BytesIO()
-    image.save(out, "JPEG", optimize=True, quality=90)
+    image.save(out, "JPEG", optimize=True, quality=JPEG_QUALITY)
     return out.getvalue()
 
 
-# -- what the image engine is told ---------------------------------------------------------------
+# -- the title ---------------------------------------------------------------------------------------
+
+# the title is drawn as the covers of Music Assistant do (Apache-2.0, the Music Assistant authors)
+TITLE_MARGIN = 0.07
+TITLE_FONT_SIZE = 0.065
+TITLE_LINE_HEIGHT = 1.08
+TITLE_SHRINK = 0.9
+MAX_TITLE_LINES = 3
+MIN_TITLE_SCALE = 0.4
+SHADE_ALPHA = 170
+SHADE_FALLOFF = 1.5
+SHADOW_OFFSET = 3
+SHADOW_COLOUR = (0, 0, 0, 120)
+BLACK = (0, 0, 0)
+TRANSPARENT = (0, 0, 0, 0)
+# the shade covers this part of the height, from the bottom
+SHADE_HEIGHT_DIVISOR = 2
+TITLE_COLOUR = (255, 255, 255, 255)
+FONT_PATHS = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial Bold.ttf",
+    "/Windows/Fonts/arialbd.ttf",
+)
 
 
-def describe_day(
-    style_key: str, root: int, mode: str, intensity: float, kinds: Sequence[VoiceKind] = ()
-) -> str:
+def draw_title_on(canvas: Image.Image, title: str) -> Image.Image:
     """
-    Return the {context} of the prompt for a day, as sentences that each end with a space.
+    Draw the title in the lower-left corner of a cover, over a shade that fades out upwards.
 
-    It is put together from lists of words that are in this module. Nothing about the house gets
-    in: not an id, a name, an area, a person, a time or a count. Only the style, the colour and the
-    mood of the key, how lively the day was in three steps, a line about the light of a day and a few
-    abstract motifs for the kinds of things that went on.
-
-    :param style_key: The style.
-    :param root: The key of the day, 0 to 11.
-    :param mode: The mode of the day.
-    :param intensity: How lively the day was, 0 to 1.
-    :param kinds: The kinds of voice that played, which pick the motifs.
+    :param canvas: A square RGB image.
+    :param title: The title.
     """
-    colour = ROOT_COLOURS[root % 12]
-    mood = MODE_MOODS.get(mode, "calm")
-    pace = (
-        "quiet and still"
-        if intensity < 0.34
-        else "gently lively"
-        if intensity < 0.67
-        else "busy and bright"
-    )
-    wanted = set(kinds)
-    motifs = [MOTIF_WORDS[kind] for kind in MOTIF_WORDS if kind in wanted][:3]
-    text = (
-        f"The cover sets the mood of a day of home life as generative music: "
-        f"{STYLE_WORDS.get(style_key, STYLE_WORDS['ambient'])}. "
-        f"Dominant colour {colour}, mood {mood}, the day feels {pace}. "
-        "Light that moves from a bright morning through a warm evening to a soft night. "
-    )
-    if motifs:
-        text += f"Abstract motifs: {', '.join(motifs)}. "
-    return text
+    from PIL import Image, ImageDraw  # noqa: PLC0415
+
+    size = canvas.width
+    margin = int(size * TITLE_MARGIN)
+    font, font_size, lines = _fit_title(title, int(size * TITLE_FONT_SIZE), size - 2 * margin)
+    line_height = int(font_size * TITLE_LINE_HEIGHT)
+    top = size - margin - line_height * len(lines)
+    shade = Image.new("RGBA", canvas.size, TRANSPARENT)
+    draw_shade = ImageDraw.Draw(shade)
+    height = size // SHADE_HEIGHT_DIVISOR
+    for offset in range(height):
+        alpha = int(SHADE_ALPHA * (1 - offset / height) ** SHADE_FALLOFF)
+        draw_shade.line([(0, size - 1 - offset), (size, size - 1 - offset)], fill=(*BLACK, alpha))
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), shade)
+    draw = ImageDraw.Draw(canvas)
+    for index, line in enumerate(lines):
+        y = top + index * line_height
+        draw.text((margin + SHADOW_OFFSET, y + SHADOW_OFFSET), line, fill=SHADOW_COLOUR, font=font)
+        draw.text((margin, y), line, fill=TITLE_COLOUR, font=font)
+    return canvas.convert("RGB")
 
 
-# -- keeping, limiting and making covers -----------------------------------------------------------
-
-
-class RateLimiter:
-    """At most `limit` events in any hour, counted by the clock that is passed in."""
-
-    def __init__(self, limit: int, clock: Callable[[], float] = time.monotonic) -> None:
-        """
-        Set the limit.
-
-        :param limit: The most events an hour; 0 lets none through.
-        :param clock: Returns seconds, for tests.
-        """
-        self.limit = limit
-        self._clock = clock
-        self._times: deque[float] = deque()
-
-    def reset(self) -> None:
-        """Forget the events of the last hour."""
-        self._times.clear()
-
-    def allow(self) -> bool:
-        """Return True and count an event when one more is within the limit."""
-        now = self._clock()
-        while self._times and now - self._times[0] >= 3600.0:
-            self._times.popleft()
-        if len(self._times) >= self.limit:
-            return False
-        self._times.append(now)
-        return True
-
-
-def is_image(data: bytes) -> bool:
-    """Return True for bytes that begin like a PNG, a JPEG or an SVG."""
-    return len(data) > 100 and (
-        data.startswith((PNG_MAGIC, JPEG_MAGIC))
-        or data.lstrip()[:5].lower() in {b"<svg ", b"<?xml"}
-    )
-
-
-class CoverStore:
-    """Generated covers on disk: those of pinned days stay, the others are cached with an LRU."""
-
-    def __init__(
-        self, permanent: str | Path, cache: str | Path, limit: int = MAX_STORE_BYTES
-    ) -> None:
-        """
-        Use two folders.
-
-        :param permanent: Where covers of pinned days live, in the storage of the server.
-        :param cache: Where the others live, in the cache of the server.
-        :param limit: The most bytes the cache folder may hold.
-        """
-        self.permanent = Path(permanent)
-        self.cache = Path(cache)
-        self.limit = limit
-
-    @staticmethod
-    def name(key: str) -> str:
-        """Return the file name of a cover key."""
-        return hashlib.sha256(key.encode()).hexdigest()[:32] + ".img"
-
-    def get(self, key: str) -> bytes | None:
-        """Return a stored cover, or None; a file that is not an image is thrown away."""
-        for folder in (self.permanent, self.cache):
-            path = folder / self.name(key)
-            try:
-                data = path.read_bytes()
-            except OSError:
-                continue
-            if not is_image(data):
-                path.unlink(missing_ok=True)
-                continue
-            if folder is self.cache:
-                path.touch()
-            return data
-        return None
-
-    def put(self, key: str, data: bytes, *, pinned: bool) -> None:
-        """
-        Keep a cover; write it to a temporary file and rename it, so a crash leaves nothing broken.
-
-        :param key: The cover key.
-        :param data: The image.
-        :param pinned: True for a day that is in the library: it stays for good.
-        """
-        folder = self.permanent if pinned else self.cache
-        write_atomic(folder / self.name(key), data)
-        if not pinned:
-            self._evict()
-
-    def clear(self) -> int:
-        """
-        Remove every cover in both folders, and the slots of the last good covers; nothing else.
-
-        :returns: How many covers were removed.
-        """
-        removed = 0
-        for folder in (self.permanent, self.cache):
-            for path in [*folder.glob("*.img"), *folder.glob("*.img.part")]:
-                path.unlink(missing_ok=True)
-                removed += 1
-        (self.cache / "slots.json").unlink(missing_ok=True)
-        return removed
-
-    def _evict(self) -> None:
-        """Remove the least recently used covers of the cache until it fits."""
-        files = sorted(
-            (p for p in self.cache.glob("*.img") if p.is_file()), key=lambda p: p.stat().st_mtime
-        )
-        total = sum(p.stat().st_size for p in files)
-        for path in files:
-            if total <= self.limit:
-                break
-            total -= path.stat().st_size
-            path.unlink(missing_ok=True)
-
-
-def write_atomic(path: Path, data: bytes) -> None:
+def _fit_title(
+    title: str, font_size: int, max_width: int
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, int, list[str]]:
     """
-    Write a file by writing a temporary one and renaming it.
+    Return the font, its size and the lines that fit the whole title within the width.
 
-    :param path: The file.
-    :param data: What to write.
+    The font shrinks until the title takes at most a few lines; nothing of it is ever dropped.
+
+    :param title: The title to fit.
+    :param font_size: The size to start from.
+    :param max_width: The width each line has to fit in, in pixels.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".part")
-    temp.write_bytes(data)
-    temp.replace(path)
+    from PIL import Image, ImageDraw  # noqa: PLC0415
+
+    measure = ImageDraw.Draw(Image.new("L", (1, 1)))
+    min_size = max(1, int(font_size * MIN_TITLE_SCALE))
+    while True:
+        font = _font(font_size)
+        lines = _wrap_title(title, font, max_width, measure)
+        if len(lines) <= MAX_TITLE_LINES or font_size <= min_size:
+            return font, font_size, lines
+        font_size = max(min_size, int(font_size * TITLE_SHRINK))
 
 
-class CoverMaker:
-    """
-    Decides what a cover is: nothing, drawn, or made by an engine in the background.
+def _wrap_title(
+    title: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+    measure: ImageDraw.ImageDraw,
+) -> list[str]:
+    """Return the title wrapped into lines that fit the width, breaking only too long words."""
+    lines: list[str] = []
+    current = ""
+    for word in title.split():
+        candidate = f"{current} {word}" if current else word
+        if measure.textlength(candidate, font=font) <= max_width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        # a word wider than the line on its own is split over as many lines as it needs
+        current = ""
+        for char in word:
+            if current and measure.textlength(current + char, font=font) > max_width:
+                lines.append(current)
+                current = ""
+            current += char
+    if current:
+        lines.append(current)
+    return lines or [title]
 
-    A cover made by an engine is asked for the first time somebody wants it, and the drawn cover
-    (or the engine's previous one, when only the title, style, prompt or engine changed) is shown
-    until it is ready.
-    """
 
-    def __init__(
-        self,
-        store: CoverStore,
-        limiter: RateLimiter,
-        clock: Callable[[], float] = time.time,
-        timeout: float = AI_TIMEOUT_S,
-    ) -> None:
-        """
-        Set up the maker.
+def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Return a bold TrueType font at the given size, falling back to Pillow's built-in."""
+    from PIL import ImageFont  # noqa: PLC0415
 
-        :param store: Where AI covers are kept.
-        :param limiter: How many AI covers an hour.
-        :param clock: Returns seconds since the epoch, for tests.
-        :param timeout: The longest an engine may take.
-        """
-        self.store = store
-        self.limiter = limiter
-        self._clock = clock
-        self.timeout = timeout
-        # key of a cover to (number of failures, when it may be tried again; inf for never)
-        self._failures: dict[str, tuple[int, float]] = {}
-        self._tasks: dict[str, asyncio.Task[None]] = {}
-        self._slots_path = store.cache / "slots.json"
-        self._slots: dict[str, str] = self._load_slots()
-        self.generated = 0
-
-    def _load_slots(self) -> dict[str, str]:
-        """Read which key was the last good cover of each slot, so that it stays across restarts."""
-        try:
-            data = json.loads(self._slots_path.read_text())
-        except OSError, ValueError:
-            return {}
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-
-    def _save_slots(self) -> None:
-        with contextlib.suppress(OSError):
-            write_atomic(self._slots_path, json.dumps(self._slots, sort_keys=True).encode())
-
-    def backing_off(self, key: str) -> bool:
-        """Return whether a cover failed recently, or too often to be tried again for now."""
-        failure = self._failures.get(key)
-        return failure is not None and self._clock() < failure[1]
-
-    async def wait(self) -> None:
-        """Wait for the covers that are being made (for tests and for a clean unload)."""
-        if self._tasks:
-            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
-
-    def stop(self) -> None:
-        """Cancel what is being made."""
-        for task in self._tasks.values():
-            task.cancel()
-
-    async def clear(self) -> int:
-        """
-        Throw away every cover made so far, and what was remembered about them.
-
-        Covers that are being made are cancelled, the failures and the slots of the last good covers
-        are forgotten and the AI limiter starts again, so that the new covers are not held back by
-        the old ones.
-
-        :returns: How many covers were removed.
-        """
-        tasks = list(self._tasks.values())
-        self.stop()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        self._tasks.clear()
-        self._failures.clear()
-        self._slots.clear()
-        self.limiter.reset()
-        return await asyncio.to_thread(self.store.clear)
-
-    async def make(  # noqa: PLR0913
-        self,
-        mode: str,
-        slot: str,
-        key: str,
-        draw: Callable[[], bytes],
-        generate: Callable[[], Awaitable[bytes]] | None,
-        *,
-        pinned: bool = False,
-    ) -> bytes | None:
-        """
-        Return the cover to show for a slot now, or None when covers are off.
-
-        :param mode: `off`, `procedural` or `ai`.
-        :param slot: One id for an area, a day and a style, whatever the settings.
-        :param key: What shapes the cover (title, style, prompt, engine and the slot): a new key
-            means a new cover, and the one of the old key is shown until it is ready.
-        :param draw: Draws the procedural cover.
-        :param generate: Makes the whole AI cover (asks the engine, draws the title); None when
-            there is no engine.
-        :param pinned: Whether the day is in the library.
-        """
-        if mode == COVER_OFF:
-            return None
-        if mode != COVER_AI or generate is None:
-            return await self._drawn(slot, draw)
-        kept = self.store.get(key)
-        if kept is not None:
-            return kept
-        if key not in self._tasks and not self.backing_off(key) and self.limiter.allow():
-            self._tasks[key] = asyncio.create_task(self._run(slot, key, generate, pinned=pinned))
-        previous = self._slots.get(slot)
-        old = self.store.get(previous) if previous and previous != key else None
-        return old if old is not None else await self._drawn(slot, draw)
-
-    async def _drawn(self, slot: str, draw: Callable[[], bytes]) -> bytes:
-        """Return the drawn cover of a slot: from the cache when it was made before, else drawn."""
-        key = f"drawn|{slot}"
-        kept = self.store.get(key)
-        if kept is not None:
-            return kept
-        image = await asyncio.to_thread(draw)
-        if is_image(image):
-            await asyncio.to_thread(self.store.put, key, image, pinned=False)
-        return image
-
-    async def _run(
-        self, slot: str, key: str, generate: Callable[[], Awaitable[bytes]], *, pinned: bool
-    ) -> None:
-        """Make one cover, keep it, and remember the failure when it does not work."""
-        try:
-            image = await asyncio.wait_for(generate(), self.timeout)
-            if not is_image(image):
-                raise ValueError("the engine did not return an image")  # noqa: TRY301
-            await asyncio.to_thread(self.store.put, key, image, pinned=pinned)
-            self._slots[slot] = key
-            self._save_slots()
-            self._failures.pop(key, None)
-            self.generated += 1
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 - whatever the engine does, the drawn cover stays
-            count = self._failures.get(key, (0, 0.0))[0] + 1
-            wait = FAILURE_BACKOFF_S[count - 1] if count <= len(FAILURE_BACKOFF_S) else float("inf")
-            self._failures[key] = (count, self._clock() + wait)
-        finally:
-            self._tasks.pop(key, None)
+    for path in FONT_PATHS:
+        if Path(path).exists():
+            with contextlib.suppress(OSError):
+                return ImageFont.truetype(path, size)
+    return ImageFont.load_default(size=size)

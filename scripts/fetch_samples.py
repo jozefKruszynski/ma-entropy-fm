@@ -115,7 +115,7 @@ def write_ogg(path: Path, wave: np.ndarray, quality: int = 3) -> None:
 QUEUE: list[tuple[str, str, np.ndarray, str, int, float, float]] = []
 
 
-def queue(  # noqa: PLR0913, PLR0917
+def queue(
     folder: str,
     name: str,
     wave: np.ndarray,

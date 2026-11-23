@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "Entropy FM",
-    "description": "Speelt de geschiedenis van je Home Assistant als generatieve klanklandschappen: elk gebied is een artiest, elke dag een album, en elk album bevat één lang, langzaam evoluerend stuk in zes stijlen. Het leest alleen uit Home Assistant en synthetiseert de audio tijdens het afspelen. Als de kamers die je toont veranderen, vraagt het Music Assistant om zijn eigen items opnieuw te synchroniseren."
+    "description": "Speelt de geschiedenis van je Home Assistant als generatieve klanklandschappen: elk gebied is een artiest, elke dag een album, en elk album bevat één langzaam evoluerend stuk in vijf stijlen. Het leest alleen uit Home Assistant en synthetiseert de audio tijdens het afspelen. Als de kamers die je toont veranderen, vraagt het Music Assistant om zijn eigen items opnieuw te synchroniseren."
   },
   "config_entries": {
     "use_ha_plugin": {
@@ -22,43 +22,32 @@
     },
     "days": {
       "label": "Dagen om te bladeren",
-      "description": "Hoeveel dagen terug je kunt bladeren en zoeken, van 1 tot 10. De recorder van Home Assistant bewaart standaard 10 dagen. Dagen die je een hartje gaf blijven bewaard, hoe oud ook."
+      "description": "Hoeveel dagen terug je kunt bladeren, zoeken en in de bibliotheek hebt, van 1 tot 10. De recorder van Home Assistant bewaart standaard 10 dagen. Dagen die je een hartje gaf blijven bewaard, hoe oud ook."
     },
     "render_quality": {
       "label": "Renderkwaliteit",
-      "description": "Hoeveel van de processor een seconde muziek mag gebruiken. Licht past bij een Raspberry Pi, Standaard bij een kleine server, Rijk bij een pc. Auto draait bij het starten een korte test en kiest de rijkste stand die minder dan 30 procent van een kern gebruikt, gemeten met de duurste stijl die je aanbiedt."
+      "description": "Hoeveel van de processor een seconde muziek mag gebruiken. Licht past bij een Raspberry Pi, Standaard bij een kleine server, Rijk bij een pc. Auto draait bij het starten een korte test en kiest de rijkste stand die minder dan 30 procent van een kern gebruikt, gemeten met de duurste stijl die je aanbiedt.",
+      "options": {
+        "auto": "Automatisch",
+        "light": "Licht",
+        "standard": "Standaard",
+        "rich": "Rijk"
+      }
     },
     "audio_cache_mb": {
       "label": "Grootte van de audiocache (MB)",
-      "description": "Gerenderde tracks van afgelopen dagen worden als Opus-audio in een Ogg-bestand in de cache van de server bewaard, zodat opnieuw afspelen geen processor kost. De langst ongebruikte bestanden worden boven deze grootte gewist. 0 zet de cache uit."
-    },
-    "prerender": {
-      "label": "Afgelopen dagen vooraf renderen",
-      "description": "Kort na middernacht, en eenmaal na het starten, worden de tracks van de dag die net voorbij is in de audiocache gerenderd, zodat ze meteen spelen en geen processor kosten. Uit doet niets. Vastgezette kamers rendert de kamers waarvan je elke dag bewaart, in elke stijl die je aanbiedt, en de dagen en tracks waaraan je een hartje gaf. Alle kamers rendert ook elke kamer en het hele huis in de standaardstijl. Het werkt één track tegelijk met lage prioriteit, wacht zolang er een track speelt, vult de audiocache nooit voor meer dan 80 procent en doet niets als de cache uit staat."
-    },
-    "piece_length": {
-      "label": "Lengte van het stuk",
-      "description": "Condensed: dezelfde dag en hetzelfde plan in een kort stuk, ongeveer 7 minuten bij Ambient, Berlin School en Ritual en ongeveer 5 minuten bij Lo-fi en Cinematic Glitch. De uren van de dag gaan sneller voorbij en de kleine gebeurtenissen van het huis worden uitgedund zodat het niet druk wordt; ongewone momenten blijven. Soundscape: zo lang als de dag druk was, 10 tot 22 minuten. Condensed-stukken en soundscapes worden apart gecachet en vooraf gerenderd."
-    },
-    "key": {
-      "label": "Toonsoort",
-      "description": "De grondtoon waarop alle toonhoogtes zijn gestemd."
-    },
-    "scale": {
-      "label": "Toonladder",
-      "description": "De toonladder waarop alle toonhoogtes zijn gestemd."
+      "description": "Gerenderde tracks van afgelopen dagen worden als Opus-audio in een Ogg-bestand in de cache van de server bewaard, zodat opnieuw afspelen geen processor kost. De langst ongebruikte bestanden worden boven deze grootte gewist. Kort na middernacht, en eenmaal na het starten, worden de tracks van de dag die net voorbij is erin gerenderd voor de kamers waarvan je elke dag bewaart en voor de dagen en tracks waaraan je een hartje gaf, in elke stijl die je aanbiedt. Dat gebeurt één track tegelijk met lage prioriteit, wacht zolang er een track speelt en vult de cache nooit voor meer dan 80 procent. 0 zet de cache en het vooraf renderen uit."
     },
     "styles": {
       "label": "Aangeboden stijlen",
-      "description": "In welke stijlen elk klanklandschap wordt aangeboden: Ambient, Berlin School, Lo-fi, Ritual en Cinematic Glitch. Elke stijl is een versie van dezelfde dag, zoals \"Vaatwasser bij Schemering (Lo-fi)\", zodat je ze kunt vergelijken."
-    },
-    "default_style": {
-      "label": "Standaardstijl",
-      "description": "De stijl die een oud nummer-id zonder versie afspeelt en die de voorrendering Alle kamers voor elke kamer gebruikt. Hij wordt altijd aangeboden. De bibliotheek toont elke stijl die wordt aangeboden, niet alleen deze."
-    },
-    "energy_offset": {
-      "label": "Activiteitsverschuiving",
-      "description": "Verschuift hoe levendig het huis voor de muziek lijkt, in procentpunten van -50 tot 50. De activiteit brengt lagen in en uit en bepaalt hoe dicht ze zijn en hoe snel ze veranderen; ze schrijft nooit noten."
+      "description": "In welke stijlen elk klanklandschap wordt aangeboden: Ambient, Berlin School, Lo-fi, Ritual en Cinematic Glitch. Elke stijl is een versie van dezelfde dag, zoals \"Vaatwasser bij Schemering (Lo-fi)\", zodat je ze kunt vergelijken.",
+      "options": {
+        "ambient": "Ambient",
+        "berlin_school": "Berlin School",
+        "lofi": "Lo-fi",
+        "ritual": "Ritual",
+        "glitch": "Cinematic Glitch"
+      }
     },
     "day_character": {
       "label": "Karakter van de dag",
@@ -76,29 +65,18 @@
       "label": "Rolkeuze",
       "description": "Kies zelf de rol van een entiteit, één `entiteit_id=rol` per regel, zoals `sensor.geschirrspueler_power=dishwasher`. Rollen: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. Je kunt in Home Assistant ook een entiteit of apparaat het label `entropy_fm_dishwasher` (enzovoort) geven; een label wint van deze lijst."
     },
-    "library_days": {
-      "label": "Dagen in de bibliotheek",
-      "description": "Hoeveel van de laatste dagen van elke kamer in de bibliotheek staan (vanaf vandaag teruggeteld). Dagen die je een hartje geeft blijven altijd bewaard; het venster bepaalt alleen welke recente dagen de bibliotheek toont."
-    },
     "rooms": {
       "label": "Kamers om te tonen",
       "description": "Kamers die in Music Assistant verschijnen. Geen enkele aangevinkt toont elke kamer, ook kamers die later worden toegevoegd."
     },
-    "house_selected_rooms": {
-      "label": "Heel huis gebruikt alleen deze kamers",
-      "description": "Aan: het klanklandschap van het hele huis wordt gemaakt van de hierboven aangevinkte kamers (van elke kamer als er geen is aangevinkt). Uit: het wordt gemaakt van elke kamer van het huis, wat er ook is aangevinkt."
-    },
-    "hide_quiet_rooms": {
-      "label": "Stille kamers verbergen",
-      "description": "Bied geen kamer aan waarin in de dagen waarover je kunt bladeren niets is veranderd dat een noot of gebeurtenis zou maken (een deur, een bewegingssensor, een lamp, een apparaat). Een kamer met alleen temperatuur-, vochtigheids- of statische sensoren is ook stil. Dit wordt gelezen uit de huidige statussen van de entiteiten, niet uit de geschiedenis. Een kamer die alleen op één dag stil is, biedt die dag gewoon aan."
-    },
     "keep_rooms": {
       "label": "Elke dag voor altijd bewaren",
       "description": "Dagen van deze kamers worden permanent opgeslagen, ook nadat Home Assistant zijn geschiedenis heeft opgeruimd. Toont of verbergt geen kamers."
-    },
-    "covers": {
-      "label": "Covers",
-      "description": "Wat de covers van de dagen tonen. Uit: geen covers. Getekend uit de dag: een plaatje dat op je server wordt gemaakt uit de gebeurtenissen van de dag, in de stijl van de covers van Music Assistant; het is elke keer hetzelfde."
     }
+  },
+  "errors": {
+    "plugin_missing": "Entropy FM heeft de Home Assistant-plug-in van Music Assistant nodig: voeg die toe en verbind hem onder Instellingen > Providers, of zet 'Home Assistant-plug-in gebruiken' uit en vul een URL en een langlevend toegangstoken in",
+    "connection_missing": "Vul de URL en een langlevend toegangstoken van Home Assistant in",
+    "login_refused": "Home Assistant heeft het toegangstoken niet geaccepteerd"
   }
 }

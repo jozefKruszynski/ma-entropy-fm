@@ -261,6 +261,7 @@ def build_item(source: Source, room: str | None, day: date, style: str, seconds:
     :param seconds: The length of the excerpt.
     """
     from entropy_fm.palette import derive_palette  # noqa: PLC0415
+    from entropy_fm.plan import PieceOptions  # noqa: PLC0415
     from entropy_fm.quality import STANDARD  # noqa: PLC0415
     from entropy_fm.render import render_all  # noqa: PLC0415
     from entropy_fm.scape import scape_score  # noqa: PLC0415
@@ -270,18 +271,19 @@ def build_item(source: Source, room: str | None, day: date, style: str, seconds:
     found = prepare(source, room, day)
     name = room or WHOLE_HOUSE
     home = Scale(HOME_ROOT, HOME_MODE)
-    extra: dict[str, Any] = {"character": found.character} if found.character else {}
     score, plan = scape_score(
         found.series,
         found.analysis,
         style,
         f"{name}|{day.isoformat()}|_scape|{style}",
         home,
-        day=day,
-        palette=derive_palette(get_style(style), day, home, found.traits),
         quality=STANDARD,
-        area_key=name,
-        **extra,
+        options=PieceOptions(
+            day=day,
+            palette=derive_palette(get_style(style), day, home, found.traits),
+            area_key=name,
+            character=found.character or None,
+        ),
     )
     start = busiest_start(plan, seconds)
     audio = render_all(score, STANDARD, "contrast", None, start_s=start, end_s=start + seconds)

@@ -1,36 +1,39 @@
 """
 Fetch the history of a day from Home Assistant, once, and keep it in the cache of the server.
 
-The library never calls this. Only playing a track does, and then once per area and day: a past
-day stays in the cache for a week, today for five minutes.
+Playing a track reads one area and day. A listing of the library reads each day once for all the
+rooms it needs (`HistoryStore.prefetch`), so Home Assistant is asked once per day and not once per
+room and day. A past day stays in the cache for a week, today for five minutes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .baseline import DAY_SECONDS, EntityBaseline, build_baselines, has_data
+from .baseline import EntityBaseline, build_baselines, has_data
 from .character import raw_energy
-from .const import (
+from .constants import (
     BASELINE_DAYS,
     BASELINE_EXPIRATION,
     BASELINE_SCHEMA,
     CACHE_CATEGORY_BASELINE,
     CACHE_CATEGORY_HISTORY,
     CACHE_SCHEMA,
+    CHECKSUM_LENGTH,
     PAST_DAY_EXPIRATION,
     TODAY_EXPIRATION,
     WEEK_ENERGY_SCHEMA,
 )
 from .library import day_bounds
 from .references import rescale
-from .timeline import Series, build_series, raw_to_json, series_from_json
+from .timeline import DAY_SECONDS, Series, build_series, raw_to_json, series_from_json
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
     from datetime import date, datetime, tzinfo
     from logging import Logger
 
@@ -51,7 +54,7 @@ class Cache(Protocol):
     ) -> Any:
         """Return the cached data or the default."""
 
-    async def set(  # noqa: PLR0913, PLR0917
+    async def set(
         self,
         key: str,
         data: Any,
@@ -87,7 +90,7 @@ class HistoryStore:
         cache: Cache,
         provider_id: str,
         logger: Logger,
-        pin_source: Callable[[str, date], dict[str, Any] | None] | None = None,
+        pin_source: Callable[[str, date], Awaitable[dict[str, Any] | None]] | None = None,
     ) -> None:
         """
         Prepare the store.
@@ -130,11 +133,7 @@ class HistoryStore:
         key, checksum = self._day_key(scope, infos, day)
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
-            data = await self.cache.get(
-                key, provider=self.provider_id, category=CACHE_CATEGORY_HISTORY, checksum=checksum
-            )
-            if data is None and self.pin_source is not None:
-                data = self.pin_source(scope, day)
+            data = await self._stored(scope, key, checksum, day)
             if data is None:
                 data = await self._fetch(infos, tz, now, start, end)
                 await self.cache.set(
@@ -146,14 +145,6 @@ class HistoryStore:
                     checksum=checksum,
                 )
         return dict(data)
-
-    def _day_key(self, scope: str, infos: Sequence[EntityInfo], day: date) -> tuple[str, str]:
-        """Return the key and the checksum under which the history of a group and a day is cached."""
-        key = f"{scope}|{day.isoformat()}"
-        checksum = hashlib.sha256(
-            f"{CACHE_SCHEMA}|{','.join(sorted(info.entity_id for info in infos))}".encode()
-        ).hexdigest()[:16]
-        return key, checksum
 
     async def cached_series(
         self, scope: str, infos: Sequence[EntityInfo], day: date
@@ -169,12 +160,55 @@ class HistoryStore:
         if not infos:
             return None
         key, checksum = self._day_key(scope, infos, day)
-        data = await self.cache.get(
-            key, provider=self.provider_id, category=CACHE_CATEGORY_HISTORY, checksum=checksum
-        )
-        if data is None and self.pin_source is not None:
-            data = self.pin_source(scope, day)
+        data = await self._stored(scope, key, checksum, day)
         return None if data is None else series_from_data(infos, dict(data))
+
+    async def prefetch(
+        self,
+        groups: Mapping[str, Sequence[EntityInfo]],
+        day: date,
+        tz: tzinfo,
+        now: datetime,
+    ) -> None:
+        """
+        Read the history of several groups on one day from Home Assistant at once, and keep it.
+
+        Groups that are cached or pinned are left alone, so a day is asked for once however many rooms it has.
+
+        :param groups: Entities by scope, such as the rooms by area id.
+        :param day: The day.
+        :param tz: The time zone of the house.
+        :param now: The current time; today is only read up to it.
+        """
+        start, end = day_bounds(day, tz)
+        expiration = TODAY_EXPIRATION if now.astimezone(tz) < end else PAST_DAY_EXPIRATION
+        keyed = {
+            self._day_key(scope, infos, day): (scope, infos)
+            for scope, infos in groups.items()
+            if infos
+        }
+        async with contextlib.AsyncExitStack() as stack:
+            for key, _ in sorted(keyed):
+                await stack.enter_async_context(self._locks.setdefault(key, asyncio.Lock()))
+            missing = {
+                (key, checksum): infos
+                for (key, checksum), (scope, infos) in keyed.items()
+                if await self._stored(scope, key, checksum, day) is None
+            }
+            if not missing:
+                return
+            fetched = await self._fetch(
+                [info for infos in missing.values() for info in infos], tz, now, start, end
+            )
+            for (key, checksum), infos in missing.items():
+                await self.cache.set(
+                    key,
+                    {info.entity_id: fetched[info.entity_id] for info in infos},
+                    expiration=expiration,
+                    provider=self.provider_id,
+                    category=CACHE_CATEGORY_HISTORY,
+                    checksum=checksum,
+                )
 
     async def day_series(
         self,
@@ -196,7 +230,7 @@ class HistoryStore:
         data = await self.day_data(scope, infos, day, tz, now)
         return series_from_data(infos, data)
 
-    async def baselines(  # noqa: PLR0913, PLR0917
+    async def baselines(
         self,
         scope: str,
         infos: Sequence[EntityInfo],
@@ -223,7 +257,7 @@ class HistoryStore:
         key = f"baseline|{scope}|{day.isoformat()}"
         checksum = hashlib.sha256(
             f"{BASELINE_SCHEMA}|{days}|{','.join(sorted(info.entity_id for info in infos))}".encode()
-        ).hexdigest()[:16]
+        ).hexdigest()[:CHECKSUM_LENGTH]
         cached = await self.cache.get(
             key, provider=self.provider_id, category=CACHE_CATEGORY_BASELINE, checksum=checksum
         )
@@ -233,7 +267,7 @@ class HistoryStore:
             await self.day_series(scope, infos, day - timedelta(days=offset), tz, now)
             for offset in range(1, days + 1)
         ]
-        built = build_baselines(before)
+        built = await asyncio.to_thread(build_baselines, before)
         await self.cache.set(
             key,
             [item.to_json() for item in built.values()],
@@ -244,7 +278,7 @@ class HistoryStore:
         )
         return built
 
-    async def week_energies(  # noqa: PLR0913, PLR0917
+    async def week_energies(
         self,
         groups: Sequence[tuple[str, Sequence[EntityInfo]]],
         day: date,
@@ -273,7 +307,7 @@ class HistoryStore:
         key = f"week|{','.join(scope for scope, _ in groups)}|{day.isoformat()}"
         checksum = hashlib.sha256(
             f"{WEEK_ENERGY_SCHEMA}|{days}|{','.join(sorted(info.entity_id for info in infos))}".encode()
-        ).hexdigest()[:16]
+        ).hexdigest()[:CHECKSUM_LENGTH]
         cached = await self.cache.get(
             key, provider=self.provider_id, category=CACHE_CATEGORY_BASELINE, checksum=checksum
         )
@@ -301,6 +335,23 @@ class HistoryStore:
             checksum=checksum,
         )
         return energies
+
+    async def _stored(self, scope: str, key: str, checksum: str, day: date) -> Any:
+        """Return the history of a group and a day from the cache, else from its pin, else None."""
+        data = await self.cache.get(
+            key, provider=self.provider_id, category=CACHE_CATEGORY_HISTORY, checksum=checksum
+        )
+        if data is None and self.pin_source is not None:
+            data = await self.pin_source(scope, day)
+        return data
+
+    def _day_key(self, scope: str, infos: Sequence[EntityInfo], day: date) -> tuple[str, str]:
+        """Return the key and the checksum under which the history of a group and a day is cached."""
+        key = f"{scope}|{day.isoformat()}"
+        checksum = hashlib.sha256(
+            f"{CACHE_SCHEMA}|{','.join(sorted(info.entity_id for info in infos))}".encode()
+        ).hexdigest()[:CHECKSUM_LENGTH]
+        return key, checksum
 
     async def _fetch(
         self,

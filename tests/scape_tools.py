@@ -58,10 +58,9 @@ def demo(
     index: int = demo_render.ANOMALY_DAY,
     areas: tuple[str, ...] = ("kitchen",),
     tier: Quality = STANDARD,
-    length_mode: str = "full",
 ) -> tuple[Score, Plan]:
-    """Return the score and the plan of a day of the fortnight in a style, full or condensed."""
-    return the_demo().score(index, areas, style, tier, length_mode)
+    """Return the score and the plan of a day of the fortnight in a style."""
+    return the_demo().score(index, areas, style, tier)
 
 
 def window(

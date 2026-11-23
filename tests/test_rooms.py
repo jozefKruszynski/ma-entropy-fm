@@ -1,4 +1,4 @@
-"""Tests of the settings that pick the rooms and the piece length, through the provider and a fake house."""
+"""Tests of the settings that pick the rooms, through the provider and a fake house."""
 
 import asyncio
 import shutil
@@ -12,12 +12,8 @@ from music_assistant_models.enums import MediaType
 from music_assistant_models.errors import MediaNotFoundError
 
 from entropy_fm import EntropyFMProvider
-from entropy_fm.const import (
-    CONF_HIDE_QUIET,
-    CONF_HOUSE_SELECTED,
+from entropy_fm.constants import (
     CONF_KEEP_ROOMS,
-    CONF_LENGTH,
-    CONF_PRERENDER,
     CONF_ROOMS,
     CONF_STYLES,
     WHOLE_HOUSE_ID,
@@ -154,7 +150,7 @@ def test_the_catalog_reads_when_a_state_last_changed() -> None:
 async def test_the_new_settings_and_their_defaults(
     mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """Rooms (empty is all), the whole house on the ticked rooms, hide quiet rooms and the piece length."""
+    """Rooms (empty is all) and the rooms that can be kept; the settings that are gone are not offered."""
     provider, _ = await _setup(mass, fake_hass)
     entries = {entry.key: entry for entry in await provider.get_config_entries()}
     rooms = entries[CONF_ROOMS]
@@ -165,11 +161,7 @@ async def test_the_new_settings_and_their_defaults(
         "kitchen",
         "living_room",
     ]
-    assert entries[CONF_HOUSE_SELECTED].default_value is True
-    assert entries[CONF_HIDE_QUIET].default_value is True
-    length = entries[CONF_LENGTH]
-    assert length.default_value == "condensed"
-    assert [option.value for option in length.options] == ["condensed", "full"]
+    assert not {"hide_quiet_rooms", "piece_length", "prerender"} & set(entries)
 
 
 async def test_no_room_ticked_is_every_room_and_a_ticked_room_is_alone(
@@ -221,10 +213,10 @@ async def test_a_ticked_room_that_does_not_exist_leaves_nothing(
     assert await _names(provider) == []
 
 
-async def test_the_whole_house_is_made_of_the_ticked_rooms_unless_that_is_off(
+async def test_the_whole_house_is_made_of_the_ticked_rooms(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The house mix reads the ticked rooms only; with the setting off it reads every room."""
+    """The house mix reads the ticked rooms only, and every room when none is ticked."""
     provider, _ = await _setup(mass, fake_hass)
     catalog = await provider._catalog_all()  # noqa: SLF001
     assert provider._house_rooms(catalog) == ["kitchen", "living_room"]  # noqa: SLF001
@@ -242,14 +234,14 @@ async def test_the_whole_house_is_made_of_the_ticked_rooms_unless_that_is_off(
     assert "binary_sensor.kitchen_door" in ids
     assert not ids & {"light.living_room_ceiling", "binary_sensor.living_room_window"}
 
-    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"], CONF_HOUSE_SELECTED: False})
+    _quiet(provider, monkeypatch, **{CONF_ROOMS: []})
     assert provider._house_rooms(catalog) == ["kitchen", "living_room"]  # noqa: SLF001
     again = await provider._gather(parsed)  # noqa: SLF001
     assert {s.entity_id for s in again.series} == {s.entity_id for s in every.series}
 
 
 @pytest.mark.usefixtures("hallway")
-async def test_a_quiet_room_is_hidden_unless_the_setting_is_off(
+async def test_a_quiet_room_is_hidden(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A room whose motion sensor has not moved all window, and whose temperature never plays, is not offered."""
@@ -262,11 +254,8 @@ async def test_a_quiet_room_is_hidden_unless_the_setting_is_off(
     kitchen = await provider.get_artist_albums("kitchen")
     assert len(cellar) == len(kitchen) > 5
 
-    _quiet(provider, monkeypatch, **{CONF_HIDE_QUIET: False})
-    assert await _names(provider) == ["Whole House", "Cellar", "Hallway", "Kitchen", "Living Room"]
-
     # a smaller window makes the cellar quiet as well: its door last changed three days ago
-    _quiet(provider, monkeypatch, **{CONF_HIDE_QUIET: True, "days": 2})
+    _quiet(provider, monkeypatch, days=2)
     assert "Cellar" not in await _names(provider)
 
 
@@ -300,46 +289,41 @@ async def test_a_deselected_room_leaves_the_library_but_keeps_its_pins_and_its_c
 async def test_the_pre_render_leaves_out_rooms_that_are_not_offered(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With all rooms, the whole house and the ticked rooms are rendered, and the others are not."""
+    """A kept room that is not ticked is not rendered."""
     provider, played = await _prepared(
         mass,
         fake_hass,
         monkeypatch,
-        **{CONF_PRERENDER: "all", CONF_STYLES: ["ambient"], CONF_ROOMS: ["kitchen"]},
+        **{
+            CONF_KEEP_ROOMS: ["kitchen", "living_room"],
+            CONF_STYLES: ["ambient"],
+            CONF_ROOMS: ["kitchen"],
+        },
     )
-    assert await provider._prerender_yesterday() == 2  # noqa: SLF001
-    assert {ref.area_id for ref in played} == {"_house", "kitchen"}
+    assert await provider._prerender_yesterday() == 1  # noqa: SLF001
+    assert {ref.area_id for ref in played} == {"kitchen"}
 
 
-# ---------------------------------------------------------------- the length
+# ---------------------------------------------------------------- the audio and the length
 
 
-async def test_the_audio_cache_key_holds_the_length_and_the_rooms_of_the_house(
+async def test_the_audio_cache_key_holds_the_rooms_of_the_house(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Condensed and soundscape never share a file, and neither do two house mixes made of other rooms."""
+    """Two house mixes made of other rooms never share a file, and a room does not change with the ticks."""
     provider, _ = await _setup(mass, fake_hass)
     day = (await provider._now()).date() - timedelta(days=2)  # noqa: SLF001
     today = (await provider._now()).date()  # noqa: SLF001
     kitchen = TrackRef("kitchen", day, "_scape", "lofi")
     house = TrackRef(WHOLE_HOUSE_ID, day, "_scape", "lofi")
-    short = provider._audio_key(kitchen, today)  # noqa: SLF001
-    short_house = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
-    assert short is not None
-    assert short_house is not None
+    key = provider._audio_key(kitchen, today)  # noqa: SLF001
+    house_key = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
+    assert key is not None
+    assert house_key is not None
 
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
-    full = provider._audio_key(kitchen, today)  # noqa: SLF001
-    full_house = provider._audio_key(house, today, await provider._catalog_all())  # noqa: SLF001
-    assert full not in {None, short}
-    assert full_house not in {None, short_house}
-
-    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"], CONF_LENGTH: "condensed"})
-    # a room does not change with the ticks; the whole house does
-    assert provider._audio_key(kitchen, today) == short  # noqa: SLF001
-    assert provider._audio_key(house, today, await provider._catalog_all()) != short_house  # noqa: SLF001
-    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"], CONF_LENGTH: "full"})
-    assert provider._audio_key(house, today, await provider._catalog_all()) != full_house  # noqa: SLF001
+    _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"]})
+    assert provider._audio_key(kitchen, today) == key  # noqa: SLF001
+    assert provider._audio_key(house, today, await provider._catalog_all()) != house_key  # noqa: SLF001
 
 
 async def test_a_condensed_track_is_listed_with_the_length_it_plays(
@@ -347,14 +331,7 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
 ) -> None:
     """Slow styles show 7 minutes and fast ones 5, the stream says the same, and the audio is made."""
     provider, _ = await _setup(mass, fake_hass)
-    real = provider.get_config_value
-    monkeypatch.setattr(
-        provider,
-        "get_config_value",
-        lambda key, default=None: {"render_quality": "light", CONF_LENGTH: "condensed"}.get(
-            key, real(key, default)
-        ),
-    )
+    _quiet(provider, monkeypatch, render_quality="light")
     past = (await provider.get_artist_albums("kitchen"))[-1]
     tracks = await provider.get_album_tracks(past.item_id)
     listed = {parse_track_id(t.item_id).style: t.duration for t in tracks}
@@ -373,21 +350,18 @@ async def test_a_condensed_track_is_listed_with_the_length_it_plays(
         assert len(await _stream(provider, item_id, seek=100, chunks=2)) == 2 * 44100 * 4
 
 
-async def test_a_condensed_soundscape_of_today_still_needs_three_hours_of_the_day(
+async def test_a_soundscape_of_today_needs_three_hours_of_the_day(
     mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The listing and the stream refuse a day with less than three hours, whatever the length."""
-    from entropy_fm.const import MIN_SCAPE_SECONDS_OF_DAY  # noqa: PLC0415
+    """The listing and the stream refuse a day with less than three hours."""
+    from entropy_fm.constants import MIN_SCAPE_SECONDS_OF_DAY  # noqa: PLC0415
 
     provider, _ = await _setup(mass, fake_hass)
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
     day = date(2026, 11, 18)
-    two_hours = int(2 * 3600 / provider._compression)  # noqa: SLF001
-    four_hours = int(4 * 3600 / provider._compression)  # noqa: SLF001
-    assert not provider._day_tracks("kitchen", "Kitchen", day, two_hours, None)  # noqa: SLF001
-    tracks = provider._day_tracks("kitchen", "Kitchen", day, four_hours, None)  # noqa: SLF001
+    assert not provider._day_tracks("kitchen", "Kitchen", day, False, None)  # noqa: SLF001, FBT003
+    tracks = provider._day_tracks("kitchen", "Kitchen", day, True, None)  # noqa: SLF001, FBT003
     assert len(tracks) == len(STYLES)
-    assert two_hours * provider._compression < MIN_SCAPE_SECONDS_OF_DAY  # noqa: SLF001
+    assert MIN_SCAPE_SECONDS_OF_DAY == 3 * 3600
 
     async def early() -> datetime:
         tz = await provider._timezone()  # noqa: SLF001
@@ -396,37 +370,6 @@ async def test_a_condensed_soundscape_of_today_still_needs_three_hours_of_the_da
     monkeypatch.setattr(provider, "_now", early)
     with pytest.raises(MediaNotFoundError):
         await provider._scape_of(TrackRef("kitchen", (await early()).date(), "_scape", "lofi"))  # noqa: SLF001
-
-
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
-async def test_the_pre_render_renders_the_length_that_is_set(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Condensed pre-renders into its own file; the full file of the same track is not there."""
-    provider, played = await _prepared(
-        mass,
-        fake_hass,
-        monkeypatch,
-        **{
-            CONF_PRERENDER: "pinned",
-            CONF_KEEP_ROOMS: ["kitchen"],
-            CONF_STYLES: ["ambient"],
-            CONF_LENGTH: "condensed",
-        },
-    )
-    day = await _yesterday(provider)
-    today = (await provider._now()).date()  # noqa: SLF001
-    assert await provider._prerender_yesterday() == 1  # noqa: SLF001
-    ref = TrackRef("kitchen", day, "_scape", "ambient")
-    assert played == [ref]
-    short = provider._audio_key(ref, today)  # noqa: SLF001
-    assert short is not None
-    assert provider.audio_cache.path(short).is_file()
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
-    full = provider._audio_key(ref, today)  # noqa: SLF001
-    assert full is not None
-    assert full != short
-    assert not provider.audio_cache.path(full).exists()
 
 
 # ---------------------------------------------------------------- the library follows the rooms
@@ -467,10 +410,9 @@ async def test_a_change_of_the_rooms_asks_for_one_library_sync_and_the_views_fol
         return await real_start(*args, **kwargs)
 
     monkeypatch.setattr(mass.music, "start_sync", start_sync)
-    # the first time there is nothing known, so it syncs; the same rooms again do not
-    assert await provider.sync_if_rooms_changed()
+    # the load wrote the rooms down, so the same rooms again ask for nothing
     assert not await provider.sync_if_rooms_changed()
-    assert asked == [[provider.instance_id]]
+    assert asked == []
     await _sync(mass, provider)
     asked.clear()
     assert await _library_albums(mass, provider) == {"Whole House", "Kitchen", "Living Room"}
@@ -519,17 +461,15 @@ async def test_no_sync_is_asked_for_when_home_assistant_cannot_tell_the_rooms(
     assert asked == []
 
 
-async def test_a_reload_asks_for_the_sync_in_the_background(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
+async def test_the_load_asks_for_the_sync_once_the_server_has_registered_the_provider(
+    mass: MusicAssistant, fake_hass: MagicMock
 ) -> None:
-    """The load starts a task that waits, then asks; unloading cancels it."""
-    monkeypatch.setattr("entropy_fm.LIBRARY_SYNC_DELAY", 0.0)
-    provider, _ = await _setup(mass, fake_hass)
-    task = provider._sync_task  # noqa: SLF001
-    assert task is not None
-    await asyncio.wait({task}, timeout=30)
-    assert task.done()
+    """The server calls `loaded_in_mass` after the registration; the first load asks once and writes down the rooms."""
+    asked: list[list[str]] = []
+    provider, _ = await _setup(mass, fake_hass, asked)
+    assert asked == [[provider.instance_id]]
     assert (Path(provider.storage_root) / "offered_rooms.json").exists()
+    assert not await provider.sync_if_rooms_changed()
 
 
 async def test_the_keep_list_only_offers_the_rooms_that_are_shown(
@@ -546,70 +486,3 @@ async def test_the_keep_list_only_offers_the_rooms_that_are_shown(
     assert sorted(await keep_options()) == ["kitchen", "living_room"]
     _quiet(provider, monkeypatch, **{CONF_ROOMS: ["kitchen"]})
     assert await keep_options() == ["kitchen"]
-
-
-async def test_a_change_of_the_piece_length_asks_for_a_library_sync_and_every_listing_agrees(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A soundscape asks for one sync like a change of rooms; get_track, album and library tracks list its lengths."""
-    provider, _ = await _setup(mass, fake_hass)
-    asked: list[list[str]] = []
-
-    async def start_sync(*_args: Any, **kwargs: Any) -> list[Any]:
-        asked.append(kwargs["providers"])
-        return []
-
-    monkeypatch.setattr(mass.music, "start_sync", start_sync)
-    assert await provider.sync_if_rooms_changed()
-    assert not await provider.sync_if_rooms_changed()
-    short = [t.duration async for t in provider.get_library_tracks()]
-    assert short
-    assert all(270 <= seconds <= 480 for seconds in short)
-
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "full"})
-    assert await provider.sync_if_rooms_changed()
-    assert not await provider.sync_if_rooms_changed()
-    assert len(asked) == 2
-
-    albums = [
-        a for a in await provider.get_artist_albums("kitchen") if a.item_id.startswith("kitchen|")
-    ]
-    listed = await provider.get_album_tracks(albums[2].item_id)
-    for track in listed:
-        assert 600 <= track.duration <= 1320
-        assert (await provider.get_track(track.item_id)).duration == track.duration
-    library = [t async for t in provider.get_library_tracks()]
-    assert library
-    assert all(600 <= t.duration <= 1320 for t in library)
-    assert {t.duration for t in library} != set(short)
-
-    # back to condensed: asked again
-    _quiet(provider, monkeypatch, **{CONF_LENGTH: "condensed"})
-    assert await provider.sync_if_rooms_changed()
-    assert len(asked) == 3
-    assert sorted([t.duration async for t in provider.get_library_tracks()]) == sorted(short)
-
-
-async def test_a_sync_marker_of_an_earlier_version_asks_for_one_more_sync(
-    mass: MusicAssistant, fake_hass: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The marker used to be the list of rooms; a list is not the current marker, so one sync follows."""
-    import json  # noqa: PLC0415
-
-    from entropy_fm.const import OFFERED_FILE  # noqa: PLC0415
-
-    provider, _ = await _setup(mass, fake_hass)
-    asked: list[object] = []
-
-    async def start_sync(*_args: Any, **kwargs: Any) -> list[Any]:
-        asked.append(kwargs)
-        return []
-
-    monkeypatch.setattr(mass.music, "start_sync", start_sync)
-    Path(provider.storage_root).mkdir(parents=True, exist_ok=True)
-    (Path(provider.storage_root) / OFFERED_FILE).write_text(
-        json.dumps(["_house", "kitchen", "living_room"])
-    )
-    assert await provider.sync_if_rooms_changed()
-    assert not await provider.sync_if_rooms_changed()
-    assert len(asked) == 1

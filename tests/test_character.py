@@ -41,12 +41,12 @@ from entropy_fm.palette import DayTraits
 from entropy_fm.plan import (
     BUILD,
     CLIMAX,
-    CONDENSED,
     INTRO,
     MIN_FORM_CELLS,
     OUTRO,
     PICK_TOLERANCE,
     RELEASE,
+    PieceOptions,
     Plan,
     build_plan,
 )
@@ -319,9 +319,7 @@ def test_tempo_and_chords_follow_the_energy() -> None:
 # ---- the dealer
 
 
-def _plan(
-    day: date | None = TUESDAY, character: DayCharacter | None = None, length_mode: str = "full"
-) -> Plan:
+def _plan(day: date | None = TUESDAY, character: DayCharacter | None = None) -> Plan:
     series = _day(1800.0, (18.0, 22.0))
     return build_plan(
         series,
@@ -330,10 +328,7 @@ def _plan(
         "seed",
         HOME,
         STANDARD,
-        day=day,
-        area_key="kitchen",
-        length_mode=length_mode,
-        character=character,
+        options=PieceOptions(day=day, area_key="kitchen", character=character),
     )
 
 
@@ -373,15 +368,10 @@ def test_the_plan_knows_the_character_and_the_room_motif() -> None:
 
 
 @pytest.mark.parametrize("shape", [MORNING, EVENING, ALL_DAY, PEAK, FLAT])
-@pytest.mark.parametrize("length_mode", ["full", CONDENSED])
 @pytest.mark.parametrize("bar", BARS)
-def test_the_form_is_on_phrase_boundaries_and_every_build_resolves(
-    shape: str, length_mode: str, bar: float
-) -> None:
+def test_the_form_is_on_phrase_boundaries_and_every_build_resolves(shape: str, bar: float) -> None:
     """Sections tile the piece, edges lie on 8 bars (4 when short), and a build is followed by a peak or release."""
-    plan = _plan(
-        character=_character_with(shape=shape, peak=0.7, energy=0.6), length_mode=length_mode
-    )
+    plan = _plan(character=_character_with(shape=shape, peak=0.7, energy=0.6))
     found = plan.sections(bar)
     grid = 8 * bar if plan.length / (8 * bar) >= MIN_FORM_CELLS else 4 * bar
     assert found[0][0] == 0.0

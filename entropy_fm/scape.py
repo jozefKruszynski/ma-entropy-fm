@@ -10,31 +10,39 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import scape_ambient, scape_berlin, scape_glitch, scape_lofi, scape_ritual
-from .character import DayCharacter, scale_of_day
-from .day_analysis import DAY_SECONDS, DayAnalysis, analyze_day
+from .character import scale_of_day
+from .day_analysis import DayAnalysis, analyze_day
 from .levels import feed_forward, trim_db
-from .plan import FULL, Plan, build_plan, length_of
+from .plan import DEFAULT_OPTIONS, LIGHT_MAX_LAYERS, PieceOptions, Plan, build_plan
 from .quality import STANDARD
-from .styles import get_style
+from .signature import gain_of_db
+from .styles import (
+    STYLE_AMBIENT,
+    STYLE_BERLIN_SCHOOL,
+    STYLE_GLITCH,
+    STYLE_LOFI,
+    STYLE_RITUAL,
+    get_style,
+)
+from .timeline import DAY_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from datetime import date
 
-    from .palette import DayPalette
     from .quality import Quality
     from .score import Score
     from .synth import Scale
     from .timeline import Series
 
 SCAPE_ID = "_scape"
-LIGHT_MAX_LAYERS = 4
+# the most buses whose low-pass the cheapest tier runs: a ladder filter costs about three milliseconds of a second
+LIGHT_FILTERS = 2
 COMPOSERS: dict[str, Callable[[Plan], Score]] = {
-    "ambient": scape_ambient.compose,
-    "berlin_school": scape_berlin.compose,
-    "lofi": scape_lofi.compose,
-    "ritual": scape_ritual.compose,
-    "glitch": scape_glitch.compose,
+    STYLE_AMBIENT: scape_ambient.compose,
+    STYLE_BERLIN_SCHOOL: scape_berlin.compose,
+    STYLE_LOFI: scape_lofi.compose,
+    STYLE_RITUAL: scape_ritual.compose,
+    STYLE_GLITCH: scape_glitch.compose,
 }
 
 
@@ -53,31 +61,15 @@ def analysis_of(
     return analyze_day(series, covered, anomalies)
 
 
-def duration_of(analysis: DayAnalysis, style_key: str = "", length_mode: str = FULL) -> int:
-    """
-    Return the length of the soundscape of a day in seconds: 10 to 22 minutes, or 5 to 7 when condensed.
-
-    :param analysis: The analysis of the day.
-    :param style_key: The style, which sets the condensed length.
-    :param length_mode: `full` or `condensed`.
-    """
-    return length_of(analysis, style_key, length_mode)
-
-
-def scape_score(  # noqa: PLR0913
+def scape_score(
     series: Sequence[Series],
     analysis: DayAnalysis,
     style_key: str,
     seed: str,
     scale: Scale,
     *,
-    day: date | None = None,
-    palette: DayPalette | None = None,
     quality: Quality = STANDARD,
-    energy_offset: float = 0.0,
-    area_key: str = "",
-    length_mode: str = FULL,
-    character: DayCharacter | None = None,
+    options: PieceOptions = DEFAULT_OPTIONS,
 ) -> tuple[Score, Plan]:
     """
     Return the score of the soundscape of a day in a style, and the plan it was made from.
@@ -87,41 +79,20 @@ def scape_score(  # noqa: PLR0913
     :param style_key: The style.
     :param seed: Text that is the same for the same room, day and style; seeds everything that is chosen.
     :param scale: The key and mode the user chose (the palette of the day moves away from it).
-    :param day: The day, which deals the material so that two days in a row differ.
-    :param palette: What the day derives: key, mode, tempo shift.
     :param quality: The tier.
-    :param energy_offset: The setting that moves the activity.
-    :param area_key: The room (or the whole house), which seeds the deals.
-    :param length_mode: `full` or `condensed`.
-    :param character: What kind of day it was; it picks the key and mode of the day and the identity of the piece.
+    :param options: The day, palette, room, length mode and character of the piece; the character
+        picks the key and mode of the day and the identity of the piece.
     """
-    if character is not None and day is not None:
-        scale = scale_of_day(get_style(style_key), scale, day, character)
-    plan = build_plan(
-        series,
-        analysis,
-        style_key,
-        seed,
-        scale,
-        quality,
-        day=day,
-        palette=palette,
-        energy_offset=energy_offset,
-        area_key=area_key,
-        length_mode=length_mode,
-        character=character,
-    )
+    if options.character is not None and options.day is not None:
+        scale = scale_of_day(get_style(style_key), scale, options.day, options.character)
+    plan = build_plan(series, analysis, style_key, seed, scale, quality, options=options)
     score = COMPOSERS[style_key](plan)
     for key, layer in score.layers.items():
-        layer.gain *= 10.0 ** (trim_db(style_key, key) / 20.0)
+        layer.gain *= gain_of_db(trim_db(style_key, key))
     _spare_filters(score, quality)
     if score.glitch is None:
         score.gain_db = feed_forward(score, score.level_db)
     return score, plan
-
-
-# the most buses whose low-pass the cheapest tier runs: a ladder filter costs about three milliseconds of a second
-LIGHT_FILTERS = 2
 
 
 def _spare_filters(score: Score, quality: Quality) -> None:

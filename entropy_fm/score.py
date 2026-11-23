@@ -18,8 +18,40 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import numpy as np
 
+    from .lead import Leads
+
 # values per second of a curve
-CR = 10
+CURVE_RATE = 10
+# the keys of the layers and the voices that more than one module names
+LAYER_LEAD = "lead"
+LAYER_BASS = "bass"
+LAYER_DRONE = "drone"
+LAYER_PIANO = "piano"
+# the strings of Ambient, Berlin School and Lo-fi
+LAYER_STRINGS = "strings"
+# the strings of Cinematic Glitch
+LAYER_STR = "str"
+LAYER_KEYS = "keys"
+# the plucked layer of Lo-fi
+LAYER_PLUCK = "pluck"
+# the plucked layer of Ritual
+LAYER_PLUCKS = "plucks"
+LAYER_SEQ_A = "seqA"
+LAYER_WASH = "wash"
+LAYER_GROWL = "growl"
+# the drums of the bus of Cinematic Glitch, which `Glitch` names
+LAYER_KICK = "kick"
+LAYER_SNARE = "snare"
+LAYER_HATS = "hats"
+VOICE_TAPE_CHOIR = "tape_choir"
+VOICE_TAPE_STRINGS = "tape_strings"
+# the defaults of a bus: its low-pass resonance, and how much goes to the reverb
+DEFAULT_RESONANCE = 0.15
+DEFAULT_REVERB = 0.2
+# the defaults of the space of a piece: the echo in seconds with its feedback, and the loudness in dB RMS
+DEFAULT_ECHO_SECONDS = 0.375
+DEFAULT_ECHO_FEEDBACK = 0.4
+DEFAULT_LEVEL_DB = -20.0
 
 
 @dataclass(frozen=True)
@@ -48,10 +80,13 @@ class Layer:
     presence: np.ndarray | None = None
     # the cutoff of a low-pass in Hz that the house moves, a value every tenth of a second (None for none)
     cutoff: np.ndarray | None = None
-    resonance: float = 0.15
+    resonance: float = DEFAULT_RESONANCE
     # how much goes to the reverb and to the echo
-    reverb: float = 0.2
+    reverb: float = DEFAULT_REVERB
     echo: float = 0.0
+    # how much goes to the long hall that only the layers that ask for it are sent to (0 for none); a tier without the
+    # hall sends it to the shared reverb instead
+    hall: float = 0.0
     # the echo send as a curve (a value every tenth of a second) that scales `echo`, or None for a constant
     echo_curve: np.ndarray | None = None
     # the human name, for the notes about a piece
@@ -101,7 +136,7 @@ class Glitch:
     # the layers that duck: (depth, time constant in seconds)
     duck: dict[str, tuple[float, float]] = field(default_factory=dict)
     # the layers that make up the drum bus
-    drum_layers: tuple[str, str, str] = ("kick", "snare", "hats")
+    drum_layers: tuple[str, str, str] = (LAYER_KICK, LAYER_SNARE, LAYER_HATS)
     # the set of vowels of the growl that the day chose
     vowels: int = 0
 
@@ -116,8 +151,8 @@ class Score:
     textures: list[Texture] = field(default_factory=list)
     # the reverb: its size 0 to 1, the share of wet at each moment (a curve), and the echo in seconds with its feedback
     space: np.ndarray | None = None
-    echo_seconds: float = 0.375
-    echo_feedback: float = 0.4
+    echo_seconds: float = DEFAULT_ECHO_SECONDS
+    echo_feedback: float = DEFAULT_ECHO_FEEDBACK
     # the tempo, for the notes about a piece, and 0 where there is none
     tempo: float = 0.0
     # what the day chose, what the generative systems did, how the house shaped it (for soundscapes.md)
@@ -132,11 +167,13 @@ class Score:
     # a wobble of the tape over the whole mix, in cents (Lo-fi)
     wobble: float = 0.0
     # the loudness the leveler holds the style at, in dB RMS
-    level_db: float = -20.0
+    level_db: float = DEFAULT_LEVEL_DB
     # the gain in dB that the loudness holds with, estimated from the notes (`levels.feed_forward`), a value every tenth of a second
     gain_db: np.ndarray | None = None
     # the splices, kicks and tempo of Cinematic Glitch, whose render is its own (`glitch_render`)
     glitch: Glitch | None = None
+    # who leads each phrase of the form, where the style has leads (`lead`)
+    leads: Leads | None = None
 
     def voices_used(self) -> dict[str, int]:
         """Return how many notes each voice plays."""
@@ -147,8 +184,8 @@ class Score:
 
 
 def curve_at(curve: np.ndarray, t: float) -> float:
-    """Return the value of a curve (CR per second) at a second."""
-    position = min(max(t * CR, 0.0), len(curve) - 1.0)
+    """Return the value of a curve (CURVE_RATE per second) at a second."""
+    position = min(max(t * CURVE_RATE, 0.0), len(curve) - 1.0)
     low = int(position)
     high = min(low + 1, len(curve) - 1)
     return float(curve[low] + (curve[high] - curve[low]) * (position - low))

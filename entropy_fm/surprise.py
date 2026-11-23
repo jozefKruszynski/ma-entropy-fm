@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .baseline import DAY_SECONDS, MIN_EVIDENCE_DAYS, episodes
-from .timeline import VoiceKind
+from .baseline import MIN_EVIDENCE_DAYS, episodes
+from .timeline import DAY_SECONDS, SECONDS_PER_HOUR, VoiceKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # how far a fully familiar voice fades: its level is multiplied by 1 - ROUTINE_FADE
 ROUTINE_FADE = 0.5
 # how much louder an episode gets, at a surprise of 1
-BOOST = 0.45
+EPISODE_BOOST = 0.45
 # an episode this unusual is featured: a leitmotif and a stranger beat
 FEATURE_THRESHOLD = 0.55
 MAX_FEATURED = 4
@@ -42,6 +42,19 @@ CLIMATE_Z = 1.8
 MIN_SPREAD = 0.6
 CURVE_STEP = 60.0
 EDGE_SECONDS = 300.0
+# the familiarity is read once every this many curve steps and held in between
+FAMILIARITY_STEPS = 10
+# the kinds of an anomaly
+KIND_EPISODE = "episode"
+KIND_CLIMATE = "climate"
+# an entity that is active on few days is unusual on this share of every day it is active
+DAY_SCORE_SHARE = 0.8
+# a climate anomaly scores from this many standard deviations, over this span of them, and lasts this many hours
+CLIMATE_SCORE_FROM = 1.5
+CLIMATE_SCORE_SPAN = 2.0
+CLIMATE_HOURS = 3
+# an anomaly is featured when it starts this many seconds before the end of the track at the latest
+FEATURE_END_MARGIN = 2.0
 
 
 @dataclass(frozen=True)
@@ -75,10 +88,12 @@ def episode_scores(series: Series, baseline: EntityBaseline) -> list[Anomaly]:
         if start - last_start < MIN_SPACING / 2:
             continue
         last_start = start
-        hour_score = 1.0 - baseline.familiarity(start / 3600.0)
-        day_score = 0.8 * (1.0 - baseline.active_days)
+        hour_score = 1.0 - baseline.familiarity(start / SECONDS_PER_HOUR)
+        day_score = DAY_SCORE_SHARE * (1.0 - baseline.active_days)
         score = max(hour_score, day_score) * baseline.evidence
-        found.append(Anomaly(series.entity_id, "episode", start, end, float(np.clip(score, 0, 1))))
+        found.append(
+            Anomaly(series.entity_id, KIND_EPISODE, start, end, float(np.clip(score, 0, 1)))
+        )
     return found
 
 
@@ -95,8 +110,9 @@ def climate_anomaly(series: Series, baseline: EntityBaseline) -> Anomaly | None:
     if abs(z) < CLIMATE_Z:
         return None
     peak = float(series.times[int(np.argmax(np.abs(series.values - baseline.mean)))])
-    score = float(np.clip((abs(z) - 1.5) / 2.0, 0.0, 1.0))
-    return Anomaly(series.entity_id, "climate", peak, min(peak + 3 * 3600.0, DAY_SECONDS), score)
+    score = float(np.clip((abs(z) - CLIMATE_SCORE_FROM) / CLIMATE_SCORE_SPAN, 0.0, 1.0))
+    end = min(peak + CLIMATE_HOURS * SECONDS_PER_HOUR, DAY_SECONDS)
+    return Anomaly(series.entity_id, KIND_CLIMATE, peak, end, score)
 
 
 def find_anomalies(
@@ -138,11 +154,18 @@ class Surprise:
         """
         self.baselines = dict(baselines)
         self.anomalies = find_anomalies(series, baselines)
-        minutes = np.arange(int(DAY_SECONDS / CURVE_STEP)) * CURVE_STEP / 3600.0
+        minutes = np.arange(int(DAY_SECONDS / CURVE_STEP)) * CURVE_STEP / SECONDS_PER_HOUR
         self._curves: dict[str, np.ndarray] = {}
         for entity_id, baseline in self.baselines.items():
-            familiar = np.array([baseline.familiarity(hour) for hour in minutes[::10]])
-            fade = 1.0 - ROUTINE_FADE * baseline.evidence * np.repeat(familiar, 10)[: len(minutes)]
+            familiar = np.array(
+                [baseline.familiarity(hour) for hour in minutes[::FAMILIARITY_STEPS]]
+            )
+            fade = (
+                1.0
+                - ROUTINE_FADE
+                * baseline.evidence
+                * np.repeat(familiar, FAMILIARITY_STEPS)[: len(minutes)]
+            )
             self._curves[entity_id] = fade
         for anomaly in self.anomalies:
             curve = self._curves.get(anomaly.entity_id)
@@ -150,7 +173,7 @@ class Surprise:
                 continue
             first = max(int((anomaly.start - EDGE_SECONDS) / CURVE_STEP), 0)
             last = int((anomaly.end + EDGE_SECONDS) / CURVE_STEP) + 1
-            curve[first:last] = np.maximum(curve[first:last], 1.0 + BOOST * anomaly.score)
+            curve[first:last] = np.maximum(curve[first:last], 1.0 + EPISODE_BOOST * anomaly.score)
 
     def gain(self, entity_id: str, house: npt.ArrayLike) -> npt.NDArray[np.float64]:
         """
@@ -188,6 +211,6 @@ class Surprise:
         inside = []
         for anomaly in self.anomalies:
             audio = (anomaly.start - origin) / compression
-            if 0.0 <= audio < duration_s - 2.0:
+            if 0.0 <= audio < duration_s - FEATURE_END_MARGIN:
                 inside.append((audio, anomaly.score, anomaly.entity_id))
         return inside

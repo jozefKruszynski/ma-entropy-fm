@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "Entropy FM",
-    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in five styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, it asks Music Assistant to re-sync its own items."
+    "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one slowly evolving piece in five styles. It only reads from Home Assistant and synthesises the audio while it plays. When the rooms you show change, it asks Music Assistant to re-sync its own items."
   },
   "config_entries": {
     "use_ha_plugin": {
@@ -22,43 +22,32 @@
     },
     "days": {
       "label": "Days to browse",
-      "description": "How many days back you can browse and search, from 1 to 10. Home Assistant's recorder keeps 10 days by default. Days you hearted stay, however old."
+      "description": "How many days back you can browse, search and have in the library, from 1 to 10. Home Assistant's recorder keeps 10 days by default. Days you hearted stay, however old."
     },
     "render_quality": {
       "label": "Render quality",
-      "description": "How much of the processor a second of music may use. Light suits a Raspberry Pi, Standard a small server, Rich a PC. Light has fewer layers, fewer saws in the big voices and a cheaper room; Rich adds a long hall and a shimmer. Auto runs a short benchmark when the provider starts and picks the richest that would use less than 30 percent of one core, measured with the dearest style that you offer."
+      "description": "How much of the processor a second of music may use. Light suits a Raspberry Pi, Standard a small server, Rich a PC. Light has fewer layers, fewer saws in the big voices and a cheaper room; Rich adds a long hall and a shimmer. Auto runs a short benchmark when the provider starts and picks the richest that would use less than 30 percent of one core, measured with the dearest style that you offer.",
+      "options": {
+        "auto": "Auto",
+        "light": "Light",
+        "standard": "Standard",
+        "rich": "Rich"
+      }
     },
     "audio_cache_mb": {
       "label": "Audio cache size (MB)",
-      "description": "Rendered tracks of past days are kept as Opus audio in Ogg files in the cache of the server, so that playing them again costs no processor and can be seeked. The oldest used are deleted above this size. 0 turns the cache off."
-    },
-    "prerender": {
-      "label": "Pre-render past days",
-      "description": "Shortly after midnight, and once after the start, render the tracks of the day that just ended into the audio cache, so that they play at once and cost no processor. Off does nothing. Pinned rooms renders the rooms you keep every day of, in every style you offer, and the days and tracks you hearted. All rooms also renders every room and the whole house in the default style. It works one track at a time at low priority, waits while a track plays, never fills more than 80 percent of the audio cache and does nothing when the cache is off."
-    },
-    "piece_length": {
-      "label": "Piece length",
-      "description": "Condensed: the same day and the same plan in a short piece, about 7 minutes in Ambient, Berlin School and Ritual and about 5 minutes in Lo-fi and Cinematic Glitch. The hours of the day pass faster and the little things of the house are thinned out so that it does not get crowded; unusual moments are kept. Soundscape: as long as the day was busy, 10 to 22 minutes. Condensed pieces and soundscapes are cached and pre-rendered apart."
-    },
-    "key": {
-      "label": "Key",
-      "description": "The root note that all pitches are tuned to."
-    },
-    "scale": {
-      "label": "Scale",
-      "description": "The scale that all pitches are tuned to."
+      "description": "Rendered tracks of past days are kept as Opus audio in Ogg files in the cache of the server, so that playing them again costs no processor and can be seeked. The oldest used are deleted above this size. Shortly after midnight, and once after the start, the tracks of the day that just ended are rendered into it for the rooms you keep every day of and for the days and tracks you hearted, in every style you offer. This works one track at a time at low priority, waits while a track plays and never fills more than 80 percent of the cache. 0 turns the cache and the pre-render off."
     },
     "styles": {
       "label": "Styles offered",
-      "description": "Which styles each soundscape comes in: Ambient, Berlin School, Lo-fi, Ritual and Cinematic Glitch. Every style is a version of the same day, such as \"Dishwasher at Dusk (Lo-fi)\", so you can compare them."
-    },
-    "default_style": {
-      "label": "Default style",
-      "description": "The style that an old track id without a version plays, and that the All rooms pre-render uses for every room. It is always offered. The library lists every style that is offered, not only this one."
-    },
-    "energy_offset": {
-      "label": "Activity offset",
-      "description": "Moves how lively the house seems to the music, in percentage points from -50 to 50. The activity brings layers in and out and sets how dense they are and how fast they change; it never writes notes."
+      "description": "Which styles each soundscape comes in: Ambient, Berlin School, Lo-fi, Ritual and Cinematic Glitch. Every style is a version of the same day, such as \"Dishwasher at Dusk (Lo-fi)\", so you can compare them.",
+      "options": {
+        "ambient": "Ambient",
+        "berlin_school": "Berlin School",
+        "lofi": "Lo-fi",
+        "ritual": "Ritual",
+        "glitch": "Cinematic Glitch"
+      }
     },
     "day_character": {
       "label": "Character of the day",
@@ -76,29 +65,18 @@
       "label": "Role overrides",
       "description": "Choose the role of an entity yourself, one `entity_id=role` per line, such as `sensor.geschirrspueler_power=dishwasher`. Roles: dishwasher, washer, washing_machine, dryer, drum, drone, fridge, oven, temperature, humidity, co2, air, pluck, chord, blip, pad, event, hob, media, cover, progress, sun, mute. You can also label an entity or its device `entropy_fm_dishwasher` (and so on) in Home Assistant; a label wins over this list."
     },
-    "library_days": {
-      "label": "Days in library",
-      "description": "How many of the last days of every room are in the library (counted back from today, at most the recorder retention below). Days you heart stay for good, however old; the window only decides which recent days the library shows."
-    },
     "rooms": {
       "label": "Rooms to show",
       "description": "Rooms that appear in Music Assistant. None ticked shows every room, also rooms added later."
     },
-    "house_selected_rooms": {
-      "label": "Whole House uses only these rooms",
-      "description": "On: the Whole House soundscape is made of the rooms ticked above (of every room when none is ticked). Off: it is made of every room of the house, whatever is ticked."
-    },
-    "hide_quiet_rooms": {
-      "label": "Hide quiet rooms",
-      "description": "Do not offer a room in which, over the days you can browse, nothing that would make a note or an event (a door, a motion sensor, a light, an appliance) has changed. A room with only temperature, humidity or static sensors is quiet too. This is read from the current states of the entities, not from the history. A room that is merely quiet on one day still offers that day."
-    },
     "keep_rooms": {
       "label": "Keep every day forever",
       "description": "Days of these rooms are saved permanently, even after Home Assistant purges its history. Does not show or hide rooms."
-    },
-    "covers": {
-      "label": "Covers",
-      "description": "What the covers of the days show. Off: no covers. Drawn from the day: a picture made on your server from the events of the day, in the look of the Music Assistant covers; it is the same every time."
     }
+  },
+  "errors": {
+    "plugin_missing": "Entropy FM needs the Home Assistant plugin of Music Assistant: add and connect it under Settings > Providers, or turn off 'Use the Home Assistant plugin' and enter a URL and a long-lived access token",
+    "connection_missing": "Enter the URL and a long-lived access token of Home Assistant",
+    "login_refused": "Home Assistant did not accept the access token"
   }
 }

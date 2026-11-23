@@ -1,5 +1,5 @@
 """
-Pitch and level helpers of Entropy FM: scales, frequencies, panning.
+Pitch and level helpers of Entropy FM: scales and the smooth ramp.
 
 The sound itself is made by `voices` and `drums`; this module only holds what the music theory and
 the mixing need and imports nothing from Music Assistant.
@@ -15,10 +15,18 @@ from .timeline import as_array
 
 SAMPLE_RATE = 44100
 TWO_PI = 2.0 * np.pi
+SEMITONES_PER_OCTAVE = 12
+# a fifth up is seven semitones
+FIFTH_SEMITONES = 7
+# the pitch of the tuning note: A4 is MIDI note 69, at 440 Hz
+A4_MIDI = 69.0
+A4_HZ = 440.0
+DEFAULT_MODE = "dorian"
+DEFAULT_ROOT = 2
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 SCALES: dict[str, tuple[int, ...]] = {
-    "dorian": (0, 2, 3, 5, 7, 9, 10),
+    DEFAULT_MODE: (0, 2, 3, 5, 7, 9, 10),
     "aeolian": (0, 2, 3, 5, 7, 8, 10),
     "phrygian": (0, 1, 3, 5, 7, 8, 10),
     "mixolydian": (0, 2, 4, 5, 7, 9, 10),
@@ -33,13 +41,13 @@ SCALES: dict[str, tuple[int, ...]] = {
 class Scale:
     """A key and a mode; every pitch of the music is a degree of it."""
 
-    root: int = 2
-    mode: str = "dorian"
+    root: int = DEFAULT_ROOT
+    mode: str = DEFAULT_MODE
 
     @property
     def intervals(self) -> tuple[int, ...]:
         """Return the semitones of the mode above its root."""
-        return SCALES.get(self.mode, SCALES["dorian"])
+        return SCALES.get(self.mode, SCALES[DEFAULT_MODE])
 
     @property
     def size(self) -> int:
@@ -55,26 +63,7 @@ class Scale:
         """
         steps = self.intervals
         octave_shift, index = divmod(degree, len(steps))
-        return 12 * (octave + 1 + octave_shift) + self.root + steps[index]
-
-
-def midi_to_hz(note: float) -> float:
-    """
-    Return the frequency of a MIDI note.
-
-    :param note: The note number, 69 is A at 440 Hz.
-    """
-    return float(440.0 * 2.0 ** ((note - 69.0) / 12.0))
-
-
-def pan_gains(pan: float) -> tuple[float, float]:
-    """
-    Return left and right gain for a pan between -1 and 1, with equal power.
-
-    :param pan: -1 is left, 1 is right.
-    """
-    angle = (pan + 1.0) * np.pi / 4.0
-    return float(np.cos(angle)), float(np.sin(angle))
+        return SEMITONES_PER_OCTAVE * (octave + 1 + octave_shift) + self.root + steps[index]
 
 
 def smoothstep(x: np.ndarray) -> np.ndarray:

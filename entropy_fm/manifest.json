@@ -3,12 +3,12 @@
   "domain": "entropy_fm",
   "stage": "experimental",
   "name": "Entropy FM",
-  "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one long, slowly evolving piece in five styles (Ambient, Berlin School, Lo-fi, Ritual, Cinematic Glitch). The pieces are made by generative systems that your house steers with texture, density, brightness and space, never note by note. It only reads from Home Assistant and synthesises the audio while it plays, from CC0 samples that ship with it. Covers are drawn locally from the day. When the rooms you show change, it asks Music Assistant to re-sync its own items.",
+  "description": "Plays the history of your Home Assistant as generative soundscapes: every area is an artist, every day an album, and each album holds one slowly evolving piece in five styles (Ambient, Berlin School, Lo-fi, Ritual, Cinematic Glitch). The pieces are made by generative systems that your house steers with texture, density, brightness and space, never note by note. It only reads from Home Assistant and synthesises the audio while it plays, from CC0 samples that ship with it. Covers are drawn locally from the day. When the rooms you show change, it asks Music Assistant to re-sync its own items.",
   "codeowners": [
     "@jozefKruszynski"
   ],
   "requirements": [
-    "numpy==2.3.5",
+    "numpy>=2.3",
     "pedalboard==0.9.26"
   ],
   "documentation": "https://github.com/jozefKruszynski/ma-entropy-fm#readme",

@@ -70,9 +70,7 @@ async def test_the_provider_benchmarks_the_dearest_offered_style_and_keeps_it_pe
     # the same style again is a cache hit; another set of styles is another measurement
     await provider._pick_quality()  # noqa: SLF001
     assert asked == ["glitch"]
-    _quiet(
-        provider, monkeypatch, render_quality="auto", styles=["ambient"], default_style="ambient"
-    )
+    _quiet(provider, monkeypatch, render_quality="auto", styles=["ambient"])
     await provider._pick_quality()  # noqa: SLF001
     assert asked == ["glitch", "ambient"]
     assert LIGHT.cache_mb < STANDARD.cache_mb

@@ -48,7 +48,7 @@ def build_real_kitchen() -> list[Series]:
     rng = np.random.default_rng(7)
     series: list[Series] = []
 
-    def add(  # noqa: PLR0913, PLR0917
+    def add(
         entity_id: str,
         kind: VoiceKind,
         times: list[float],

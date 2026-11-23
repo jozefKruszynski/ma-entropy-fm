@@ -15,7 +15,8 @@ From the edited buses of a block:
 * the kick, the snare and the hats make the drum bus: the snare gets a parallel compressor and a short dark plate, the
   sum goes through a glue compressor (-16 dB, 3:1, 10/140 ms) and a little tanh, which at this level is as clean as the
   oversampled one that made the hits (-73 dB apart) and, unlike it, has no seam from block to block;
-* the layers go to a hall of 4.5 seconds through the sends of the layers.
+* the layers go to a hall of 4.5 seconds through the sends of the layers, and a layer that asks for it (the trailer piano)
+  also to a longer, darker one of its own (`render.hall_board`).
 
 The loudness is held by the gain of the score alone, so that the night is as quiet as its arrangement and the drops
 as loud: the leveler of the other styles would lift the one and press the other.
@@ -38,8 +39,10 @@ from pedalboard import (  # type: ignore[attr-defined]
 )
 
 from . import glitch, glitch_drums, glitch_voices
-from .dsp import SR, StreamLadder
-from .render import REVERB_WET, Renderer, impulse
+from .dsp import AMPLITUDE_DB_DIVISOR, LADDER_HP24, SR, StreamLadder
+from .glitch import GLITCH_HALL_LOWPASS_HZ, GLITCH_HALL_SECONDS
+from .glitch_voices import LIGHT_MAX_LAYERS
+from .render import HALL_HIGHPASS_HZ, REVERB_SEED, REVERB_WET, Renderer, impulse
 from .score import Note
 
 if TYPE_CHECKING:
@@ -50,11 +53,32 @@ if TYPE_CHECKING:
 LATENCY = 3
 # the buses are kept this many blocks behind the output, for the edits that read what came before
 KEEP = 4
-HALL_SECONDS = 4.5
 PARALLEL_AMOUNT = 0.6
 PLATE_AMOUNT = 0.35
 HAT_GAIN = 0.8
 MASTER_HP_HZ = 26.0
+# the parallel compressor of the snare: threshold in dB, ratio, attack and release in ms
+PARALLEL_THRESHOLD_DB = -28.0
+PARALLEL_RATIO = 10.0
+PARALLEL_ATTACK_MS = 0.6
+PARALLEL_RELEASE_MS = 80.0
+# the glue compressor of the drum bus
+GLUE_THRESHOLD_DB = -16.0
+GLUE_RATIO = 3.0
+GLUE_ATTACK_MS = 10.0
+GLUE_RELEASE_MS = 140.0
+GLUE_DRIVE = 1.2
+# the drum bus is silent after it has been quiet for more than this many blocks, and starts out as long quiet as this
+DRUM_QUIET_BLOCKS = 1
+DRUM_QUIET_START = 99
+# an edit is read from this far before its start and after its end (seconds), and the piece that is kept begins and ends this far out
+EDIT_READ_LEAD = 0.05
+EDIT_READ_TAIL = 0.1
+EDIT_PIECE_LEAD = 0.03
+EDIT_PIECE_TAIL = 0.05
+EDIT_REACH_PAD = 0.2
+# a duck is felt a little over the time constants of its recovery, as `glitch_drums` has them
+DUCK_REACH_PAD = 0.01
 
 
 class GlitchRenderer(Renderer):
@@ -77,10 +101,10 @@ class GlitchRenderer(Renderer):
         assert score.glitch is not None
         self.setup = score.glitch
         glitch_voices.prepare(score.notes, tier)
-        self.light = tier.max_layers <= 4
+        self.light = tier.max_layers <= LIGHT_MAX_LAYERS
         self.edits = sorted(self.setup.edits, key=lambda e: e.t)
         self._edit_starts = [e.t for e in self.edits]
-        self._edit_reach = max((e.dur for e in self.edits), default=0.0) + 0.2
+        self._edit_reach = max((e.dur for e in self.edits), default=0.0) + EDIT_REACH_PAD
         self._kick_times = [t for t, _ in self.setup.kicks]
         self._raw: dict[str, dict[int, np.ndarray]] = {key: {} for key in score.layers}
         self._results: dict[tuple[int, str], tuple[int, np.ndarray] | None] = {}
@@ -88,32 +112,34 @@ class GlitchRenderer(Renderer):
         if not self.light:
             self.reverb = Pedalboard(
                 [
-                    Convolution(impulse(HALL_SECONDS, 11), mix=1.0, sample_rate=SR),
-                    LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=170.0),
-                    LadderFilter(mode=LadderFilter.Mode.LPF24, cutoff_hz=6200.0),
+                    Convolution(impulse(GLITCH_HALL_SECONDS, REVERB_SEED), mix=1.0, sample_rate=SR),
+                    LadderFilter(mode=LadderFilter.Mode.HPF24, cutoff_hz=HALL_HIGHPASS_HZ),
+                    LadderFilter(mode=LadderFilter.Mode.LPF24, cutoff_hz=GLITCH_HALL_LOWPASS_HZ),
                 ]
             )
             self._parallel = Pedalboard(
-                [Compressor(threshold_db=-28.0, ratio=10.0, attack_ms=0.6, release_ms=80.0)]
+                [
+                    Compressor(
+                        threshold_db=PARALLEL_THRESHOLD_DB,
+                        ratio=PARALLEL_RATIO,
+                        attack_ms=PARALLEL_ATTACK_MS,
+                        release_ms=PARALLEL_RELEASE_MS,
+                    )
+                ]
             )
             self._plate = glitch_drums.plate_board()
         self._glue = Pedalboard(
-            [Compressor(threshold_db=-16.0, ratio=3.0, attack_ms=10.0, release_ms=140.0)]
+            [
+                Compressor(
+                    threshold_db=GLUE_THRESHOLD_DB,
+                    ratio=GLUE_RATIO,
+                    attack_ms=GLUE_ATTACK_MS,
+                    release_ms=GLUE_RELEASE_MS,
+                )
+            ]
         )
-        self._drum_quiet = 99
-        self._hp = StreamLadder(0.0, 1.0, "hp24")
-
-    # -- notes -------------------------------------------------------------------------------------
-
-    def _wave(self, note: Note) -> np.ndarray:
-        if glitch_voices.is_glitch(note.voice):
-            return glitch_voices.render(note, self.tier, self.setup)
-        return super()._wave(note)
-
-    def _reach(self, note: Note) -> float:
-        if glitch_voices.is_glitch(note.voice):
-            return glitch_voices.reach(note)
-        return super()._reach(note)
+        self._drum_quiet = DRUM_QUIET_START
+        self._hp = StreamLadder(0.0, 1.0, LADDER_HP24)
 
     # -- the loop ----------------------------------------------------------------------------------
 
@@ -151,11 +177,30 @@ class GlitchRenderer(Renderer):
             del self._results[index]
         return mix
 
+    # -- edits -------------------------------------------------------------------------------------
+
+    # -- the mix -----------------------------------------------------------------------------------
+
+    def level(self, out: np.ndarray, block: int) -> np.ndarray:
+        """Apply the gain of the score and nothing else: the arrangement is the dynamics of this style."""
+        if self.score.gain_db is not None:
+            edges = self._ramp(self.score.gain_db, block)
+            out = out * (10.0 ** (edges / AMPLITUDE_DB_DIVISOR))[:, None].astype(np.float32)
+        return out
+
+    def _wave(self, note: Note) -> np.ndarray:
+        if glitch_voices.is_glitch(note.voice):
+            return glitch_voices.render(note, self.tier, self.setup)
+        return super()._wave(note)
+
+    def _reach(self, note: Note) -> float:
+        if glitch_voices.is_glitch(note.voice):
+            return glitch_voices.reach(note)
+        return super()._reach(note)
+
     def _over(self, index: int, block: int) -> bool:
         edit = self.edits[index]
-        return edit.t + edit.dur + 0.1 < block
-
-    # -- edits -------------------------------------------------------------------------------------
+        return edit.t + edit.dur + EDIT_READ_TAIL < block
 
     def _result(self, index: int, key: str) -> tuple[int, np.ndarray] | None:
         """Return the audio of a bus over an edit, as (first sample, samples), made once from the unedited bus."""
@@ -163,8 +208,8 @@ class GlitchRenderer(Renderer):
         if found in self._results:
             return self._results[found]
         edit = self.edits[index]
-        first = math.floor(edit.t - edit.back - 0.05)
-        last = math.floor(edit.t + edit.dur + 0.1)
+        first = math.floor(edit.t - edit.back - EDIT_READ_LEAD)
+        last = math.floor(edit.t + edit.dur + EDIT_READ_TAIL)
         raws = self._raw[key]
         if not any(b in raws for b in range(first, last + 1)):
             self._results[found] = None
@@ -175,8 +220,8 @@ class GlitchRenderer(Renderer):
             if raw is not None:
                 buf[(b - first) * SR : (b - first + 1) * SR] = raw
         glitch.apply_edit(buf, edit.t - first, edit.kind, edit.params)
-        a = round((edit.t - 0.03) * SR)
-        b = round((edit.t + edit.dur + 0.05) * SR)
+        a = round((edit.t - EDIT_PIECE_LEAD) * SR)
+        b = round((edit.t + edit.dur + EDIT_PIECE_TAIL) * SR)
         piece = buf[a - first * SR : b - first * SR].copy()
         self._results[found] = (a, piece)
         return self._results[found]
@@ -191,7 +236,7 @@ class GlitchRenderer(Renderer):
             edit = self.edits[index]
             if key not in edit.layers or (self.solo is not None and key not in self.solo):
                 continue
-            if edit.t + edit.dur + 0.05 < block or edit.t - 0.03 > block + 1:
+            if edit.t + edit.dur + EDIT_PIECE_TAIL < block or edit.t - EDIT_PIECE_LEAD > block + 1:
                 continue
             result = self._result(index, key)
             if result is None:
@@ -206,11 +251,9 @@ class GlitchRenderer(Renderer):
             out[a - block * SR : b - block * SR] = piece[a - start : b - start]
         return out
 
-    # -- the mix -----------------------------------------------------------------------------------
-
     def _ducked(self, key: str, bus: np.ndarray, block: int) -> np.ndarray:
         depth, tau = self.setup.duck[key]
-        reach = tau * 6.0 + 0.01
+        reach = tau * glitch_drums.DUCK_TAUS + DUCK_REACH_PAD
         lo = bisect_left(self._kick_times, block - reach)
         hi = bisect_right(self._kick_times, block + 1.0)
         if hi <= lo:
@@ -226,7 +269,7 @@ class GlitchRenderer(Renderer):
         hats = self._edited(hat_key, block)
         if kick is None and snare is None and hats is None:
             self._drum_quiet += 1
-            if self._drum_quiet > 1:
+            if self._drum_quiet > DRUM_QUIET_BLOCKS:
                 return None, None
         else:
             self._drum_quiet = 0
@@ -247,7 +290,7 @@ class GlitchRenderer(Renderer):
                 + np.float32(PLATE_AMOUNT) * room
             )
         glued = self._glue(np.ascontiguousarray(raw.T.astype(np.float32)), SR, reset=False).T
-        bus = (np.tanh(1.2 * glued) / 1.2).astype(np.float32)
+        bus = (np.tanh(GLUE_DRIVE * glued) / GLUE_DRIVE).astype(np.float32)
         return bus, snare
 
     def _mix(self, block: int) -> np.ndarray:
@@ -256,6 +299,7 @@ class GlitchRenderer(Renderer):
         drum_keys = set(self.setup.drum_layers)
         dry = np.zeros((SR, 2), dtype=np.float32)
         send = np.zeros((SR, 2), dtype=np.float32)
+        send_hall = np.zeros((SR, 2), dtype=np.float32)
         for key, layer in score.layers.items():
             if key in drum_keys:
                 continue
@@ -265,8 +309,7 @@ class GlitchRenderer(Renderer):
             if key in self.setup.duck:
                 bus = self._ducked(key, bus, block)
             dry += bus
-            if layer.reverb:
-                send += bus * np.float32(layer.reverb)
+            self._send(layer, bus, send, send_hall)
         drums, snare = self._drum_bus(block)
         if drums is not None:
             dry += drums
@@ -274,13 +317,6 @@ class GlitchRenderer(Renderer):
             send += snare * np.float32(score.layers[self.setup.drum_layers[1]].reverb)
         wet = self.reverb(np.ascontiguousarray(send.T), SR, reset=False).T
         space = self._ramp(score.space, block, REVERB_WET)
-        out = dry + wet.astype(np.float32) * space[:, None]
+        out = self._hall_return(dry + wet.astype(np.float32) * space[:, None], send_hall, space)
         out = self._hp.process(out, np.array([MASTER_HP_HZ]), SR)
         return np.asarray(out, dtype=np.float32)
-
-    def level(self, out: np.ndarray, block: int) -> np.ndarray:
-        """Apply the gain of the score and nothing else: the arrangement is the dynamics of this style."""
-        if self.score.gain_db is not None:
-            edges = self._ramp(self.score.gain_db, block)
-            out = out * (10.0 ** (edges / 20.0))[:, None].astype(np.float32)
-        return out

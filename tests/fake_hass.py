@@ -102,7 +102,7 @@ STATES = [
 ]
 
 
-def _events(entity_id: str, start: float, end: float) -> list[dict[str, Any]]:  # noqa: C901
+def _events(entity_id: str, start: float, end: float) -> list[dict[str, Any]]:
     """Return canned history: offsets in seconds from the start of the day."""
     hour = 3600.0
     if entity_id == "sensor.fridge_power":

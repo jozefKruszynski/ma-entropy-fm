@@ -12,7 +12,7 @@ import pytest
 
 from entropy_fm import scape_ambient, scape_ritual
 from entropy_fm.character import ALL_DAY, FLAT, HIGH, LOW, DayCharacter
-from entropy_fm.plan import Plan
+from entropy_fm.plan import PieceOptions, Plan
 from entropy_fm.quality import STANDARD
 from entropy_fm.references import rescale
 from entropy_fm.scape import analysis_of, scape_score
@@ -71,10 +71,8 @@ def _made(
         style,
         f"{room}|{index}|_scape|{style}",
         HOME,
-        day=demo.day_of(index),
         quality=STANDARD,
-        area_key=room,
-        character=character,
+        options=PieceOptions(day=demo.day_of(index), area_key=room, character=character),
     )
 
 
@@ -115,15 +113,11 @@ def test_ambient_loops_are_long_and_few_on_a_quiet_day_and_short_and_many_on_a_b
 
 
 def test_ambient_voices_and_harmony_follow_the_warmth_and_the_energy() -> None:
-    """A warm busy day takes the rounder voices, the fuller pitch set and the wider centres; a cold quiet one the others."""
+    """A warm busy day takes the rounder loop voices, the fuller pitch set and the wider centres; a cold quiet one the others."""
     quiet, _ = _made("ambient", QUIET)
     busy, _ = _made("ambient", BUSY)
     warmth = scape_ambient.LOOP_WARMTH
     assert warmth[busy.choices["loop voice A"]] > warmth[quiet.choices["loop voice A"]]
-    assert (
-        scape_ambient.PIANO_WARMTH[busy.choices["piano"]]
-        > (scape_ambient.PIANO_WARMTH[quiet.choices["piano"]])
-    )
     assert (
         scape_ambient.SET_COLOUR[busy.choices["pitch set"]]
         > (scape_ambient.SET_COLOUR[quiet.choices["pitch set"]])
@@ -137,7 +131,12 @@ def test_ambient_states_the_motif_of_the_room_on_the_piano_in_the_key_of_the_day
     """The motif is on the piano as scale degrees of the day's scale, above C4, in the first peak or plateau section."""
     for character in (QUIET, BUSY):
         score, plan = _made("ambient", character)
-        piano = [n.midi for n in sorted(score.notes, key=lambda n: n.t) if n.layer == "piano"]
+        # the motif is played as open intervals: the melody is the top note at each onset
+        onsets: dict[float, float] = {}
+        for note in score.notes:
+            if note.layer == "piano":
+                onsets[note.t] = max(onsets.get(note.t, note.midi), note.midi)
+        piano = [onsets[t] for t in sorted(onsets)]
         expected = [float(plan.scale.midi(d, 4)) for d, _ in plan.motif()]
         while min(expected) < scape_ambient.MOTIF_FLOOR:
             expected = [m + 12 for m in expected]
@@ -168,8 +167,6 @@ def test_ritual_picks_the_tuning_pattern_and_pulse_from_the_day() -> None:
     assert seconds[quiet.choices["pluck cell length"]] > seconds[busy.choices["pluck cell length"]]
     energy = scape_ritual.SLIT_ENERGY
     assert energy[busy.choices["slit drum pattern"]] > energy[quiet.choices["slit drum pattern"]]
-    warmth = scape_ritual.PLUCK_WARMTH
-    assert warmth[busy.choices["pluck voice"]] > warmth[quiet.choices["pluck voice"]]
     lead = scape_ritual.LEAD_ENERGY
     assert lead[busy.choices["chant leader"]] > lead[quiet.choices["chant leader"]]
     assert _per_minute(busy, {"plucks", "slit", "block"}) > 1.5 * _per_minute(

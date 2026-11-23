@@ -15,28 +15,23 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from .const import SCAPE_ID
+from .constants import SCAPE_ID
 from .library import TrackRef, parse_album_id, parse_track_id
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from datetime import date
 
-OFF = "off"
-PINNED = "pinned"
-ALL = "all"
-DEFAULT_PRERENDER = PINNED
-MODES = (OFF, PINNED, ALL)
-
 # the first run after the start, so that the benchmark of Auto and the first sync are done
 STARTUP_DELAY_SECONDS = 180.0
 # the nightly run starts this long after midnight, plus up to the jitter, so that many servers do not start together
 MIDNIGHT_DELAY_SECONDS = 600.0
 MIDNIGHT_JITTER_SECONDS = 1800.0
+# the nice level of the thread that renders, where the system allows it
+NICE_LEVEL = 15
 # the pause after every second of audio that is rendered, which keeps the worker to a small share of one core
 YIELD_SECONDS = 0.15
-# how often a pause for a stream that is playing looks again, and how long it waits at the most
-POLL_SECONDS = 5.0
+# how long a pause for a stream that is playing waits at the most
 GIVE_UP_SECONDS = 1800.0
 # the audio cache holds 96 kbit/s; the pre-render never fills it past this share, so that there is room for what is played
 BYTES_PER_SECOND = 12_000
@@ -89,45 +84,42 @@ def _added_for(
     return areas, singles
 
 
-def choose_tracks(  # noqa: PLR0913
-    mode: str,
+def choose_tracks(
     day: date,
     *,
     rooms: Iterable[str],
     pinned_rooms: Iterable[str],
     offered: Iterable[str],
-    default_style: str,
     added_albums: Iterable[str] = (),
     added_tracks: Iterable[str] = (),
 ) -> list[TrackRef]:
     """
     Return the tracks of a day to pre-render, the most wanted first.
 
-    In every mode the first tracks are those in the default style (the one the library lists). What is pinned also
-    gets every style that is offered: the rooms that are kept, and the albums and tracks that were added to the
-    library for this day. With `all`, every room and the whole house get the default style; with `pinned`, only
-    what is pinned is rendered at all.
+    Only what is pinned is rendered: the rooms that are kept, and the albums and tracks that were added to the
+    library for this day. The first tracks are those in the first style that is offered; then every other style
+    that is offered follows.
 
-    :param mode: off, pinned or all.
     :param day: The day to render.
     :param rooms: Every room that can be played, the whole house included.
     :param pinned_rooms: The rooms whose every day is kept.
-    :param offered: The keys of the styles the library offers.
-    :param default_style: The key of the default style.
+    :param offered: The keys of the styles the library offers, in their order.
     :param added_albums: The ids of the albums that were hearted.
     :param added_tracks: The ids of the tracks that were hearted.
     """
-    if mode not in {PINNED, ALL}:
+    styles = list(dict.fromkeys(offered))
+    if not styles:
         return []
+    first = styles[0]
     room_set = set(rooms)
     album_rooms, singles = _added_for(day, room_set, added_albums, added_tracks)
     pinned = list(dict.fromkeys([*sorted(set(pinned_rooms) & room_set), *album_rooms]))
     wanted: dict[tuple[str, str], None] = {}
-    for area in sorted(room_set) if mode == ALL else pinned:
-        wanted.setdefault((area, default_style), None)
+    for area in pinned:
+        wanted.setdefault((area, first), None)
     for ref in singles:
         wanted.setdefault((ref.area_id, ref.style), None)
-    for style in dict.fromkeys([default_style, *offered]):
+    for style in styles:
         for area in pinned:
             wanted.setdefault((area, style), None)
     return [TrackRef(area, day, SCAPE_ID, style) for area, style in wanted]

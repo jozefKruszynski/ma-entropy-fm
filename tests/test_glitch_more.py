@@ -11,11 +11,13 @@ from .scape_tools import demo
 
 RATE = 44100
 HOUSE = ("kitchen", "living")
-INSTRUMENTS = {"str", "bass", "stab"}
+INSTRUMENTS = {"str", "bass", "stab", "piano"}
 # the days of the fortnight that the tests look at
 DAYS = range(2, 14)
 # on a busy day (driving mode) an edit comes at least this often in the stretches where the drums play: one per 2.25 bars
 BUSY_EDITS_PER_BAR = 1.0 / 2.25
+# a day has a kit from this many kicks in a piece of 5 minutes (the quietest day with a kit has about 50)
+MIN_KIT_KICKS = 40
 # at the least, on the quietest day with a kit (heavy mode), one per 3.5 bars; at the most, on any day, one per bar
 QUIET_EDITS_PER_BAR = 1.0 / 3.5
 MOST_EDITS_PER_BAR = 1.0
@@ -66,7 +68,9 @@ def _busy_day() -> tuple[Score, int]:
 def _quiet_day() -> Score:
     """Return the score of the day with the fewest kicks that still has a kit."""
     kits = {i: sum(n.layer == "kick" for n in demo("glitch", i, HOUSE)[0].notes) for i in DAYS}
-    return demo("glitch", min((i for i in kits if kits[i] > 200), key=lambda i: kits[i]), HOUSE)[0]
+    return demo(
+        "glitch", min((i for i in kits if kits[i] > MIN_KIT_KICKS), key=lambda i: kits[i]), HOUSE
+    )[0]
 
 
 def test_a_busy_day_is_cut_every_bar_or_two_where_the_drums_play() -> None:

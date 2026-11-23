@@ -2,13 +2,14 @@
 
 import itertools
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from entropy_fm.quality import LIGHT, RICH, STANDARD
-from entropy_fm.voices import VOICES, render_note
+from entropy_fm.voices import MAX_NOTE_SECONDS, VOICES, gain_of, quantised, render_note
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 
@@ -183,3 +184,27 @@ def test_a_long_note_is_made_from_a_loop_that_has_no_seam() -> None:
             5 * RATE : 18 * RATE
         ]
         assert level.min() > 0.1 * level.max(), key
+
+
+@pytest.mark.parametrize(
+    ("length", "expected"),
+    [
+        (0.01, 0.02),
+        (0.59, 0.58),
+        (1.0, 1.0),
+        (2.9, 3.0),
+        (5.0, 5.0),
+        (9.6, 10.0),
+        (99.0, MAX_NOTE_SECONDS),
+    ],
+)
+def test_quantised_steps_grow_with_the_length(length: float, expected: float) -> None:
+    """A note is rounded to a coarser step the longer it is, and never past the longest note."""
+    assert quantised(length) == pytest.approx(expected)
+
+
+def test_gain_is_the_same_for_threads_that_ask_at_once() -> None:
+    """The gain of a voice does not depend on how many threads work it out together."""
+    with ThreadPoolExecutor(4) as pool:
+        gains = list(pool.map(lambda _i: gain_of("flute_lead", STANDARD), range(4)))
+    assert len(set(gains)) == 1

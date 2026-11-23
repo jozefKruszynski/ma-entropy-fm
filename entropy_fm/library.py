@@ -11,14 +11,21 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from .const import (
+from .constants import (
     MIN_SCAPE_SECONDS_OF_DAY,
     SCAPE_ID,
 )
 from .day_analysis import QUIET_KINDS
 from .roles import EntityMeta, classify
 from .styles import DEFAULT_STYLE
-from .timeline import SUN_ELEVATION_ENTITY, SUN_ENTITY, EntityInfo, VoiceKind, is_excluded
+from .timeline import (
+    POWER_KINDS,
+    SUN_ELEVATION_ENTITY,
+    SUN_ENTITY,
+    EntityInfo,
+    VoiceKind,
+    is_excluded,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -43,7 +50,6 @@ VOICE_DOMAINS = frozenset(
         "device_tracker",
     }
 )
-POWER_KINDS = frozenset({VoiceKind.DRONE, VoiceKind.DRUM, VoiceKind.DISHWASHER})
 SUN_ENTITIES = (SUN_ELEVATION_ENTITY, SUN_ENTITY)
 
 
@@ -75,6 +81,11 @@ class TrackRef:
     target: str
     # the key of the style the track is played in
     style: str = DEFAULT_STYLE
+
+    @property
+    def item_id(self) -> str:
+        """Return the item id of the track."""
+        return track_id(self.area_id, self.day, self.target, self.style)
 
 
 def resolve_area(
@@ -117,7 +128,7 @@ def candidate_ids(
     )
 
 
-def build_catalog(  # noqa: PLR0913
+def build_catalog(
     areas: Mapping[str, str],
     entity_areas: Mapping[str, str | None],
     states: Iterable[Mapping[str, Any]],
@@ -249,47 +260,17 @@ def album_id(area_id: str, day: date) -> str:
     return f"{area_id}|{day.isoformat()}"
 
 
-# the last part of the id of a track that is listed as the long piece
-SOUNDSCAPE_MARK = "soundscape"
-# the last part that ids made when the condensed piece was marked still carry; they play the condensed piece now
-LEGACY_CONDENSED_MARK = "condensed"
-
-
-def track_id(
-    area_id: str,
-    day: date,
-    target: str = SCAPE_ID,
-    style: str | None = None,
-    *,
-    soundscape: bool = False,
-) -> str:
+def track_id(area_id: str, day: date, target: str = SCAPE_ID, style: str | None = None) -> str:
     """
     Return the item id of a track; it holds the style, so that each style is its own version.
 
-    A condensed piece has the plain id. A soundscape (the long piece) adds a last part, so that it is another item
-    to Music Assistant, which never rewrites the length of an item that it has stored.
-
     :param area_id: The area id, or the id of the whole house.
     :param day: The day.
-    :param target: The entity id of a voice, or the id of the ensemble.
+    :param target: The id of the ensemble.
     :param style: The key of the style; without one the id is the old one, which plays Ambient.
-    :param soundscape: Whether the track is listed as the long piece.
     """
     item = f"{area_id}|{day.isoformat()}|{target}"
-    if soundscape:
-        return f"{item}|{style or DEFAULT_STYLE}|{SOUNDSCAPE_MARK}"
     return f"{item}|{style}" if style else item
-
-
-def canonical_track_id(item_id: str) -> str:
-    """
-    Return the id of a track whatever its length: what hearts and pins are kept under.
-
-    :param item_id: An id made by `track_id`, of either length.
-    :raises ValueError: When it is not one.
-    """
-    ref = parse_track_id(item_id)
-    return track_id(ref.area_id, ref.day, ref.target, ref.style)
 
 
 def parse_album_id(item_id: str) -> tuple[str, date]:
@@ -309,21 +290,14 @@ def parse_track_id(item_id: str) -> TrackRef:
     """
     Split a track id into its parts; a missing style is the default one.
 
-    The length is not part of the result: an id of either length plays the piece length that is set.
-
     :param item_id: An id made by `track_id`.
     :raises ValueError: When it is not one.
     """
     area_id, _, rest = item_id.partition("|")
     day, _, rest = rest.partition("|")
     target, _, rest = rest.partition("|")
-    style, _, mark = rest.partition("|")
-    if (
-        not area_id
-        or not day
-        or not target
-        or mark not in {"", SOUNDSCAPE_MARK, LEGACY_CONDENSED_MARK}
-    ):
+    style, _, extra = rest.partition("|")
+    if not area_id or not day or not target or extra:
         raise ValueError(item_id)
     return TrackRef(area_id, date.fromisoformat(day), target, style or DEFAULT_STYLE)
 
@@ -365,26 +339,12 @@ def covered_seconds(day: date, tz: tzinfo, now: datetime) -> float:
     return max(0.0, now.timestamp() - start.timestamp())
 
 
-def track_seconds(day: date, tz: tzinfo, now: datetime, compression: float) -> int:
+def playable(day: date, tz: tzinfo, now: datetime) -> bool:
     """
-    Return the length of a track in seconds of audio: only up to now for today.
+    Return True when enough of the day has happened for a soundscape: `MIN_SCAPE_SECONDS_OF_DAY` of it.
 
     :param day: The day.
     :param tz: The time zone of the house.
     :param now: The current time.
-    :param compression: Seconds of house time per second of audio.
     """
-    return int(covered_seconds(day, tz, now) / compression)
-
-
-def playable(day: date, tz: tzinfo, now: datetime, compression: float) -> bool:
-    """
-    Return True when the day has enough in it to make an album.
-
-    :param day: The day.
-    :param tz: The time zone of the house.
-    :param now: The current time.
-    :param compression: Seconds of house time per second of audio.
-    """
-    del compression  # a soundscape needs a few hours of the day, whatever the compression
     return covered_seconds(day, tz, now) >= MIN_SCAPE_SECONDS_OF_DAY
