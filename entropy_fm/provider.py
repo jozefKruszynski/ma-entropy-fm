@@ -79,6 +79,7 @@ from .constants import (
     AUTO_EXPIRATION,
     BROWSE_AREA_FOLDER,
     CACHE_CATEGORY_AUTO,
+    CACHE_CATEGORY_COVER,
     CACHE_CATEGORY_FACTS,
     CATALOG_TTL,
     CHECKSUM_LENGTH,
@@ -97,15 +98,21 @@ from .constants import (
     CONF_USE_PLUGIN,
     CONF_VERIFY_SSL,
     COVER_AREA_INDEX,
+    COVER_CHARACTER_INDEX,
+    COVER_CHARACTER_OFF,
+    COVER_CHARACTER_ON,
     COVER_DAY_INDEX,
+    COVER_ENGINE_INDEX,
     COVER_GENERATION,
     COVER_LIVE_INDEX,
     COVER_LIVE_MARK,
+    COVER_MOOD_SCHEMA,
     COVER_PATH_PARTS,
     COVER_PATH_PREFIX,
     COVER_STYLE_INDEX,
     DEFAULT_AUDIO_CACHE_MB,
     DEFAULT_DAYS,
+    ENGINE_PATTERN,
     ENGINE_VERSION,
     ERROR_CONNECTION_MISSING,
     ERROR_LOGIN_REFUSED,
@@ -122,6 +129,7 @@ from .constants import (
     MAX_AUDIO_CACHE_MB,
     MAX_CONCURRENT_STREAMS,
     MAX_COVER_DRAWS,
+    MAX_COVER_READS,
     MAX_DAYS,
     MAX_KEPT_SCAPES,
     MIN_SCAPE_SECONDS_OF_DAY,
@@ -141,6 +149,7 @@ from .constants import (
     WHOLE_HOUSE_NAME,
 )
 from .covers import (
+    CoverMood,
     album_style,
     procedural_cover,
     profile_of,
@@ -421,6 +430,7 @@ class EntropyFMProvider(MusicProvider):
         )
         self._pin_lock = asyncio.Lock()
         self._cover_draws = asyncio.Semaphore(MAX_COVER_DRAWS)
+        self._cover_reads = asyncio.Semaphore(MAX_COVER_READS)
         self._benchmark_task = self.mass.create_task(self._pick_quality())
         self.mass.call_later(MAINTENANCE_START_SECONDS, self._maintain, task_id=self._maintain_id)
         self.mass.call_later(
@@ -514,8 +524,8 @@ class EntropyFMProvider(MusicProvider):
         """
         Return the cover of an area, a day and a style, as PNG or JPEG bytes.
 
-        :param path: `cover|<area id>|<day>|<style>|g<cover generation>`, as the albums and
-            tracks name it, with `live` before the last part while the day is going on.
+        :param path: `cover|<area id>|<day>|<style>|c<0 or 1>|e<engine>|g<cover generation>`, as the
+            albums and tracks name it, with `live` after the style while the day is going on.
         """
         try:
             return await self._image_of(path.split("|"))
@@ -832,20 +842,27 @@ class EntropyFMProvider(MusicProvider):
             del parts[COVER_LIVE_INDEX]
         if len(parts) != COVER_PATH_PARTS or parts[0] != COVER_PATH_PREFIX:
             return None
-        if not re.fullmatch(GENERATION_PATTERN, parts[-1]):
+        if (
+            not re.fullmatch(GENERATION_PATTERN, parts[-1])
+            or not re.fullmatch(ENGINE_PATTERN, parts[COVER_ENGINE_INDEX])
+            or parts[COVER_CHARACTER_INDEX] not in {COVER_CHARACTER_ON, COVER_CHARACTER_OFF}
+        ):
             return None
         area_id, day_text, style_key = (
             parts[COVER_AREA_INDEX],
             parts[COVER_DAY_INDEX],
             parts[COVER_STYLE_INDEX],
         )
+        character = parts[COVER_CHARACTER_INDEX] == COVER_CHARACTER_ON
         try:
             day = date.fromisoformat(day_text)
         except ValueError:
             return None
         try:
             await self._check_album(album_id(area_id, day))
-            return await self._cover(area_id, day, style_key or self._default_style.key)
+            return await self._cover(
+                area_id, day, style_key or self._default_style.key, character=character
+            )
         except MediaNotFoundError:
             return None
 
@@ -1209,9 +1226,10 @@ class EntropyFMProvider(MusicProvider):
         """Return the cover of an area, a day and a style."""
         # a day that is still going on has its own path, so the finished cover is fetched anew once it is over
         live = f"|{COVER_LIVE_MARK}" if self._day_is_running(day) else ""
+        character = COVER_CHARACTER_ON if self._day_character else COVER_CHARACTER_OFF
         path = (
             f"{COVER_PATH_PREFIX}|{area_id}|{day.isoformat()}|{style_key or ''}"
-            f"{live}|g{COVER_GENERATION}"
+            f"{live}|{character}|e{ENGINE_VERSION}|g{COVER_GENERATION}"
         )
         return UniqueList(
             [
@@ -1277,20 +1295,114 @@ class EntropyFMProvider(MusicProvider):
         profile = await asyncio.to_thread(week_profile, days)
         return profile or seeded_profile(area_id)
 
-    async def _cover(self, area_id: str, day: date, style_key: str) -> bytes:
-        """Return the cover of a day, drawn from its events."""
+    async def _cover(self, area_id: str, day: date, style_key: str, *, character: bool) -> bytes:
+        """
+        Return the cover of a day, drawn from its events.
+
+        :param area_id: The room, or the whole house.
+        :param day: The day.
+        :param style_key: The style of the cover.
+        :param character: Whether the cover goes by the character of the day, as its path says.
+        """
         style = get_style(style_key)
         area_name = WHOLE_HOUSE_NAME if area_id == WHOLE_HOUSE_ID else area_id
         catalog = await self._catalog_all()
         area_name = catalog.areas.get(area_id, area_name)
-        profile = profile_of(await self._cover_series(area_id, catalog, day))
-        palette = derive_palette(style, day, self._scale, DayTraits(energy=profile.intensity))
+        start, end = day_bounds(day, await self._timezone())
+        profile = profile_of(
+            await self._cover_series(area_id, catalog, day), end.timestamp() - start.timestamp()
+        )
+        read = await self._cover_mood(area_id, day, style.key) if character else None
+        # without a reading (setting off, Home Assistant away, too little of the day) the cover goes by
+        # the share of the day that was active, as it always did
+        if read:
+            traits, found = read
+            mood: CoverMood | None = CoverMood(found.energy)
+        else:
+            traits, mood = DayTraits(energy=profile.intensity), None
+        palette = derive_palette(style, day, self._scale, traits)
         slot = f"{area_id}|{day.isoformat()}|{style.key}"
         title = album_name(area_name, day)
         async with self._cover_draws:
             return await asyncio.to_thread(
-                procedural_cover, profile, style.key, palette.root, palette.mode, slot, title
+                procedural_cover, profile, style.key, palette.root, palette.mode, slot, title, mood
             )
+
+    async def _cover_mood(
+        self, area_id: str, day: date, style_key: str
+    ) -> tuple[DayTraits, DayCharacter] | None:
+        """
+        Return the traits and the character of a day as the track of it reads them, for its cover; None when unknown.
+
+        A reading is kept like the facts of a day (for the hour when it is today). None when too little of
+        the day has happened, or when Home Assistant does not answer while the day is still going on: that
+        cover has a path of its own and goes by the activity of the day. For a finished day a failed read
+        raises, so that no fallback cover is kept under its path.
+
+        :param area_id: The room, or the whole house.
+        :param day: The day.
+        :param style_key: The style of the cover.
+        """
+        try:
+            tz, now = await self._timezone(), await self._now()
+            if covered_seconds(day, tz, now) < MIN_SCAPE_SECONDS_OF_DAY:
+                return None
+            running = self._day_is_running(day)
+            catalog = await self._catalog_all()
+            key = self._reading_key(
+                (
+                    COVER_MOOD_SCHEMA,
+                    *(field.name for field in fields(DayCharacter)),
+                    *(field.name for field in fields(DayTraits)),
+                ),
+                area_id,
+                day,
+                str(now.hour) if running else "",
+                self._facts_rooms(area_id, catalog),
+            )
+            async with self._cover_reads:
+                seen = await self.mass.cache.get(
+                    key, provider=self.instance_id, category=CACHE_CATEGORY_COVER
+                )
+                if seen is not None:
+                    return DayTraits(**seen["traits"]), DayCharacter(**seen["character"])
+                gathered = await self._gather(TrackRef(area_id, day, SCAPE_ID, style_key))
+                traits, _, character = await asyncio.to_thread(self._measure_day, gathered, day)
+                await self.mass.cache.set(
+                    key,
+                    {"traits": asdict(traits), "character": asdict(character)},
+                    expiration=FACTS_TODAY_EXPIRATION if running else PAST_DAY_EXPIRATION,
+                    provider=self.instance_id,
+                    category=CACHE_CATEGORY_COVER,
+                )
+        except (*HASS_ERRORS, MediaNotFoundError):
+            if not self._day_is_running(day):
+                raise
+            self.logger.debug("Could not read %s on %s for its cover", area_id, day, exc_info=True)
+            return None
+        return traits, character
+
+    def _measure_day(
+        self, gathered: _Gathered, day: date
+    ) -> tuple[DayTraits, DayAnalysis, DayCharacter]:
+        """
+        Measure what a day was like: its traits, its analysis and its character (blocking, run it in a thread).
+
+        This is what the track and the cover of a day are both made from.
+
+        :param gathered: What the day is made of.
+        :param day: The day.
+        """
+        traits = measure_traits(gathered.whole_day, gathered.baselines, gathered.covered)
+        featured = Surprise(gathered.series, gathered.baselines).featured(
+            0.0, 1.0, min(gathered.covered, DAY_SECONDS)
+        )
+        anomalies = [
+            (t, score, entity) for t, score, entity in featured if score >= ANOMALY_MIN_SCORE
+        ]
+        analysis = analysis_of(gathered.series, gathered.covered, anomalies)
+        character = measure_character(analysis, traits, day, gathered.series, week=gathered.week)
+        return traits, analysis, character
 
     async def _cover_series(self, area_id: str, catalog: Catalog, day: date) -> list[Series]:
         """
@@ -2072,26 +2184,13 @@ class EntropyFMProvider(MusicProvider):
 
         def make() -> _Scape:
             palette = None
-            traits: DayTraits | None = None
-            anomalies: list[tuple[float, float, str]] = []
-            if self._day_character:
-                traits = measure_traits(gathered.whole_day, gathered.baselines, gathered.covered)
-                palette = derive_palette(style, ref.day, self._scale, traits)
-                featured = Surprise(gathered.series, gathered.baselines).featured(
-                    0.0, 1.0, min(gathered.covered, DAY_SECONDS)
-                )
-                anomalies = [
-                    (t, score, entity)
-                    for t, score, entity in featured
-                    if score >= ANOMALY_MIN_SCORE
-                ]
-            analysis = analysis_of(gathered.series, gathered.covered, anomalies)
             character = None
-            if traits is not None:
-                character = measure_character(
-                    analysis, traits, ref.day, gathered.series, week=gathered.week
-                )
+            if self._day_character:
+                traits, analysis, character = self._measure_day(gathered, ref.day)
+                palette = derive_palette(style, ref.day, self._scale, traits)
                 self.logger.debug("Character of %s: %s", seed, character.label())
+            else:
+                analysis = analysis_of(gathered.series, gathered.covered, [])
             return _Scape(
                 gathered,
                 analysis,

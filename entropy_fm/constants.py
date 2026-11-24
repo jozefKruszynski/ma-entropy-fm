@@ -21,8 +21,8 @@ COVER_PATH_PREFIX = "cover"
 COVER_LIVE_MARK = "live"
 # where the mark sits in a cover path split at the bars, after the style
 COVER_LIVE_INDEX = 4
-# the parts of a cover path without the mark: prefix, area, day, style and generation
-COVER_PATH_PARTS = 5
+# the parts of a cover path without the mark: prefix, area, day, style, day character, engine and generation
+COVER_PATH_PARTS = 7
 # the images of the artists (rooms): `artist|<area id>|thumb or fanart|<figure>|g<cover generation>`
 ARTIST_PATH_PREFIX = "artist"
 # the parts of such a path: prefix, area, thumb or fanart, figure and generation
@@ -31,6 +31,13 @@ ARTIST_PATH_PARTS = 5
 COVER_AREA_INDEX = 1
 COVER_DAY_INDEX = 2
 COVER_STYLE_INDEX = 3
+COVER_CHARACTER_INDEX = 4
+COVER_ENGINE_INDEX = 5
+# the day-character part of a cover path: whether the cover was drawn from the character of the day
+COVER_CHARACTER_ON = "c1"
+COVER_CHARACTER_OFF = "c0"
+# the engine part of a cover path: `e` and the engine version, since the character of a day depends on it
+ENGINE_PATTERN = r"e\d+"
 # and in an artist path: the area, thumb or fanart, and the figure
 ARTIST_AREA_INDEX = 1
 ARTIST_KIND_INDEX = 2
@@ -73,6 +80,7 @@ CACHE_CATEGORY_HISTORY = 4
 CACHE_CATEGORY_BASELINE = 5
 CACHE_CATEGORY_AUTO = 6
 CACHE_CATEGORY_FACTS = 7
+CACHE_CATEGORY_COVER = 8
 # the recorder of Home Assistant keeps ten days by default
 PAST_DAY_EXPIRATION = 7 * 86400
 TODAY_EXPIRATION = 300
@@ -80,6 +88,8 @@ CACHE_SCHEMA = 1
 # how many characters of a hash make the checksum of a cached reading
 CHECKSUM_LENGTH = 16
 FACTS_SCHEMA = 1
+# the schema of the character and traits that a cover is made from (raise it when what they hold changes)
+COVER_MOOD_SCHEMA = 1
 # today's reading of a day is read again every hour
 FACTS_TODAY_EXPIRATION = 3600
 # the soundscape of today is read again every this many seconds of the day
@@ -98,7 +108,7 @@ OFFERED_FILE = "offered_rooms.json"
 # soundscapes that may be rendered at once on the CPU of the server
 MAX_CONCURRENT_STREAMS = 5
 # part of every cover path: raise it to make the image cache of the server fetch every cover again
-COVER_GENERATION = 0
+COVER_GENERATION = 2
 ARTIST_KEY = "@artist|"
 # the target of a track: the soundscape of a day
 TRACK_TARGETS = frozenset({SCAPE_ID})
@@ -110,6 +120,8 @@ ERROR_LOGIN_REFUSED = "login_refused"
 MAX_KEPT_SCAPES = 16
 # how many covers are drawn at once; a burst of requests for them must not hold every thread
 MAX_COVER_DRAWS = 2
+# how many covers read their day from Home Assistant at once, so that a grid of covers is not a burst of reads
+MAX_COVER_READS = 2
 # how long the server's own time zone stands in before Home Assistant is asked again
 TIME_ZONE_RETRY_SECONDS = 300.0
 # how long the benchmark of the Auto quality stays valid, in seconds

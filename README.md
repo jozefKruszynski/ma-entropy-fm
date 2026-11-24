@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="entropy_fm/icon_dark.svg">
+    <img src="entropy_fm/icon.svg" alt="Entropy FM" width="128">
+  </picture>
+</p>
+
 # Entropy FM
 
 Entropy FM is a community provider for [Music Assistant](https://music-assistant.io) that turns the
@@ -222,7 +229,16 @@ line-art glyph cropped off the top and right edges, and the title in the lower-l
 
 A cover is a 1024 pixel JPEG made on your server with Pillow, with no network at all. The gradient follows the
 style and the key and mode of the day, and the glyph is that of the style, shaped by what happened that day. The same
-area, day and style always give the same cover. The cover of an album takes the glyph of the style that suits the day (a busy day Cinematic Glitch, a quiet one Ambient), among the styles that are offered.
+area, day and style always give the same cover.
+
+A cover also tells you what kind of mix to expect. The energy of the day (how busy it was against the room's
+own days, the same number the music is made with; with the day-character setting off, the share of the day that
+was active) sets the small wave next to the five dots (flat and slow on a quiet day, tall and tight on a busy one),
+the saturation, brightness and bloom of the colours, and the glyph of every style: more lit and brighter sequencer
+bars, more lines of water and a halo round the sun, a tonearm that tilts further, more ripples on the drum, more
+slices and more torn ones. A thin strip above the foot of the cover shows the day round the clock, a bar for every
+quarter of an hour, with the busiest in the accent colour. The key and mode of the cover are those of the track.
+The cover of an album takes the glyph of the style that suits the day (a busy day Cinematic Glitch, a quiet one Ambient), among the styles that are offered.
 
 Every room, and the whole house, is an artist with a drawn image of its own: a square one with the name of the room,
 and a wide one for the backdrop of the artist page. Its figure has one of three shapes, picked from the id of the room (the whole house is always the clock). One is a clock of the typical day of the room, from the
